@@ -10,22 +10,29 @@ export interface ChatItem {
 
 interface ChatContextValue {
   chats: ChatItem[]
+  pendingIds: Set<string>
   getChat: (id: string | undefined) => ChatItem | undefined
   startNewChat: (initialText?: string, title?: string) => string
   sendMessage: (id: string, text: string) => void
 }
 
-const AI_PROVIDERS: ChatMessage['ai'][] = ['Gemini', 'GPT', 'Claude', 'DeepSeek']
+async function fetchGeminiReply(message: string, history: ChatMessage[]): Promise<string> {
+  const res = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      history: history.map((m) => ({ role: m.role, text: m.text })),
+    }),
+  })
 
-const AI_REPLIES = [
-  '네, 바로 도와드릴게요. 조금 더 구체적으로 말씀해주시면 더 정확하게 답변드릴 수 있어요.',
-  '질문 내용을 확인했어요. 아래와 같은 방향으로 정리해볼 수 있을 것 같아요.',
-  '좋은 질문이에요! 몇 가지 아이디어를 정리해서 알려드릴게요.',
-  '요청하신 내용을 분석했어요. 필요하신 형식으로 다시 정리해드릴까요?',
-]
+  const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
+  if (!res.ok) {
+    throw new Error(data.error || 'Gemini 응답을 받지 못했어요.')
+  }
+
+  return data.text ?? ''
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -34,50 +41,88 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [chats, setChats] = useState<ChatItem[]>(() =>
     recentChats.map(({ id, title, time, messages }) => ({ id, title, time, messages })),
   )
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
 
   const getChat = useCallback(
     (id: string | undefined) => chats.find((c) => c.id === id),
     [chats],
   )
 
-  const startNewChat = useCallback((initialText?: string, title?: string) => {
-    const id = `chat-${Date.now()}`
-    const messages: ChatMessage[] = []
-    if (initialText) {
-      messages.push({ role: 'user', text: initialText })
-      const ai = pick(AI_PROVIDERS)
-      messages.push({ role: 'ai', ai, text: pick(AI_REPLIES) })
-    }
-    const newChat: ChatItem = {
-      id,
-      title: title ?? initialText ?? '새 대화',
-      time: '방금 전',
-      messages,
-    }
-    setChats((prev) => [newChat, ...prev])
-    return id
+  const setPending = useCallback((id: string, isPending: boolean) => {
+    setPendingIds((prev) => {
+      const next = new Set(prev)
+      if (isPending) next.add(id)
+      else next.delete(id)
+      return next
+    })
   }, [])
 
-  const sendMessage = useCallback((id: string, text: string) => {
+  const appendAiReply = useCallback((id: string, text: string, error = false) => {
     setChats((prev) =>
-      prev.map((chat) => {
-        if (chat.id !== id) return chat
-        const ai = pick(AI_PROVIDERS)
-        return {
-          ...chat,
-          time: '방금 전',
-          messages: [
-            ...chat.messages,
-            { role: 'user', text },
-            { role: 'ai', ai, text: pick(AI_REPLIES) },
-          ],
-        }
-      }),
+      prev.map((chat) =>
+        chat.id === id
+          ? {
+              ...chat,
+              time: '방금 전',
+              messages: [...chat.messages, { role: 'ai', ai: 'Gemini', text, error }],
+            }
+          : chat,
+      ),
     )
   }, [])
 
+  const requestReply = useCallback(
+    (id: string, message: string, history: ChatMessage[]) => {
+      setPending(id, true)
+      fetchGeminiReply(message, history)
+        .then((text) => appendAiReply(id, text))
+        .catch((err: Error) => appendAiReply(id, err.message, true))
+        .finally(() => setPending(id, false))
+    },
+    [appendAiReply, setPending],
+  )
+
+  const startNewChat = useCallback(
+    (initialText?: string, title?: string) => {
+      const id = `chat-${Date.now()}`
+      const messages: ChatMessage[] = initialText ? [{ role: 'user', text: initialText }] : []
+      const newChat: ChatItem = {
+        id,
+        title: title ?? initialText ?? '새 대화',
+        time: '방금 전',
+        messages,
+      }
+      setChats((prev) => [newChat, ...prev])
+
+      if (initialText) {
+        requestReply(id, initialText, [])
+      }
+
+      return id
+    },
+    [requestReply],
+  )
+
+  const sendMessage = useCallback(
+    (id: string, text: string) => {
+      const chat = chats.find((c) => c.id === id)
+      const history = chat?.messages ?? []
+
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? { ...c, time: '방금 전', messages: [...c.messages, { role: 'user', text }] }
+            : c,
+        ),
+      )
+
+      requestReply(id, text, history)
+    },
+    [chats, requestReply],
+  )
+
   return (
-    <ChatContext.Provider value={{ chats, getChat, startNewChat, sendMessage }}>
+    <ChatContext.Provider value={{ chats, pendingIds, getChat, startNewChat, sendMessage }}>
       {children}
     </ChatContext.Provider>
   )

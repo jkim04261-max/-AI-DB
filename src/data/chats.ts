@@ -5,6 +5,7 @@ export interface ChatMessage {
   role: 'user' | 'ai'
   text: string
   ai?: 'Gemini' | 'GPT' | 'Claude' | 'DeepSeek'
+  error?: boolean
 }
 
 export interface RecentChat {
