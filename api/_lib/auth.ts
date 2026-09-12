@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { parseCookie, stringifySetCookie } from 'cookie'
 import type { IncomingMessage } from 'node:http'
 
@@ -18,22 +18,50 @@ function getAuthSecret(): string {
   return secret
 }
 
+function sign(data: string): string {
+  return createHmac('sha256', getAuthSecret()).update(data).digest('base64url')
+}
+
+// A small self-contained session token (HMAC-signed JSON), so this never
+// depends on how the serverless bundler treats a third-party JWT library's
+// module format.
 export function signSession(payload: SessionPayload): string {
-  return jwt.sign(payload, getAuthSecret(), { expiresIn: SESSION_MAX_AGE_SECONDS })
+  const body = { ...payload, exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 }
+  const data = Buffer.from(JSON.stringify(body)).toString('base64url')
+  return `${data}.${sign(data)}`
 }
 
 export function verifySession(token: string): SessionPayload | null {
+  const [data, signature] = token.split('.')
+  if (!data || !signature) return null
+
+  let expectedSignature: string
   try {
-    const decoded = jwt.verify(token, getAuthSecret())
-    if (
-      typeof decoded === 'object' &&
-      decoded !== null &&
-      typeof (decoded as Record<string, unknown>).sub === 'number' &&
-      typeof (decoded as Record<string, unknown>).email === 'string'
-    ) {
-      return decoded as unknown as SessionPayload
-    }
+    expectedSignature = sign(data)
+  } catch {
     return null
+  }
+
+  const sigBuf = Buffer.from(signature)
+  const expectedBuf = Buffer.from(expectedSignature)
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
+    return null
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >
+    if (
+      typeof payload.sub !== 'number' ||
+      typeof payload.email !== 'string' ||
+      typeof payload.exp !== 'number' ||
+      Date.now() > payload.exp
+    ) {
+      return null
+    }
+    return { sub: payload.sub, email: payload.email }
   } catch {
     return null
   }
