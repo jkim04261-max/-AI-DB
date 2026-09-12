@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import Logo from './Logo'
 import { sidebarNavItems, sidebarFooterItems } from '../data/nav'
 import { useChats } from '../context/ChatContext'
+import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
 const linkBase =
@@ -12,6 +13,7 @@ const linkInactive = 'text-slate-600 hover:bg-slate-100'
 
 export default function Sidebar() {
   const { startNewChat } = useChats()
+  const { user } = useAuth()
   const navigate = useNavigate()
 
   const handleNewChat = () => {
@@ -67,11 +69,13 @@ export default function Sidebar() {
           className="mt-2 flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-100"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600">
-            사용
+            {user ? user.email.slice(0, 2).toUpperCase() : '?'}
           </span>
           <span className="flex flex-col text-left">
-            <span className="text-sm font-semibold text-slate-800">사용자님</span>
-            <span className="text-xs text-slate-400">무료 플랜</span>
+            <span className="truncate text-sm font-semibold text-slate-800">
+              {user ? user.email : '로그인이 필요해요'}
+            </span>
+            <span className="text-xs text-slate-400">{user ? '무료 플랜' : '로그인 / 회원가입'}</span>
           </span>
         </NavLink>
       </div>
