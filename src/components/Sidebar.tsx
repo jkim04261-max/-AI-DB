@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, LogIn, UserPlus } from 'lucide-react'
 import Logo from './Logo'
 import { sidebarNavItems, sidebarFooterItems } from '../data/nav'
 import { useChats } from '../context/ChatContext'
+import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
 const linkBase =
@@ -12,6 +13,7 @@ const linkInactive = 'text-slate-600 hover:bg-slate-100'
 
 export default function Sidebar() {
   const { startNewChat } = useChats()
+  const { user } = useAuth()
   const navigate = useNavigate()
 
   const handleNewChat = () => {
@@ -62,18 +64,37 @@ export default function Sidebar() {
           </NavLink>
         ))}
 
-        <NavLink
-          to="/mypage"
-          className="mt-2 flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-100"
-        >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600">
-            사용
-          </span>
-          <span className="flex flex-col text-left">
-            <span className="text-sm font-semibold text-slate-800">사용자님</span>
-            <span className="text-xs text-slate-400">무료 플랜</span>
-          </span>
-        </NavLink>
+        {user ? (
+          <NavLink
+            to="/mypage"
+            className="mt-2 flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-100"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600">
+              {user.email.slice(0, 2).toUpperCase()}
+            </span>
+            <span className="flex flex-col text-left">
+              <span className="truncate text-sm font-semibold text-slate-800">{user.email}</span>
+              <span className="text-xs text-slate-400">무료 플랜</span>
+            </span>
+          </NavLink>
+        ) : (
+          <div className="mt-2 flex flex-col gap-1.5 px-1">
+            <NavLink
+              to="/login"
+              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+            >
+              <LogIn size={16} />
+              로그인
+            </NavLink>
+            <NavLink
+              to="/signup"
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <UserPlus size={16} />
+              회원가입
+            </NavLink>
+          </div>
+        )}
       </div>
     </aside>
   )
