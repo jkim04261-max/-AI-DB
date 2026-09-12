@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ArrowRight, Sparkles, User } from 'lucide-react'
 import { useChats } from '../context/ChatContext'
+import MarkdownMessage from '../components/MarkdownMessage'
 
 export default function ChatPage() {
   const { id } = useParams()
@@ -61,7 +62,11 @@ export default function ChatPage() {
                     {msg.error ? '오류' : msg.ai}
                   </p>
                 )}
-                {msg.text}
+                {msg.role === 'ai' && !msg.error ? (
+                  <MarkdownMessage text={msg.text} />
+                ) : (
+                  msg.text
+                )}
               </div>
             </div>
           ))}
