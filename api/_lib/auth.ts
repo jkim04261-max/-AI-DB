@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { parseCookie, stringifySetCookie } from 'cookie'
 import type { IncomingMessage } from 'node:http'
 
 export const SESSION_COOKIE = 'session'
@@ -67,34 +66,50 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
+// Hand-rolled instead of using the `cookie` package: `cookie` v2 ships ESM-only
+// (no CJS export), and api/package.json forces this directory to bundle as
+// CommonJS (see that file for why) — requiring an ESM-only package there
+// crashes with ERR_REQUIRE_ESM.
+function parseCookieHeader(header: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const pair of header.split(';')) {
+    const eq = pair.indexOf('=')
+    if (eq === -1) continue
+    const key = pair.slice(0, eq).trim()
+    if (!key || key in result) continue
+    const value = pair.slice(eq + 1).trim()
+    try {
+      result[key] = decodeURIComponent(value)
+    } catch {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+function buildSetCookie(value: string, maxAge: number): string {
+  return [
+    `${SESSION_COOKIE}=${encodeURIComponent(value)}`,
+    'Path=/',
+    `Max-Age=${maxAge}`,
+    'HttpOnly',
+    'Secure',
+    'SameSite=Lax',
+  ].join('; ')
+}
+
 export function readSessionCookie(req: IncomingMessage): string | undefined {
   const header = req.headers.cookie
   if (!header) return undefined
-  return parseCookie(header)[SESSION_COOKIE]
+  return parseCookieHeader(header)[SESSION_COOKIE]
 }
 
 export function buildSessionCookie(token: string): string {
-  return stringifySetCookie({
-    name: SESSION_COOKIE,
-    value: token,
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: SESSION_MAX_AGE_SECONDS,
-  })
+  return buildSetCookie(token, SESSION_MAX_AGE_SECONDS)
 }
 
 export function buildClearedSessionCookie(): string {
-  return stringifySetCookie({
-    name: SESSION_COOKIE,
-    value: '',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  })
+  return buildSetCookie('', 0)
 }
 
 export function isValidEmail(email: string): boolean {
