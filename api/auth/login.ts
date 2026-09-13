@@ -42,9 +42,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ user: { id: user.id, email: user.email } })
   } catch (err) {
     if (err instanceof Error && err.message === 'AUTH_SECRET_MISSING') {
+      console.error('[api/auth/login] AUTH_SECRET is not configured')
       res.status(500).json({ error: '서버에 AUTH_SECRET이 설정되지 않았어요.' })
       return
     }
+    console.error('[api/auth/login] unexpected error', err)
     res.status(500).json({ error: '로그인 중 오류가 발생했어요.' })
   }
 }
