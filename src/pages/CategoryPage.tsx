@@ -12,9 +12,9 @@ export default function CategoryPage() {
 
   const colors = colorClasses[category.color]
 
-  const handlePrompt = (prompt: string) => {
-    const chatId = startNewChat(prompt, category.title)
-    navigate(`/chat/${chatId}`)
+  const handlePrompt = async (prompt: string) => {
+    const chatId = await startNewChat(prompt, category.title)
+    if (chatId) navigate(`/chat/${chatId}`)
   }
 
   return (

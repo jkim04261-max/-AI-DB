@@ -16,9 +16,9 @@ export default function Sidebar() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const handleNewChat = () => {
-    const id = startNewChat()
-    navigate(`/chat/${id}`)
+  const handleNewChat = async () => {
+    const id = await startNewChat()
+    if (id) navigate(`/chat/${id}`)
   }
 
   return (

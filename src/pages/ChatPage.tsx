@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ArrowRight, Sparkles, User } from 'lucide-react'
 import { useChats } from '../context/ChatContext'
@@ -6,9 +6,15 @@ import MarkdownMessage from '../components/MarkdownMessage'
 
 export default function ChatPage() {
   const { id } = useParams()
-  const { getChat, sendMessage, pendingIds } = useChats()
+  const { getChat, sendMessage, loadConversation, pendingIds } = useChats()
   const [value, setValue] = useState('')
   const chat = getChat(id)
+
+  useEffect(() => {
+    if (chat && !chat.messagesLoaded) {
+      loadConversation(chat.id)
+    }
+  }, [chat, loadConversation])
 
   if (!chat) return <Navigate to="/chat" replace />
 

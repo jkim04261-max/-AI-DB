@@ -104,6 +104,11 @@ export function readSessionCookie(req: IncomingMessage): string | undefined {
   return parseCookieHeader(header)[SESSION_COOKIE]
 }
 
+export function getSessionUser(req: IncomingMessage): SessionPayload | null {
+  const token = readSessionCookie(req)
+  return token ? verifySession(token) : null
+}
+
 export function buildSessionCookie(token: string): string {
   return buildSetCookie(token, SESSION_MAX_AGE_SECONDS)
 }
