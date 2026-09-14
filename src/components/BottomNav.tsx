@@ -8,9 +8,9 @@ export default function BottomNav() {
   const { startNewChat } = useChats()
   const navigate = useNavigate()
 
-  const handleNewChat = () => {
-    const id = startNewChat()
-    navigate(`/chat/${id}`)
+  const handleNewChat = async () => {
+    const id = await startNewChat()
+    if (id) navigate(`/chat/${id}`)
   }
 
   return (
