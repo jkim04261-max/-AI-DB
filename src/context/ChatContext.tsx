@@ -136,7 +136,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       )
       setPending(id, true)
 
-      fetch(`/api/conversations/${id}/messages`, {
+      fetch(`/api/conversations/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
