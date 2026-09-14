@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { ensureConversationsTables, sql, type ConversationRow, type MessageRow } from '../_lib/db'
-import { getSessionUser } from '../_lib/auth'
+import { ensureConversationsTables, sql, type ConversationRow, type MessageRow } from '../../_lib/db'
+import { getSessionUser } from '../../_lib/auth'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const session = getSessionUser(req)
