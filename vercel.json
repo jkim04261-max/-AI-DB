@@ -1,9 +1,7 @@
 {
   "framework": "vite",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "^(?!/api/).*", "dest": "/index.html" }
   ]
 }
