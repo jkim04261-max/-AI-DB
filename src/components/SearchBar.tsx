@@ -8,13 +8,13 @@ export default function SearchBar() {
   const { startNewChat } = useChats()
   const navigate = useNavigate()
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     const text = value.trim()
     if (!text) return
-    const id = startNewChat(text)
-    navigate(`/chat/${id}`)
     setValue('')
+    const id = await startNewChat(text)
+    if (id) navigate(`/chat/${id}`)
   }
 
   return (
