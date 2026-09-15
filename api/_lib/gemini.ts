@@ -85,7 +85,7 @@ async function callGeminiWithRetry(apiKey: string, contents: unknown): Promise<G
       console.error(
         `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} threw${isTimeout ? ' (timeout)' : ''}:`,
         err instanceof Error ? err.message : err,
-        err instanceof Error ? err.cause : undefined,
+        (err as { cause?: unknown } | undefined)?.cause,
       )
       if (attempt < MAX_ATTEMPTS) {
         await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
