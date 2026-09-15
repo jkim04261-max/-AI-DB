@@ -3,6 +3,13 @@ import { ensureConversationsTables, sql, type ConversationRow, type MessageRow }
 import { getSessionUser } from '../_lib/auth'
 import { GeminiConfigError, getGeminiReply } from '../_lib/gemini'
 
+// Explicit ceiling instead of relying on the platform default: comfortably
+// above the Gemini call's worst case (two attempts x 10s timeout, plus one
+// short backoff — see api/_lib/gemini.ts) plus the handful of DB round
+// trips this route makes, so a genuinely slow request gets a clean error
+// response instead of the platform killing the function mid-request.
+export const config = { maxDuration: 30 }
+
 // GET fetches a conversation with its messages; POST appends a user message
 // and the AI reply. Both live in one file (instead of GET in [id]/index.ts
 // and POST in [id]/messages.ts) because Vercel's zero-config function router
@@ -96,9 +103,17 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
       return
     }
 
+    // Cap what we send Gemini as context to the most recent messages: an
+    // unbounded history means both the DB round trip and the prompt (and
+    // so Gemini's response time) grow with every message a conversation
+    // ever had, instead of staying roughly constant per turn.
     const historyResult = await sql<Pick<MessageRow, 'role' | 'content'>>`
-      SELECT role, content FROM messages
-      WHERE conversation_id = ${id}
+      SELECT role, content FROM (
+        SELECT role, content, created_at, id FROM messages
+        WHERE conversation_id = ${id}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 20
+      ) recent
       ORDER BY created_at ASC, id ASC
     `
     const history = historyResult.rows.map((m) => ({ role: m.role, text: m.content }))

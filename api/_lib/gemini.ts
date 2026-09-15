@@ -4,8 +4,8 @@
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
-const REQUEST_TIMEOUT_MS = 15_000
-const MAX_ATTEMPTS = 3
+const REQUEST_TIMEOUT_MS = 10_000
+const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 
 export interface GeminiHistoryMessage {
@@ -87,6 +87,13 @@ async function callGeminiWithRetry(apiKey: string, contents: unknown): Promise<G
         err instanceof Error ? err.message : err,
         (err as { cause?: unknown } | undefined)?.cause,
       )
+      // A timeout means Gemini already used its full budget without
+      // responding — retrying would just wait the same amount again and
+      // double the user's wait for no benefit. Only retry on errors that
+      // fail fast (network glitches, DNS issues, etc.).
+      if (isTimeout) {
+        throw err
+      }
       if (attempt < MAX_ATTEMPTS) {
         await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
       }
