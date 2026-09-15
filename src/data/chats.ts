@@ -1,11 +1,18 @@
 import { FileText, Lightbulb, FileType } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
+export interface ChatAttachment {
+  url: string
+  mimeType?: string | null
+  name?: string | null
+}
+
 export interface ChatMessage {
   role: 'user' | 'ai'
   text: string
   ai?: 'Gemini' | 'GPT' | 'Claude' | 'DeepSeek'
   error?: boolean
+  attachment?: ChatAttachment
 }
 
 export interface RecentChat {

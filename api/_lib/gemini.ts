@@ -4,13 +4,22 @@
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
-const REQUEST_TIMEOUT_MS = 10_000
+const TEXT_REQUEST_TIMEOUT_MS = 10_000
+// Multimodal (image) requests take Gemini noticeably longer to process than
+// plain text, so they get a longer per-attempt budget.
+const IMAGE_REQUEST_TIMEOUT_MS = 20_000
 const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 
 export interface GeminiHistoryMessage {
   role: 'user' | 'ai'
   text: string
+}
+
+export interface GeminiImageAttachment {
+  mimeType: string
+  /** Base64-encoded image bytes (no data: URL prefix). */
+  data: string
 }
 
 // Thrown when GEMINI_API_KEY isn't configured, so callers can distinguish a
@@ -46,12 +55,16 @@ interface GeminiCallResult {
   }
 }
 
-async function callGeminiWithRetry(apiKey: string, contents: unknown): Promise<GeminiCallResult> {
+async function callGeminiWithRetry(
+  apiKey: string,
+  contents: unknown,
+  timeoutMs: number,
+): Promise<GeminiCallResult> {
   let lastError: unknown
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const geminiRes = await fetch(GEMINI_URL, {
@@ -108,10 +121,23 @@ async function callGeminiWithRetry(apiKey: string, contents: unknown): Promise<G
 export async function getGeminiReply(
   message: string,
   history: GeminiHistoryMessage[],
+  attachment?: GeminiImageAttachment,
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
     throw new GeminiConfigError()
+  }
+
+  // The attachment only rides along on the turn it was sent — past turns in
+  // `history` are text-only (see api/conversations/[id].ts), so a
+  // conversation's image doesn't get re-uploaded to Gemini on every
+  // follow-up message.
+  const lastParts: Array<{ text: string } | { inlineData: GeminiImageAttachment }> = []
+  if (message) {
+    lastParts.push({ text: message })
+  }
+  if (attachment) {
+    lastParts.push({ inlineData: attachment })
   }
 
   const contents = [
@@ -119,10 +145,11 @@ export async function getGeminiReply(
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.text }],
     })),
-    { role: 'user', parts: [{ text: message }] },
+    { role: 'user', parts: lastParts },
   ]
 
-  const { status, data } = await callGeminiWithRetry(apiKey, contents)
+  const timeoutMs = attachment ? IMAGE_REQUEST_TIMEOUT_MS : TEXT_REQUEST_TIMEOUT_MS
+  const { status, data } = await callGeminiWithRetry(apiKey, contents, timeoutMs)
 
   if (status < 200 || status >= 300) {
     console.error(`[gemini] request failed — status ${status}, model ${GEMINI_MODEL}:`, data?.error)

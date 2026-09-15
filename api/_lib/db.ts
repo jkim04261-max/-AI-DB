@@ -55,6 +55,13 @@ export function ensureConversationsTables() {
         CREATE INDEX IF NOT EXISTS messages_conversation_id_created_at_idx
           ON messages (conversation_id, created_at)
       `
+
+      // Additive columns for image attachments (Vercel Blob URL + metadata;
+      // the file itself never touches Postgres). Nullable so existing rows
+      // and the ALTER stay backward-compatible.
+      await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT`
+      await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_mime_type TEXT`
+      await sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT`
     })().catch((err) => {
       conversationsTablesReady = null
       throw err
@@ -88,4 +95,7 @@ export interface MessageRow {
   content: string
   is_error: boolean
   created_at: string
+  attachment_url: string | null
+  attachment_mime_type: string | null
+  attachment_name: string | null
 }

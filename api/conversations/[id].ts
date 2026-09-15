@@ -1,14 +1,58 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ensureConversationsTables, sql, type ConversationRow, type MessageRow } from '../_lib/db'
 import { getSessionUser } from '../_lib/auth'
-import { GeminiConfigError, getGeminiReply } from '../_lib/gemini'
+import { GeminiConfigError, getGeminiReply, type GeminiImageAttachment } from '../_lib/gemini'
+
+const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+])
+
+interface IncomingAttachment {
+  url: string
+  mimeType: string
+  name: string
+}
+
+// Only ever fetch attachment bytes from our own Vercel Blob store, never an
+// arbitrary client-supplied URL — otherwise an authenticated user could turn
+// this endpoint into an SSRF proxy against internal/private addresses.
+function isTrustedBlobUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && hostname.endsWith('.public.blob.vercel-storage.com')
+  } catch {
+    return false
+  }
+}
+
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024 // matches api/blob/upload.ts's upload-time limit
+
+// Gemini's inlineData part needs the actual base64-encoded bytes, not a URL
+// (fileData/fileUri only works with files uploaded through Gemini's own
+// Files API), so we fetch the blob server-side before calling Gemini.
+async function fetchImageAttachment(attachment: IncomingAttachment): Promise<GeminiImageAttachment> {
+  const res = await fetch(attachment.url)
+  if (!res.ok) {
+    throw new Error('첨부 이미지를 불러오지 못했어요.')
+  }
+  const buffer = await res.arrayBuffer()
+  if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new Error('첨부 이미지가 너무 커요.')
+  }
+  return { mimeType: attachment.mimeType, data: Buffer.from(buffer).toString('base64') }
+}
 
 // Explicit ceiling instead of relying on the platform default: comfortably
-// above the Gemini call's worst case (two attempts x 10s timeout, plus one
-// short backoff — see api/_lib/gemini.ts) plus the handful of DB round
-// trips this route makes, so a genuinely slow request gets a clean error
-// response instead of the platform killing the function mid-request.
-export const config = { maxDuration: 30 }
+// above the Gemini call's worst case (two attempts x 20s timeout for a
+// message with an image attachment, plus one short backoff — see
+// api/_lib/gemini.ts) plus the handful of DB round trips and the
+// attachment fetch this route makes, so a genuinely slow request gets a
+// clean error response instead of the platform killing the function
+// mid-request.
+export const config = { maxDuration: 60 }
 
 // GET fetches a conversation with its messages; POST appends a user message
 // and the AI reply. Both live in one file (instead of GET in [id]/index.ts
@@ -59,9 +103,20 @@ async function handleGet(_req: VercelRequest, res: VercelResponse, id: number, u
     }
 
     const messagesResult = await sql<
-      Pick<MessageRow, 'role' | 'content' | 'ai_provider' | 'is_error'>
+      Pick<
+        MessageRow,
+        | 'role'
+        | 'content'
+        | 'ai_provider'
+        | 'is_error'
+        | 'attachment_url'
+        | 'attachment_mime_type'
+        | 'attachment_name'
+      >
     >`
-      SELECT role, content, ai_provider, is_error FROM messages
+      SELECT role, content, ai_provider, is_error,
+        attachment_url, attachment_mime_type, attachment_name
+      FROM messages
       WHERE conversation_id = ${id}
       ORDER BY created_at ASC, id ASC
     `
@@ -74,6 +129,9 @@ async function handleGet(_req: VercelRequest, res: VercelResponse, id: number, u
           text: m.content,
           ai: m.ai_provider ?? undefined,
           error: m.is_error,
+          attachment: m.attachment_url
+            ? { url: m.attachment_url, mimeType: m.attachment_mime_type, name: m.attachment_name }
+            : undefined,
         })),
       },
     })
@@ -84,12 +142,38 @@ async function handleGet(_req: VercelRequest, res: VercelResponse, id: number, u
 }
 
 async function handlePost(req: VercelRequest, res: VercelResponse, id: number, userId: number) {
-  const { text } = (req.body ?? {}) as { text?: unknown }
-  if (typeof text !== 'string' || !text.trim()) {
+  const { text, attachment } = (req.body ?? {}) as {
+    text?: unknown
+    attachment?: unknown
+  }
+  if (typeof text !== 'string') {
     res.status(400).json({ error: '메시지를 입력해주세요.' })
     return
   }
   const messageText = text.trim()
+
+  let incomingAttachment: IncomingAttachment | undefined
+  if (attachment != null) {
+    const a = attachment as Partial<IncomingAttachment>
+    if (
+      typeof a.url !== 'string' ||
+      typeof a.mimeType !== 'string' ||
+      typeof a.name !== 'string' ||
+      !ALLOWED_ATTACHMENT_MIME_TYPES.has(a.mimeType) ||
+      !isTrustedBlobUrl(a.url)
+    ) {
+      res.status(400).json({ error: '첨부 파일이 올바르지 않아요.' })
+      return
+    }
+    incomingAttachment = { url: a.url, mimeType: a.mimeType, name: a.name }
+  }
+
+  // Text is required unless an image is attached — a caption-less image
+  // should still be sendable.
+  if (!messageText && !incomingAttachment) {
+    res.status(400).json({ error: '메시지를 입력해주세요.' })
+    return
+  }
 
   try {
     await ensureConversationsTables()
@@ -119,14 +203,22 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     const history = historyResult.rows.map((m) => ({ role: m.role, text: m.content }))
 
     await sql`
-      INSERT INTO messages (conversation_id, role, content)
-      VALUES (${id}, 'user', ${messageText})
+      INSERT INTO messages (conversation_id, role, content, attachment_url, attachment_mime_type, attachment_name)
+      VALUES (
+        ${id}, 'user', ${messageText},
+        ${incomingAttachment?.url ?? null},
+        ${incomingAttachment?.mimeType ?? null},
+        ${incomingAttachment?.name ?? null}
+      )
     `
 
     let replyText: string
     let isError = false
     try {
-      replyText = await getGeminiReply(messageText, history)
+      const imageAttachment = incomingAttachment
+        ? await fetchImageAttachment(incomingAttachment)
+        : undefined
+      replyText = await getGeminiReply(messageText, history, imageAttachment)
     } catch (err) {
       isError = true
       if (err instanceof GeminiConfigError) {
@@ -145,7 +237,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     await sql`UPDATE conversations SET updated_at = now() WHERE id = ${id}`
 
     res.status(201).json({
-      userMessage: { role: 'user', text: messageText },
+      userMessage: { role: 'user', text: messageText, attachment: incomingAttachment },
       aiMessage: { role: 'ai', ai: 'Gemini', text: replyText, error: isError },
     })
   } catch (err) {
