@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
-import { ArrowRight, Sparkles, User } from 'lucide-react'
+import { ArrowRight, RotateCcw, Sparkles, User } from 'lucide-react'
 import { useChats } from '../context/ChatContext'
 import MarkdownMessage from '../components/MarkdownMessage'
 
 export default function ChatPage() {
   const { id } = useParams()
-  const { getChat, sendMessage, pendingIds } = useChats()
+  const { getChat, sendMessage, pendingIds, retryLastMessage } = useChats()
   const [value, setValue] = useState('')
   const chat = getChat(id)
 
@@ -66,6 +66,16 @@ export default function ChatPage() {
                   <MarkdownMessage text={msg.text} />
                 ) : (
                   msg.text
+                )}
+                {msg.role === 'ai' && msg.error && i === chat.messages.length - 1 && !isPending && (
+                  <button
+                    type="button"
+                    onClick={() => retryLastMessage(chat.id)}
+                    className="mt-2 flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700"
+                  >
+                    <RotateCcw size={12} />
+                    다시 시도
+                  </button>
                 )}
               </div>
             </div>
