@@ -14,6 +14,7 @@ interface ChatContextValue {
   getChat: (id: string | undefined) => ChatItem | undefined
   startNewChat: (initialText?: string, title?: string) => string
   sendMessage: (id: string, text: string) => void
+  retryLastMessage: (id: string) => void
 }
 
 async function fetchGeminiReply(message: string, history: ChatMessage[]): Promise<string> {
@@ -121,8 +122,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [chats, requestReply],
   )
 
+  const retryLastMessage = useCallback(
+    (id: string) => {
+      const chat = chats.find((c) => c.id === id)
+      if (!chat) return
+
+      const { messages } = chat
+      const lastMessage = messages[messages.length - 1]
+      const lastUserMessage = messages[messages.length - 2]
+      if (!lastMessage || lastMessage.role !== 'ai' || !lastMessage.error) return
+      if (!lastUserMessage || lastUserMessage.role !== 'user') return
+
+      const history = messages.slice(0, -2)
+
+      setChats((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, messages: messages.slice(0, -1) } : c)),
+      )
+
+      requestReply(id, lastUserMessage.text, history)
+    },
+    [chats, requestReply],
+  )
+
   return (
-    <ChatContext.Provider value={{ chats, pendingIds, getChat, startNewChat, sendMessage }}>
+    <ChatContext.Provider
+      value={{ chats, pendingIds, getChat, startNewChat, sendMessage, retryLastMessage }}
+    >
       {children}
     </ChatContext.Provider>
   )
