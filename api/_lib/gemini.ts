@@ -11,6 +11,12 @@ const IMAGE_REQUEST_TIMEOUT_MS = 20_000
 const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 
+// User-facing message for failures that are Gemini/network being slow or
+// briefly unavailable, not a problem with the request itself — shown
+// instead of a raw error like "This operation was aborted" (AbortError's
+// message) or an upstream 5xx body.
+const TRANSIENT_FAILURE_MESSAGE = '일시적으로 응답이 지연되고 있어요. 잠시 후 다시 시도해주세요.'
+
 export interface GeminiHistoryMessage {
   role: 'user' | 'ai'
   text: string
@@ -105,7 +111,7 @@ async function callGeminiWithRetry(
       // double the user's wait for no benefit. Only retry on errors that
       // fail fast (network glitches, DNS issues, etc.).
       if (isTimeout) {
-        throw err
+        throw new GeminiApiError(TRANSIENT_FAILURE_MESSAGE, 504)
       }
       if (attempt < MAX_ATTEMPTS) {
         await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
@@ -115,7 +121,11 @@ async function callGeminiWithRetry(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Gemini API 요청에 실패했어요.')
+  // Every attempt threw a non-timeout error (network glitch, DNS issue,
+  // etc.) — the raw error (e.g. a TypeError's message) isn't something a
+  // user should see, so surface the same friendly message as a timeout.
+  console.error('[gemini] all attempts failed:', lastError)
+  throw new GeminiApiError(TRANSIENT_FAILURE_MESSAGE, 502)
 }
 
 export async function getGeminiReply(
@@ -153,7 +163,12 @@ export async function getGeminiReply(
 
   if (status < 200 || status >= 300) {
     console.error(`[gemini] request failed — status ${status}, model ${GEMINI_MODEL}:`, data?.error)
-    throw new GeminiApiError(data?.error?.message ?? 'Gemini API 요청에 실패했어요.', status)
+    // 429/5xx means Gemini itself was overloaded or briefly unavailable —
+    // that's the same "try again shortly" story as a timeout, so use the
+    // same friendly message rather than surfacing Google's raw error text.
+    const message =
+      status === 429 || status >= 500 ? TRANSIENT_FAILURE_MESSAGE : (data?.error?.message ?? 'Gemini API 요청에 실패했어요.')
+    throw new GeminiApiError(message, status)
   }
 
   const text: string =

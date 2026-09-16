@@ -1,7 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ensureConversationsTables, sql, type ConversationRow, type MessageRow } from '../_lib/db'
 import { getSessionUser } from '../_lib/auth'
-import { GeminiConfigError, getGeminiReply, type GeminiImageAttachment } from '../_lib/gemini'
+import {
+  GeminiApiError,
+  GeminiConfigError,
+  getGeminiReply,
+  type GeminiImageAttachment,
+} from '../_lib/gemini'
 
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   'image/png',
@@ -45,6 +50,23 @@ async function fetchImageAttachment(attachment: IncomingAttachment): Promise<Gem
   return { mimeType: attachment.mimeType, data: Buffer.from(buffer).toString('base64') }
 }
 
+// GeminiConfigError/GeminiApiError already carry a Korean, user-facing
+// message (see api/_lib/gemini.ts); anything else (e.g. our own attachment
+// fetch failing) is unexpected, so fall back to a generic message instead
+// of risking a raw/English error reaching the chat UI.
+function resolveGeminiFailureMessage(err: unknown): string {
+  if (err instanceof GeminiConfigError) {
+    console.error('[api/conversations/[id]] GEMINI_API_KEY is not configured')
+    return '서버에 GEMINI_API_KEY가 설정되지 않았어요.'
+  }
+  if (err instanceof GeminiApiError) {
+    console.error('[api/conversations/[id]] gemini error', err)
+    return err.message
+  }
+  console.error('[api/conversations/[id]] gemini error', err)
+  return err instanceof Error ? err.message : 'Gemini 응답을 받지 못했어요.'
+}
+
 // Explicit ceiling instead of relying on the platform default: comfortably
 // above the Gemini call's worst case (two attempts x 20s timeout for a
 // message with an image attachment, plus one short backoff — see
@@ -79,7 +101,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'POST') {
-    await handlePost(req, res, id, session.sub)
+    const body = (req.body ?? {}) as { retry?: unknown }
+    if (body.retry === true) {
+      await handleRetry(res, id, session.sub)
+    } else {
+      await handlePost(req, res, id, session.sub)
+    }
     return
   }
 
@@ -221,13 +248,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
       replyText = await getGeminiReply(messageText, history, imageAttachment)
     } catch (err) {
       isError = true
-      if (err instanceof GeminiConfigError) {
-        console.error('[api/conversations/[id]] GEMINI_API_KEY is not configured')
-        replyText = '서버에 GEMINI_API_KEY가 설정되지 않았어요.'
-      } else {
-        console.error('[api/conversations/[id]] gemini error', err)
-        replyText = err instanceof Error ? err.message : 'Gemini 응답을 받지 못했어요.'
-      }
+      replyText = resolveGeminiFailureMessage(err)
     }
 
     await sql`
@@ -242,6 +263,85 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     })
   } catch (err) {
     console.error('[api/conversations/[id]] unexpected error', err)
+    res.status(500).json({ error: '메시지를 처리하는 중 오류가 발생했어요.' })
+  }
+}
+
+// Re-attempts the Gemini call for a conversation's last message without
+// creating a new user message row — a retry is "try that same turn again",
+// not a new turn, so the existing failed AI message row is updated in
+// place instead of appending a duplicate user/AI pair.
+async function handleRetry(res: VercelResponse, id: number, userId: number) {
+  try {
+    await ensureConversationsTables()
+
+    const convResult = await sql<Pick<ConversationRow, 'id'>>`
+      SELECT id FROM conversations
+      WHERE id = ${id} AND user_id = ${userId}
+    `
+    if (convResult.rows.length === 0) {
+      res.status(404).json({ error: '대화를 찾을 수 없어요.' })
+      return
+    }
+
+    const lastRows = await sql<MessageRow>`
+      SELECT * FROM messages
+      WHERE conversation_id = ${id}
+      ORDER BY created_at DESC, id DESC
+      LIMIT 2
+    `
+    const [lastMessage, userMessage] = lastRows.rows
+    if (!lastMessage || lastMessage.role !== 'ai' || !lastMessage.is_error) {
+      res.status(400).json({ error: '다시 시도할 메시지가 없어요.' })
+      return
+    }
+    if (!userMessage || userMessage.role !== 'user') {
+      res.status(400).json({ error: '다시 시도할 메시지가 없어요.' })
+      return
+    }
+
+    const historyResult = await sql<Pick<MessageRow, 'role' | 'content'>>`
+      SELECT role, content FROM (
+        SELECT role, content, created_at, id FROM messages
+        WHERE conversation_id = ${id} AND id NOT IN (${lastMessage.id}, ${userMessage.id})
+        ORDER BY created_at DESC, id DESC
+        LIMIT 20
+      ) recent
+      ORDER BY created_at ASC, id ASC
+    `
+    const history = historyResult.rows.map((m) => ({ role: m.role, text: m.content }))
+
+    const incomingAttachment: IncomingAttachment | undefined = userMessage.attachment_url
+      ? {
+          url: userMessage.attachment_url,
+          mimeType: userMessage.attachment_mime_type ?? '',
+          name: userMessage.attachment_name ?? '',
+        }
+      : undefined
+
+    let replyText: string
+    let isError = false
+    try {
+      const imageAttachment = incomingAttachment
+        ? await fetchImageAttachment(incomingAttachment)
+        : undefined
+      replyText = await getGeminiReply(userMessage.content, history, imageAttachment)
+    } catch (err) {
+      isError = true
+      replyText = resolveGeminiFailureMessage(err)
+    }
+
+    await sql`
+      UPDATE messages SET content = ${replyText}, is_error = ${isError}
+      WHERE id = ${lastMessage.id}
+    `
+    await sql`UPDATE conversations SET updated_at = now() WHERE id = ${id}`
+
+    res.status(200).json({
+      aiMessage: { role: 'ai', ai: 'Gemini', text: replyText, error: isError },
+    })
+  } catch (err) {
+    console.error('[api/conversations/[id]] unexpected error on retry', err)
     res.status(500).json({ error: '메시지를 처리하는 중 오류가 발생했어요.' })
   }
 }
