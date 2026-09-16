@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ChatMessage } from '../data/chats'
+import type { ChatAttachment, ChatMessage } from '../data/chats'
 import { formatRelativeTime } from '../lib/time'
 import { useAuth } from './AuthContext'
 
@@ -32,7 +32,7 @@ interface ChatContextValue {
   getChat: (id: string | undefined) => ChatItem | undefined
   loadConversation: (id: string) => void
   startNewChat: (initialText?: string, title?: string) => Promise<string | null>
-  sendMessage: (id: string, text: string) => void
+  sendMessage: (id: string, text: string, attachment?: ChatAttachment) => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -126,11 +126,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const sendMessage = useCallback(
-    (id: string, text: string) => {
+    (id: string, text: string, attachment?: ChatAttachment) => {
       setChats((prev) =>
         prev.map((c) =>
           c.id === id
-            ? { ...c, time: '방금 전', messages: [...c.messages, { role: 'user', text }] }
+            ? {
+                ...c,
+                time: '방금 전',
+                messages: [...c.messages, { role: 'user', text, attachment }],
+              }
             : c,
         ),
       )
@@ -139,7 +143,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       fetch(`/api/conversations/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, attachment }),
       })
         .then(async (res) => {
           const data = (await res.json().catch(() => ({}))) as {
