@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
-import { ArrowRight, Paperclip, Sparkles, User, X } from 'lucide-react'
+import { ArrowRight, Paperclip, RotateCcw, Sparkles, User, X } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
 import type { ChatAttachment } from '../data/chats'
@@ -11,7 +11,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024 // keep in sync with api/blob/upload.ts
 
 export default function ChatPage() {
   const { id } = useParams()
-  const { getChat, sendMessage, loadConversation, pendingIds } = useChats()
+  const { getChat, sendMessage, loadConversation, pendingIds, retryLastMessage } = useChats()
   const [value, setValue] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -145,6 +145,16 @@ export default function ChatPage() {
                   ) : (
                     msg.text
                   ))}
+                {msg.role === 'ai' && msg.error && i === chat.messages.length - 1 && !isPending && (
+                  <button
+                    type="button"
+                    onClick={() => retryLastMessage(chat.id)}
+                    className="mt-2 flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700"
+                  >
+                    <RotateCcw size={12} />
+                    다시 시도
+                  </button>
+                )}
               </div>
             </div>
           ))}

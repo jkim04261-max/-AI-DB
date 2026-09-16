@@ -33,6 +33,7 @@ interface ChatContextValue {
   loadConversation: (id: string) => void
   startNewChat: (initialText?: string, title?: string) => Promise<string | null>
   sendMessage: (id: string, text: string, attachment?: ChatAttachment) => void
+  retryLastMessage: (id: string) => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -161,6 +162,56 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [appendAiReply, setPending],
   )
 
+  // Replaces the last message (the failed AI reply) rather than appending,
+  // so a retry updates that bubble in place instead of stacking a new one
+  // below it — matching the server, which updates the same message row.
+  const replaceLastAiReply = useCallback((id: string, text: string, error = false) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === id
+          ? {
+              ...chat,
+              time: '방금 전',
+              messages: [
+                ...chat.messages.slice(0, -1),
+                { role: 'ai', ai: 'Gemini', text, error },
+              ],
+            }
+          : chat,
+      ),
+    )
+  }, [])
+
+  const retryLastMessage = useCallback(
+    (id: string) => {
+      const chat = chats.find((c) => c.id === id)
+      if (!chat) return
+      const lastMessage = chat.messages[chat.messages.length - 1]
+      if (!lastMessage || lastMessage.role !== 'ai' || !lastMessage.error) return
+
+      setPending(id, true)
+
+      fetch(`/api/conversations/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retry: true }),
+      })
+        .then(async (res) => {
+          const data = (await res.json().catch(() => ({}))) as {
+            aiMessage?: ChatMessage
+            error?: string
+          }
+          if (!res.ok || !data.aiMessage) {
+            throw new Error(data.error || 'Gemini 응답을 받지 못했어요.')
+          }
+          replaceLastAiReply(id, data.aiMessage.text, data.aiMessage.error)
+        })
+        .catch((err: Error) => replaceLastAiReply(id, err.message, true))
+        .finally(() => setPending(id, false))
+    },
+    [chats, replaceLastAiReply, setPending],
+  )
+
   const startNewChat = useCallback(
     async (initialText?: string, title?: string) => {
       if (!user) {
@@ -205,7 +256,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   return (
     <ChatContext.Provider
-      value={{ chats, pendingIds, getChat, loadConversation, startNewChat, sendMessage }}
+      value={{
+        chats,
+        pendingIds,
+        getChat,
+        loadConversation,
+        startNewChat,
+        sendMessage,
+        retryLastMessage,
+      }}
     >
       {children}
     </ChatContext.Provider>
