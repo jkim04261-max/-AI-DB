@@ -4,7 +4,7 @@
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
-const TEXT_REQUEST_TIMEOUT_MS = 10_000
+const TEXT_REQUEST_TIMEOUT_MS = 15_000
 // Multimodal (image) requests take Gemini noticeably longer to process than
 // plain text, so they get a longer per-attempt budget.
 const IMAGE_REQUEST_TIMEOUT_MS = 20_000
