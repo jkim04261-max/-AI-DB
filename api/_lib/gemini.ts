@@ -6,8 +6,11 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 
 const TEXT_REQUEST_TIMEOUT_MS = 18_000
 // Multimodal (image) requests take Gemini noticeably longer to process than
-// plain text, so they get a longer per-attempt budget.
-const IMAGE_REQUEST_TIMEOUT_MS = 20_000
+// plain text — 20s was still getting hit in production ("[제미니] 시도 1/2에서
+// 시간 초과"), so this gives image requests real headroom. A timeout doesn't
+// get retried (see the AbortError branch below), so this is also the actual
+// worst-case wait for a request that never times out.
+const IMAGE_REQUEST_TIMEOUT_MS = 35_000
 const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 

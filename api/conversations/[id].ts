@@ -88,13 +88,15 @@ function resolveGeminiFailureMessage(err: unknown): string {
 }
 
 // Explicit ceiling instead of relying on the platform default: comfortably
-// above the Gemini call's worst case (two attempts x 20s timeout for a
-// message with an image attachment, plus one short backoff — see
-// api/_lib/gemini.ts) plus the handful of DB round trips and the
-// attachment fetch this route makes, so a genuinely slow request gets a
-// clean error response instead of the platform killing the function
-// mid-request.
-export const config = { maxDuration: 60 }
+// above the Gemini call's worst case for a message with an image attachment
+// — a fast-failing first attempt (429/5xx), a short backoff, then a second
+// attempt that runs the full 35s image timeout (see IMAGE_REQUEST_TIMEOUT_MS
+// in api/_lib/gemini.ts; a timeout itself never retries, so two full
+// timeouts back to back can't happen) — plus the attachment fetch (up to
+// 10s) and the handful of DB round trips this route makes, so a genuinely
+// slow request gets a clean error response instead of the platform killing
+// the function mid-request.
+export const config = { maxDuration: 75 }
 
 // GET fetches a conversation with its messages; POST appends a user message
 // and the AI reply. Both live in one file (instead of GET in [id]/index.ts
