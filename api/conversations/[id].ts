@@ -35,11 +35,31 @@ function isTrustedBlobUrl(url: string): boolean {
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024 // matches api/blob/upload.ts's upload-time limit
 
+// Unlike the Gemini call, this has no retry — a stuck blob fetch would
+// otherwise hang until Vercel's own maxDuration kills the function, which
+// looks like a silent "no response" to the user instead of a clean error.
+const ATTACHMENT_FETCH_TIMEOUT_MS = 10_000
+
 // Gemini's inlineData part needs the actual base64-encoded bytes, not a URL
 // (fileData/fileUri only works with files uploaded through Gemini's own
 // Files API), so we fetch the blob server-side before calling Gemini.
 async function fetchImageAttachment(attachment: IncomingAttachment): Promise<GeminiImageAttachment> {
-  const res = await fetch(attachment.url)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), ATTACHMENT_FETCH_TIMEOUT_MS)
+
+  let res: Response
+  try {
+    res = await fetch(attachment.url, { signal: controller.signal })
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.name === 'AbortError'
+    console.error('[api/conversations/[id]] attachment fetch failed', err)
+    throw new Error(
+      isTimeout ? '첨부 이미지를 불러오는 데 시간이 너무 오래 걸려요.' : '첨부 이미지를 불러오지 못했어요.',
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+
   if (!res.ok) {
     throw new Error('첨부 이미지를 불러오지 못했어요.')
   }
