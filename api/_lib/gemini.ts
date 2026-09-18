@@ -6,8 +6,11 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 
 const TEXT_REQUEST_TIMEOUT_MS = 18_000
 // Multimodal (image) requests take Gemini noticeably longer to process than
-// plain text, so they get a longer per-attempt budget.
-const IMAGE_REQUEST_TIMEOUT_MS = 20_000
+// plain text — 20s was still getting hit in production ("[제미니] 시도 1/2에서
+// 시간 초과"), so this gives image requests real headroom. A timeout doesn't
+// get retried (see the AbortError branch below), so this is also the actual
+// worst-case wait for a request that never times out.
+const IMAGE_REQUEST_TIMEOUT_MS = 35_000
 const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 
@@ -61,6 +64,28 @@ interface GeminiCallResult {
   }
 }
 
+// Classifies a thrown fetch error so logs say *why* the call failed instead
+// of just dumping the raw Error object — "timeout" (our own AbortController
+// firing), "network" (DNS/connection/TLS failures, tagged with Node's error
+// code when fetch's undici backend exposes one via `cause`), or "unknown"
+// for anything else.
+function describeGeminiFailure(err: unknown): { kind: 'timeout' | 'network' | 'unknown'; detail: string } {
+  if (err instanceof Error && err.name === 'AbortError') {
+    return { kind: 'timeout', detail: err.message }
+  }
+  const cause = err instanceof Error ? (err as { cause?: unknown }).cause : undefined
+  const causeCode =
+    cause && typeof cause === 'object' && 'code' in cause ? String((cause as { code?: unknown }).code) : undefined
+  const detail = [
+    err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    causeCode ? `code=${causeCode}` : undefined,
+    cause instanceof Error ? `cause=${cause.name}: ${cause.message}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' | ')
+  return { kind: causeCode ? 'network' : 'unknown', detail }
+}
+
 async function callGeminiWithRetry(
   apiKey: string,
   contents: unknown,
@@ -71,6 +96,7 @@ async function callGeminiWithRetry(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    const startedAt = Date.now()
 
     try {
       const geminiRes = await fetch(GEMINI_URL, {
@@ -91,33 +117,39 @@ async function callGeminiWithRetry(
       })
 
       const data = (await geminiRes.json()) as GeminiCallResult['data']
+      const elapsedMs = Date.now() - startedAt
 
       // Retry on rate limiting / transient server errors, not on 4xx like
       // bad request or bad API key.
       const isRetryable = geminiRes.status === 429 || geminiRes.status >= 500
       if (!geminiRes.ok && isRetryable && attempt < MAX_ATTEMPTS) {
         console.error(
-          `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed with status ${geminiRes.status}, retrying:`,
+          `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed — HTTP ${geminiRes.status} (${elapsedMs}ms, model=${GEMINI_MODEL}), retrying:`,
           data?.error?.message ?? data,
         )
         await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
         continue
       }
+      if (!geminiRes.ok) {
+        console.error(
+          `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed — HTTP ${geminiRes.status} (${elapsedMs}ms, model=${GEMINI_MODEL}), not retrying (${isRetryable ? 'out of attempts' : 'non-retryable status'}):`,
+          data?.error?.message ?? data,
+        )
+      }
 
       return { status: geminiRes.status, data }
     } catch (err) {
       lastError = err
-      const isTimeout = err instanceof Error && err.name === 'AbortError'
+      const elapsedMs = Date.now() - startedAt
+      const { kind, detail } = describeGeminiFailure(err)
       console.error(
-        `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} threw${isTimeout ? ' (timeout)' : ''}:`,
-        err instanceof Error ? err.message : err,
-        (err as { cause?: unknown } | undefined)?.cause,
+        `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} threw — kind=${kind} (${elapsedMs}ms of ${timeoutMs}ms budget, model=${GEMINI_MODEL}): ${detail}`,
       )
       // A timeout means Gemini already used its full budget without
       // responding — retrying would just wait the same amount again and
       // double the user's wait for no benefit. Only retry on errors that
       // fail fast (network glitches, DNS issues, etc.).
-      if (isTimeout) {
+      if (kind === 'timeout') {
         throw new GeminiApiError(TRANSIENT_FAILURE_MESSAGE, 504)
       }
       if (attempt < MAX_ATTEMPTS) {
@@ -131,7 +163,8 @@ async function callGeminiWithRetry(
   // Every attempt threw a non-timeout error (network glitch, DNS issue,
   // etc.) — the raw error (e.g. a TypeError's message) isn't something a
   // user should see, so surface the same friendly message as a timeout.
-  console.error('[gemini] all attempts failed:', lastError)
+  const { kind, detail } = describeGeminiFailure(lastError)
+  console.error(`[gemini] all ${MAX_ATTEMPTS} attempts failed — last failure kind=${kind}: ${detail}`)
   throw new GeminiApiError(TRANSIENT_FAILURE_MESSAGE, 502)
 }
 
@@ -169,10 +202,11 @@ export async function getGeminiReply(
   const { status, data } = await callGeminiWithRetry(apiKey, contents, timeoutMs)
 
   if (status < 200 || status >= 300) {
-    console.error(`[gemini] request failed — status ${status}, model ${GEMINI_MODEL}:`, data?.error)
-    // 429/5xx means Gemini itself was overloaded or briefly unavailable —
-    // that's the same "try again shortly" story as a timeout, so use the
-    // same friendly message rather than surfacing Google's raw error text.
+    // callGeminiWithRetry already logged this attempt's failure in detail
+    // (status, elapsed time, model, retryability) — 429/5xx means Gemini
+    // itself was overloaded or briefly unavailable, which is the same "try
+    // again shortly" story as a timeout, so use the same friendly message
+    // rather than surfacing Google's raw error text.
     const message =
       status === 429 || status >= 500 ? TRANSIENT_FAILURE_MESSAGE : (data?.error?.message ?? 'Gemini API 요청에 실패했어요.')
     throw new GeminiApiError(message, status)
