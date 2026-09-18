@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { GeminiApiError, GeminiConfigError, getGeminiReply, type GeminiHistoryMessage } from './_lib/gemini'
 
 // Explicit ceiling instead of relying on the platform default: comfortably
-// above the Gemini call's worst case (two attempts x 15s timeout, plus one
+// above the Gemini call's worst case (two attempts x 18s timeout, plus one
 // short backoff — see api/_lib/gemini.ts) so a genuinely slow request gets
 // a clean error response instead of the platform killing the function
 // mid-request.

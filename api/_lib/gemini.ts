@@ -4,7 +4,7 @@
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
-const TEXT_REQUEST_TIMEOUT_MS = 15_000
+const TEXT_REQUEST_TIMEOUT_MS = 18_000
 // Multimodal (image) requests take Gemini noticeably longer to process than
 // plain text, so they get a longer per-attempt budget.
 const IMAGE_REQUEST_TIMEOUT_MS = 20_000
@@ -79,7 +79,14 @@ async function callGeminiWithRetry(
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
-        body: JSON.stringify({ contents }),
+        // Gemini 2.5 models "think" before answering by default, which can add
+        // many seconds of latency even for simple prompts — this is a chat
+        // UI where users expect a fast reply, not a reasoning budget, so
+        // thinking is disabled outright.
+        body: JSON.stringify({
+          contents,
+          generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
+        }),
         signal: controller.signal,
       })
 
