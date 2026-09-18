@@ -23,6 +23,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const body = req.body as HandleUploadBody
     const jsonResponse = await handleUpload({
+      // The Blob store connected to this project generates env vars with a
+      // "NEW_" prefix instead of the SDK's default `BLOB_READ_WRITE_TOKEN`
+      // (Vercel adds that prefix automatically when a name would collide,
+      // and it isn't editable from the dashboard) — pass it explicitly
+      // rather than relying on handleUpload()'s implicit env lookup, which
+      // only ever checks `BLOB_READ_WRITE_TOKEN`. Falls back to that
+      // default name (via handleUpload's own env lookup) when unset, so
+      // local dev can still use the standard `BLOB_READ_WRITE_TOKEN`.
+      token: process.env.NEW_READ_WRITE_TOKEN,
       body,
       request: req,
       onBeforeGenerateToken: async () => ({
