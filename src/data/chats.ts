@@ -12,7 +12,7 @@ export interface ChatMessage {
   text: string
   ai?: 'Gemini' | 'GPT' | 'Claude' | 'DeepSeek'
   error?: boolean
-  attachment?: ChatAttachment
+  attachments?: ChatAttachment[]
 }
 
 export interface RecentChat {

@@ -9,8 +9,12 @@ const TEXT_REQUEST_TIMEOUT_MS = 18_000
 // plain text — 20s was still getting hit in production ("[제미니] 시도 1/2에서
 // 시간 초과"), so this gives image requests real headroom. A timeout doesn't
 // get retried (see the AbortError branch below), so this is also the actual
-// worst-case wait for a request that never times out.
-const IMAGE_REQUEST_TIMEOUT_MS = 35_000
+// worst-case wait for a request that never times out. Used for any request
+// carrying one or more images — a message can now attach up to
+// MAX_ATTACHMENTS_PER_MESSAGE images (see api/conversations/[id].ts), and
+// the combined-size cap there keeps the inline payload bounded regardless
+// of how many of those images are attached, so a single budget covers both.
+const IMAGE_REQUEST_TIMEOUT_MS = 45_000
 const MAX_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 500
 
@@ -171,22 +175,22 @@ async function callGeminiWithRetry(
 export async function getGeminiReply(
   message: string,
   history: GeminiHistoryMessage[],
-  attachment?: GeminiImageAttachment,
+  attachments?: GeminiImageAttachment[],
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
     throw new GeminiConfigError()
   }
 
-  // The attachment only rides along on the turn it was sent — past turns in
+  // Attachments only ride along on the turn they were sent — past turns in
   // `history` are text-only (see api/conversations/[id].ts), so a
-  // conversation's image doesn't get re-uploaded to Gemini on every
+  // conversation's images don't get re-uploaded to Gemini on every
   // follow-up message.
   const lastParts: Array<{ text: string } | { inlineData: GeminiImageAttachment }> = []
   if (message) {
     lastParts.push({ text: message })
   }
-  if (attachment) {
+  for (const attachment of attachments ?? []) {
     lastParts.push({ inlineData: attachment })
   }
 
@@ -198,7 +202,7 @@ export async function getGeminiReply(
     { role: 'user', parts: lastParts },
   ]
 
-  const timeoutMs = attachment ? IMAGE_REQUEST_TIMEOUT_MS : TEXT_REQUEST_TIMEOUT_MS
+  const timeoutMs = attachments && attachments.length > 0 ? IMAGE_REQUEST_TIMEOUT_MS : TEXT_REQUEST_TIMEOUT_MS
   const { status, data } = await callGeminiWithRetry(apiKey, contents, timeoutMs)
 
   if (status < 200 || status >= 300) {

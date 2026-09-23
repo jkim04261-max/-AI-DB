@@ -32,7 +32,7 @@ interface ChatContextValue {
   getChat: (id: string | undefined) => ChatItem | undefined
   loadConversation: (id: string) => void
   startNewChat: (initialText?: string, title?: string) => Promise<string | null>
-  sendMessage: (id: string, text: string, attachment?: ChatAttachment) => void
+  sendMessage: (id: string, text: string, attachments?: ChatAttachment[]) => void
   retryLastMessage: (id: string) => void
 }
 
@@ -127,14 +127,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const sendMessage = useCallback(
-    (id: string, text: string, attachment?: ChatAttachment) => {
+    (id: string, text: string, attachments?: ChatAttachment[]) => {
       setChats((prev) =>
         prev.map((c) =>
           c.id === id
             ? {
                 ...c,
                 time: '방금 전',
-                messages: [...c.messages, { role: 'user', text, attachment }],
+                messages: [...c.messages, { role: 'user', text, attachments }],
               }
             : c,
         ),
@@ -144,7 +144,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       fetch(`/api/conversations/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, attachment }),
+        body: JSON.stringify({ text, attachments }),
       })
         .then(async (res) => {
           const data = (await res.json().catch(() => ({}))) as {
