@@ -1,23 +1,17 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
-import { ArrowRight, Paperclip, RotateCcw, Sparkles, User, X } from 'lucide-react'
+import { RotateCcw, Sparkles, User } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
 import type { ChatAttachment } from '../data/chats'
 import MarkdownMessage from '../components/MarkdownMessage'
-
-const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024 // keep in sync with api/blob/upload.ts
+import ChatInput from '../components/ChatInput'
 
 export default function ChatPage() {
   const { id } = useParams()
   const { getChat, sendMessage, loadConversation, pendingIds, retryLastMessage } = useChats()
-  const [value, setValue] = useState('')
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [attachError, setAttachError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const chat = getChat(id)
 
   useEffect(() => {
@@ -26,70 +20,41 @@ export default function ChatPage() {
     }
   }, [chat, loadConversation])
 
-  // Revoke the object URL used for the preview thumbnail once it's replaced
-  // or the component unmounts, so we don't leak memory.
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
-    }
-  }, [previewUrl])
-
   if (!chat) return <Navigate to="/chat" replace />
 
   const isPending = pendingIds.has(chat.id)
   const isBusy = isPending || isUploading
 
-  const clearAttachment = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setSelectedFile(null)
-    setPreviewUrl(null)
-  }
+  const handleSend = async (text: string, files: File[]) => {
+    if (isBusy) return
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = '' // allow re-selecting the same file later
-    if (!file) return
-
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      setAttachError('PNG, JPEG, WEBP, GIF 이미지만 첨부할 수 있어요.')
-      return
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setAttachError('이미지는 8MB 이하만 첨부할 수 있어요.')
-      return
-    }
-
-    setAttachError(null)
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setSelectedFile(file)
-    setPreviewUrl(URL.createObjectURL(file))
-  }
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    const text = value.trim()
-    if ((!text && !selectedFile) || isBusy) return
-
-    let attachment: ChatAttachment | undefined
-    if (selectedFile) {
+    let attachments: ChatAttachment[] | undefined
+    if (files.length > 0) {
       setIsUploading(true)
       try {
-        const blob = await upload(`chat/${chat.id}/${Date.now()}-${selectedFile.name}`, selectedFile, {
-          access: 'public',
-          handleUploadUrl: '/api/blob/upload',
-        })
-        attachment = { url: blob.url, mimeType: blob.contentType, name: selectedFile.name }
+        const uploaded = await Promise.all(
+          files.map((file) =>
+            upload(`chat/${chat.id}/${Date.now()}-${file.name}`, file, {
+              access: 'public',
+              handleUploadUrl: '/api/blob/upload',
+            }),
+          ),
+        )
+        attachments = uploaded.map((blob, i) => ({
+          url: blob.url,
+          mimeType: blob.contentType,
+          name: files[i].name,
+        }))
       } catch {
         setAttachError('이미지 업로드에 실패했어요. 다시 시도해주세요.')
         setIsUploading(false)
         return
       }
+      setAttachError(null)
       setIsUploading(false)
     }
 
-    sendMessage(chat.id, text, attachment)
-    setValue('')
-    clearAttachment()
+    sendMessage(chat.id, text, attachments)
   }
 
   return (
@@ -132,12 +97,17 @@ export default function ChatPage() {
                     {msg.error ? '오류' : msg.ai}
                   </p>
                 )}
-                {msg.attachment && (
-                  <img
-                    src={msg.attachment.url}
-                    alt={msg.attachment.name ?? '첨부 이미지'}
-                    className={`mb-2 max-h-64 max-w-full rounded-lg object-contain ${msg.text ? '' : 'mb-0'}`}
-                  />
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className={`mb-2 flex flex-wrap gap-1 ${msg.text ? '' : 'mb-0'}`}>
+                    {msg.attachments.map((attachment, ai) => (
+                      <img
+                        key={ai}
+                        src={attachment.url}
+                        alt={attachment.name ?? '첨부 이미지'}
+                        className="max-h-48 max-w-full rounded-lg object-contain"
+                      />
+                    ))}
+                  </div>
                 )}
                 {msg.text &&
                   (msg.role === 'ai' && !msg.error ? (
@@ -179,58 +149,9 @@ export default function ChatPage() {
 
       {attachError && <p className="mb-2 text-xs text-red-500">{attachError}</p>}
 
-      {previewUrl && (
-        <div className="mb-2 flex items-center gap-2">
-          <div className="relative">
-            <img src={previewUrl} alt="첨부 미리보기" className="h-16 w-16 rounded-lg object-cover" />
-            <button
-              type="button"
-              onClick={clearAttachment}
-              aria-label="첨부 제거"
-              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      <form
-        onSubmit={handleSubmit}
-        className="mb-4 flex items-center gap-2 rounded-full border border-slate-200 bg-white py-2 pl-3 pr-2 shadow-sm"
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ALLOWED_IMAGE_TYPES.join(',')}
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isBusy}
-          aria-label="이미지 첨부"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40"
-        >
-          <Paperclip size={18} />
-        </button>
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="메시지를 입력하세요..."
-          disabled={isBusy}
-          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 disabled:opacity-60"
-        />
-        <button
-          type="submit"
-          disabled={(!value.trim() && !selectedFile) || isBusy}
-          aria-label="전송"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white disabled:opacity-40"
-        >
-          <ArrowRight size={18} />
-        </button>
-      </form>
+      <div className="mb-4">
+        <ChatInput onSendMessage={handleSend} isLoading={isBusy} />
+      </div>
     </div>
   )
 }
