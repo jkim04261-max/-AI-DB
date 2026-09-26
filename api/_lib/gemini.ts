@@ -1,7 +1,14 @@
-// Overridable via env in case Google retires/renames this model again —
-// `gemini-flash-latest` is Google's stable alias that always resolves to
-// their current default flash model, so it doesn't need to be updated by hand.
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest'
+// Overridable via env for whichever model the account currently has access
+// to. `gemini-2.5-flash-lite` (and the `gemini-flash-latest` alias, which
+// resolved to a 2.5-generation model at the time) started 404ing with
+// "is no longer available to new users" — Google now gates the 2.5
+// generation to accounts/keys with prior usage history on it, regardless of
+// whether the model or alias is itself deprecated. `gemini-3.5-flash-lite`
+// is the model Google's own error response names as the replacement, and is
+// unrestricted for new accounts. Unlike the old `-latest` alias, this is a
+// dated model ID, so it isn't automatically hot-swapped when Google ships
+// the next generation — if this same 404 recurs later, that's why.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
 
 const TEXT_REQUEST_TIMEOUT_MS = 18_000
