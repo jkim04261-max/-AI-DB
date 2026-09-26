@@ -136,7 +136,10 @@ async function callGeminiWithRetry(
       if (!geminiRes.ok && isRetryable && attempt < MAX_ATTEMPTS) {
         console.error(
           `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed — HTTP ${geminiRes.status} (${elapsedMs}ms, model=${GEMINI_MODEL}), retrying:`,
-          data?.error?.message ?? data,
+          // The full error body, not just .message — a 400 in particular
+          // often carries a `details` array naming the exact invalid field,
+          // which .message alone drops.
+          JSON.stringify(data?.error ?? data),
         )
         await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
         continue
@@ -144,7 +147,7 @@ async function callGeminiWithRetry(
       if (!geminiRes.ok) {
         console.error(
           `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed — HTTP ${geminiRes.status} (${elapsedMs}ms, model=${GEMINI_MODEL}), not retrying (${isRetryable ? 'out of attempts' : 'non-retryable status'}):`,
-          data?.error?.message ?? data,
+          JSON.stringify(data?.error ?? data),
         )
       }
 
