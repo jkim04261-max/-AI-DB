@@ -117,12 +117,20 @@ async function callGeminiWithRetry(
           'x-goog-api-key': apiKey,
         },
         // Gemini 2.5 models "think" before answering by default, which can add
-        // many seconds of latency even for simple prompts — this is a chat
-        // UI where users expect a fast reply, not a reasoning budget, so
-        // thinking is disabled outright.
+        // many seconds of latency even for simple prompts — this was meant to
+        // disable that outright for a chat UI where users expect a fast
+        // reply. But `thinkingConfig.thinkingBudget` is a Gemini 2.5-era
+        // field; Gemini 3.x models (the current GEMINI_MODEL default,
+        // gemini-3.5-flash-lite) use `thinkingConfig.thinkingLevel` instead,
+        // and reject `thinkingBudget` outright with 400 "Request contains an
+        // invalid argument" — on every request, regardless of content, which
+        // is what started happening after the 2.5 -> 3.5 model switch.
+        // thinkingLevel's accepted values/casing and per-model availability
+        // aren't consistently documented, so rather than guess a
+        // replacement and risk a second invalid-argument error, this just
+        // omits thinking config entirely and takes the model's default.
         body: JSON.stringify({
           contents,
-          generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
         }),
         signal: controller.signal,
       })
