@@ -34,6 +34,7 @@ interface ChatContextValue {
   startNewChat: (initialText?: string, title?: string) => Promise<string | null>
   sendMessage: (id: string, text: string, attachments?: ChatAttachment[]) => void
   retryLastMessage: (id: string) => void
+  deleteChat: (id: string) => Promise<boolean>
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -212,6 +213,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [chats, replaceLastAiReply, setPending],
   )
 
+  // Returns whether the delete succeeded so the caller (the confirm dialog)
+  // can decide whether to navigate away or show an error and let the user
+  // retry, instead of navigating on a failed delete.
+  const deleteChat = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
+      if (!res.ok) return false
+      setChats((prev) => prev.filter((c) => c.id !== id))
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
   const startNewChat = useCallback(
     async (initialText?: string, title?: string) => {
       if (!user) {
@@ -264,6 +279,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         startNewChat,
         sendMessage,
         retryLastMessage,
+        deleteChat,
       }}
     >
       {children}
