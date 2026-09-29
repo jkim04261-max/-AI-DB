@@ -195,6 +195,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  if (req.method === 'DELETE') {
+    await handleDelete(res, id, session.sub)
+    return
+  }
+
   res.status(405).json({ error: 'Method not allowed' })
 }
 
@@ -451,5 +456,36 @@ async function handleRetry(res: VercelResponse, id: number, userId: number) {
   } catch (err) {
     console.error('[api/conversations/[id]] unexpected error on retry', err)
     res.status(500).json({ error: '메시지를 처리하는 중 오류가 발생했어요.' })
+  }
+}
+
+// Deletes a conversation the caller owns. messages and message_attachments
+// cascade-delete via their FK constraints (ON DELETE CASCADE — see
+// ensureConversationsTables in api/_lib/db.ts), so this single statement is
+// enough on the DB side. It does NOT delete the underlying Vercel Blob
+// files for any image attachments — see the follow-up note in the PR this
+// shipped in; that's a deliberate, reported scope boundary, not an
+// oversight.
+async function handleDelete(res: VercelResponse, id: number, userId: number) {
+  try {
+    await ensureConversationsTables()
+
+    // Scoping the DELETE itself to user_id (rather than a separate
+    // ownership SELECT first) is both the ownership check and the delete in
+    // one round trip — a row only ever comes back if the caller owns it.
+    const result = await sql<{ id: number }>`
+      DELETE FROM conversations
+      WHERE id = ${id} AND user_id = ${userId}
+      RETURNING id
+    `
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: '대화를 찾을 수 없어요.' })
+      return
+    }
+
+    res.status(200).json({ deleted: true })
+  } catch (err) {
+    console.error('[api/conversations/[id]] unexpected error on delete', err)
+    res.status(500).json({ error: '대화를 삭제하는 중 오류가 발생했어요.' })
   }
 }

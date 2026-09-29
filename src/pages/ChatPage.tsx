@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Navigate, useParams } from 'react-router-dom'
-import { RotateCcw, Sparkles, User } from 'lucide-react'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { MoreHorizontal, RotateCcw, Sparkles, Trash2, User } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
 import type { ChatAttachment } from '../data/chats'
@@ -9,9 +9,15 @@ import ChatInput from '../components/ChatInput'
 
 export default function ChatPage() {
   const { id } = useParams()
-  const { getChat, sendMessage, loadConversation, pendingIds, retryLastMessage } = useChats()
+  const navigate = useNavigate()
+  const { getChat, sendMessage, loadConversation, pendingIds, retryLastMessage, deleteChat } =
+    useChats()
   const [attachError, setAttachError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const chat = getChat(id)
 
   useEffect(() => {
@@ -57,10 +63,54 @@ export default function ChatPage() {
     sendMessage(chat.id, text, attachments)
   }
 
+  const handleDeleteConfirm = async () => {
+    setIsDeleting(true)
+    setDeleteError(null)
+    const ok = await deleteChat(chat.id)
+    if (ok) {
+      navigate('/chat')
+      return
+    }
+    setIsDeleting(false)
+    setDeleteError('대화를 삭제하지 못했어요. 다시 시도해주세요.')
+  }
+
   return (
     <div className="mx-auto flex h-[calc(100svh-57px)] max-w-3xl flex-col px-4 lg:h-[calc(100svh-65px)]">
       <div className="flex-1 overflow-y-auto py-6">
-        <h1 className="mb-4 text-lg font-bold text-slate-900">{chat.title}</h1>
+        <div className="relative mb-4 flex items-center justify-between gap-2">
+          <h1 className="truncate text-lg font-bold text-slate-900">{chat.title}</h1>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="대화 메뉴"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <MoreHorizontal size={18} />
+          </button>
+
+          {menuOpen && (
+            <div className="absolute inset-0 z-30" onClick={() => setMenuOpen(false)}>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-0 top-9 w-40 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setDeleteError(null)
+                    setConfirmOpen(true)
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 size={14} />
+                  대화 삭제
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {chat.messages.length === 0 && !isPending && (
           <p className="text-sm text-slate-400">메시지를 입력해서 대화를 시작해보세요.</p>
@@ -152,6 +202,36 @@ export default function ChatPage() {
       <div className="mb-4">
         <ChatInput onSendMessage={handleSend} isLoading={isBusy} />
       </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-base font-bold text-slate-900">대화를 삭제할까요?</h2>
+            <p className="mt-1.5 text-sm text-slate-500">
+              이 대화의 모든 메시지가 삭제되며, 되돌릴 수 없어요.
+            </p>
+            {deleteError && <p className="mt-2 text-xs text-red-500">{deleteError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                disabled={isDeleting}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+                className="rounded-full bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {isDeleting ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
