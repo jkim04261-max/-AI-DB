@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { homeFeatures } from '../data/homeFeatures'
 import { useChats } from '../context/ChatContext'
+import { useComingSoonNotice } from '../lib/comingSoon'
+import ComingSoonToast from './ComingSoonToast'
 
 const cardClass =
   'relative flex flex-col items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-transparent hover:shadow-lg hover:shadow-slate-200 lg:p-5'
@@ -9,14 +10,7 @@ const cardClass =
 export default function FeatureCards() {
   const { startNewChat } = useChats()
   const navigate = useNavigate()
-  const [notice, setNotice] = useState<string | null>(null)
-
-  // Auto-dismiss the "coming soon" notice instead of requiring a close tap.
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 2500)
-    return () => clearTimeout(timer)
-  }, [notice])
+  const { notice, showComingSoon } = useComingSoonNotice()
 
   const handleNewChat = async () => {
     const id = await startNewChat()
@@ -70,25 +64,14 @@ export default function FeatureCards() {
           }
 
           return (
-            <button
-              key={feature.id}
-              type="button"
-              onClick={() => setNotice('현재 준비 중인 기능입니다.')}
-              className={cardClass}
-            >
+            <button key={feature.id} type="button" onClick={showComingSoon} className={cardClass}>
               {content}
             </button>
           )
         })}
       </div>
 
-      {notice && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 lg:bottom-8">
-          <div className="rounded-full bg-slate-900/90 px-4 py-2 text-sm font-medium text-white shadow-lg">
-            {notice}
-          </div>
-        </div>
-      )}
+      <ComingSoonToast message={notice} />
     </div>
   )
 }

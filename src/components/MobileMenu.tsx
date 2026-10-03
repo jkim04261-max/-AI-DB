@@ -1,7 +1,9 @@
 import { NavLink } from 'react-router-dom'
 import { X } from 'lucide-react'
 import Logo from './Logo'
-import { sidebarNavItems, sidebarFooterItems } from '../data/nav'
+import ComingSoonToast from './ComingSoonToast'
+import { sidebarNavItems, sidebarFeatureItems, sidebarFooterItems } from '../data/nav'
+import { useComingSoonNotice } from '../lib/comingSoon'
 
 const linkBase =
   'flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors'
@@ -15,6 +17,10 @@ export default function MobileMenu({
   open: boolean
   onClose: () => void
 }) {
+  // Always called (hooks can't be conditional), but the notice only ever
+  // renders below while the menu itself is open anyway.
+  const { notice, showComingSoon } = useComingSoonNotice()
+
   if (!open) return null
 
   return (
@@ -51,6 +57,37 @@ export default function MobileMenu({
               {item.label}
             </NavLink>
           ))}
+
+          {sidebarFeatureItems.map((feature) =>
+            feature.action.kind === 'link' ? (
+              <NavLink
+                key={feature.id}
+                to={feature.action.to}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `${linkBase} ${isActive ? linkActive : linkInactive}`
+                }
+              >
+                <feature.icon size={18} />
+                {feature.title}
+              </NavLink>
+            ) : (
+              <button
+                key={feature.id}
+                type="button"
+                onClick={showComingSoon}
+                className={`${linkBase} ${linkInactive} justify-between`}
+              >
+                <span className="flex items-center gap-3">
+                  <feature.icon size={18} />
+                  {feature.title}
+                </span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                  준비 중
+                </span>
+              </button>
+            ),
+          )}
         </nav>
 
         <div className="flex flex-col gap-1 border-t border-slate-100 pt-3">
@@ -69,6 +106,8 @@ export default function MobileMenu({
           ))}
         </div>
       </div>
+
+      <ComingSoonToast message={notice} />
     </div>
   )
 }
