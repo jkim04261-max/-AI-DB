@@ -1,6 +1,6 @@
 import { Sparkles } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
-import CategoryGrid from '../components/CategoryGrid'
+import FeatureCards from '../components/FeatureCards'
 import RecentChatsList from '../components/RecentChatsList'
 import HelperCard from '../components/HelperCard'
 import AIProviders from '../components/AIProviders'
@@ -14,7 +14,7 @@ export default function HomePage() {
         </span>
         <div>
           <h1 className="text-2xl font-bold text-slate-900 lg:text-3xl">
-            무엇을 도와드릴까요?
+            오늘은 무엇을 해볼까요?
           </h1>
           <p className="mt-1 text-sm text-slate-400">궁금한 것은 편하게 물어보세요</p>
         </div>
@@ -23,7 +23,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      <CategoryGrid />
+      <FeatureCards />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <RecentChatsList />
