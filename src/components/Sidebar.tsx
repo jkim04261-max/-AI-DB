@@ -1,9 +1,11 @@
 import { NavLink } from 'react-router-dom'
 import { Plus, LogIn, UserPlus } from 'lucide-react'
 import Logo from './Logo'
-import { sidebarNavItems, sidebarFooterItems } from '../data/nav'
+import ComingSoonToast from './ComingSoonToast'
+import { sidebarNavItems, sidebarFeatureItems, sidebarFooterItems } from '../data/nav'
 import { useChats } from '../context/ChatContext'
 import { useAuth } from '../context/AuthContext'
+import { useComingSoonNotice } from '../lib/comingSoon'
 import { useNavigate } from 'react-router-dom'
 
 const linkBase =
@@ -15,6 +17,7 @@ export default function Sidebar() {
   const { startNewChat } = useChats()
   const { user } = useAuth()
   const navigate = useNavigate()
+  const { notice, showComingSoon } = useComingSoonNotice()
 
   const handleNewChat = async () => {
     const id = await startNewChat()
@@ -48,6 +51,36 @@ export default function Sidebar() {
             {item.label}
           </NavLink>
         ))}
+
+        {sidebarFeatureItems.map((feature) =>
+          feature.action.kind === 'link' ? (
+            <NavLink
+              key={feature.id}
+              to={feature.action.to}
+              className={({ isActive }) =>
+                `${linkBase} ${isActive ? linkActive : linkInactive}`
+              }
+            >
+              <feature.icon size={18} />
+              {feature.title}
+            </NavLink>
+          ) : (
+            <button
+              key={feature.id}
+              type="button"
+              onClick={showComingSoon}
+              className={`${linkBase} ${linkInactive} justify-between`}
+            >
+              <span className="flex items-center gap-3">
+                <feature.icon size={18} />
+                {feature.title}
+              </span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                준비 중
+              </span>
+            </button>
+          ),
+        )}
       </nav>
 
       <div className="flex flex-col gap-1 border-t border-slate-100 pt-3">
@@ -96,6 +129,8 @@ export default function Sidebar() {
           </div>
         )}
       </div>
+
+      <ComingSoonToast message={notice} />
     </aside>
   )
 }
