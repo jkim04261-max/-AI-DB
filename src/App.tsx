@@ -15,6 +15,7 @@ import SignupPage from './pages/SignupPage'
 import TermsPage from './pages/TermsPage'
 import PrivacyPage from './pages/PrivacyPage'
 import AiNoticePage from './pages/AiNoticePage'
+import AdminPage from './pages/AdminPage'
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/ai-notice" element={<AiNoticePage />} />
+            <Route path="/admin" element={<AdminPage />} />
           </Routes>
         </main>
       </div>
