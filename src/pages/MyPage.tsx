@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Crown, LogOut, LogIn, UserPlus, MessageSquare, Trash2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -6,14 +7,29 @@ import { useComingSoonNotice } from '../lib/comingSoon'
 import ComingSoonToast from '../components/ComingSoonToast'
 
 export default function MyPage() {
-  const { user, loading, logout } = useAuth()
+  const { user, loading, logout, deleteAccount } = useAuth()
   const { chats } = useChats()
   const navigate = useNavigate()
   const { notice, showComingSoon } = useComingSoonNotice()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const handleLogout = async () => {
     await logout()
     navigate('/')
+  }
+
+  const handleDeleteAccountConfirm = async () => {
+    setIsDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteAccount()
+      navigate('/')
+    } catch (err) {
+      setIsDeleting(false)
+      setDeleteError(err instanceof Error ? err.message : '회원탈퇴 중 오류가 발생했어요.')
+    }
   }
 
   if (loading) {
@@ -120,20 +136,48 @@ export default function MyPage() {
         </button>
 
         <button
-          onClick={showComingSoon}
-          className="flex items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-medium text-slate-400"
+          onClick={() => {
+            setDeleteError(null)
+            setConfirmOpen(true)
+          }}
+          className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-red-500 hover:bg-red-50"
         >
-          <span className="flex items-center gap-3">
-            <Trash2 size={18} />
-            회원탈퇴
-          </span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">
-            준비 중
-          </span>
+          <Trash2 size={18} />
+          회원탈퇴
         </button>
       </div>
 
       <ComingSoonToast message={notice} />
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-base font-bold text-slate-900">정말 회원탈퇴 하시겠어요?</h2>
+            <p className="mt-1.5 text-sm text-slate-500">
+              계정과 저장된 모든 대화, 첨부 이미지가 영구적으로 삭제되며 되돌릴 수 없어요.
+            </p>
+            {deleteError && <p className="mt-2 text-xs text-red-500">{deleteError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                disabled={isDeleting}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAccountConfirm}
+                disabled={isDeleting}
+                className="rounded-full bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {isDeleting ? '삭제 중...' : '회원탈퇴'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

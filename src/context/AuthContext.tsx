@@ -11,6 +11,7 @@ interface AuthContextValue {
   signup: (email: string, password: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  deleteAccount: () => Promise<void>
 }
 
 async function parseJsonResponse(res: Response) {
@@ -60,8 +61,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const deleteAccount = useCallback(async () => {
+    const res = await fetch('/api/account/delete', { method: 'DELETE' })
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    if (!res.ok) {
+      throw new Error(data.error || '계정을 삭제하는 중 오류가 발생했어요.')
+    }
+    setUser(null)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, loading, signup, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, signup, login, logout, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   )
