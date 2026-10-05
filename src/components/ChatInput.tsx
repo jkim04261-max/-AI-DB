@@ -6,13 +6,14 @@ import {
   type ClipboardEvent,
   type FormEvent,
 } from 'react'
-import { AlertCircle, ArrowRight, Paperclip, X } from 'lucide-react'
+import { AlertCircle, ArrowRight, Mic, Paperclip, X } from 'lucide-react'
 import {
   ALLOWED_IMAGE_TYPES,
   MAX_FILE_COUNT,
   MAX_IMAGE_BYTES,
   MAX_TOTAL_IMAGE_BYTES,
 } from '../lib/attachments'
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 
 interface ChatInputProps {
   onSendMessage: (text: string, files: File[]) => void
@@ -32,6 +33,30 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const selectedRef = useRef<SelectedFile[]>([])
+  const textBeforeListeningRef = useRef('')
+
+  // `onResult` gives the full transcript for the current listening session
+  // each time it's refined, so it replaces (not appends to) the text —
+  // whatever was already typed before the mic was pressed is preserved via
+  // textBeforeListeningRef and prefixed back in.
+  const {
+    isListening,
+    error: speechError,
+    start: startListening,
+    stop: stopListening,
+  } = useSpeechRecognition((transcript) => {
+    const base = textBeforeListeningRef.current.trimEnd()
+    setText(base ? `${base} ${transcript}` : transcript)
+  })
+
+  const handleMicClick = () => {
+    if (isListening) {
+      stopListening()
+      return
+    }
+    textBeforeListeningRef.current = text
+    startListening()
+  }
 
   useEffect(() => {
     selectedRef.current = selected
@@ -128,6 +153,7 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
     const trimmed = text.trim()
     if ((!trimmed && selected.length === 0) || isLoading) return
 
+    if (isListening) stopListening()
     onSendMessage(trimmed, selected.map((s) => s.file))
     selected.forEach((s) => URL.revokeObjectURL(s.previewUrl))
     setText('')
@@ -141,6 +167,20 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
         <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">
           <AlertCircle size={14} className="shrink-0" />
           <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {speechError && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">
+          <AlertCircle size={14} className="shrink-0" />
+          <span>{speechError}</span>
+        </div>
+      )}
+
+      {isListening && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-indigo-50 p-2 text-xs text-indigo-600">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-indigo-500" />
+          <span>듣고 있어요... 말씀해주세요</span>
         </div>
       )}
 
@@ -199,6 +239,20 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
           disabled={isLoading}
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 disabled:opacity-60"
         />
+        <button
+          type="button"
+          onClick={handleMicClick}
+          disabled={isLoading}
+          aria-label={isListening ? '음성 입력 중지' : '음성 입력 시작'}
+          aria-pressed={isListening}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+            isListening
+              ? 'animate-pulse bg-red-500 text-white'
+              : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+          }`}
+        >
+          <Mic size={18} />
+        </button>
         <button
           type="submit"
           disabled={isLoading || (!text.trim() && selected.length === 0)}
