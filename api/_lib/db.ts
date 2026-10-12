@@ -4,19 +4,63 @@ let usersTableReady: Promise<unknown> | null = null
 
 export function ensureUsersTable() {
   if (!usersTableReady) {
-    usersTableReady = sql`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `.catch((err) => {
+    usersTableReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      // Bumped on password reset so every session cookie signed before that
+      // point (they carry the version they were signed with) fails the
+      // check in getSessionUser — the only way to invalidate an already-
+      // issued stateless session without a server-side session store.
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0`
+    })().catch((err) => {
       usersTableReady = null
       throw err
     })
   }
   return usersTableReady
+}
+
+let passwordResetTableReady: Promise<unknown> | null = null
+
+// One row per issued reset request; only the token's hash is stored (never
+// the raw token the user receives by email), mirroring how password_hash
+// never stores the plaintext password. A row becomes unusable once
+// used_at is set or expires_at has passed — checked in api/auth/reset-password.ts.
+export function ensurePasswordResetTable() {
+  if (!passwordResetTableReady) {
+    passwordResetTableReady = (async () => {
+      await ensureUsersTable()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          used_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_created_at_idx
+          ON password_reset_tokens (user_id, created_at DESC)
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS password_reset_tokens_token_hash_idx
+          ON password_reset_tokens (token_hash)
+      `
+    })().catch((err) => {
+      passwordResetTableReady = null
+      throw err
+    })
+  }
+  return passwordResetTableReady
 }
 
 let conversationsTablesReady: Promise<unknown> | null = null
@@ -111,6 +155,16 @@ export interface UserRow {
   id: number
   email: string
   password_hash: string
+  created_at: string
+  token_version: number
+}
+
+export interface PasswordResetTokenRow {
+  id: number
+  user_id: number
+  token_hash: string
+  expires_at: string
+  used_at: string | null
   created_at: string
 }
 

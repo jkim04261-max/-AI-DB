@@ -54,6 +54,9 @@ export default function LoginPage() {
           placeholder="비밀번호"
           className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
         />
+        <Link to="/forgot-password" className="self-end text-xs font-medium text-indigo-600 hover:underline">
+          비밀번호를 잊으셨나요?
+        </Link>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
 

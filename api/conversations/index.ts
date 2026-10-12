@@ -3,7 +3,7 @@ import { ensureConversationsTables, sql, type ConversationRow } from '../_lib/db
 import { getSessionUser } from '../_lib/auth'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const session = getSessionUser(req)
+  const session = await getSessionUser(req)
   if (!session) {
     res.status(401).json({ error: '로그인이 필요해요.' })
     return

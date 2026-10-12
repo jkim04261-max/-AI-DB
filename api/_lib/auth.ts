@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
+import { ensureUsersTable, sql } from './db'
 
 export const SESSION_COOKIE = 'session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days
@@ -7,6 +8,7 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days
 export interface SessionPayload {
   sub: number
   email: string
+  tokenVersion: number
 }
 
 function getAuthSecret(): string {
@@ -55,12 +57,13 @@ export function verifySession(token: string): SessionPayload | null {
     if (
       typeof payload.sub !== 'number' ||
       typeof payload.email !== 'string' ||
+      typeof payload.tokenVersion !== 'number' ||
       typeof payload.exp !== 'number' ||
       Date.now() > payload.exp
     ) {
       return null
     }
-    return { sub: payload.sub, email: payload.email }
+    return { sub: payload.sub, email: payload.email, tokenVersion: payload.tokenVersion }
   } catch {
     return null
   }
@@ -104,9 +107,31 @@ export function readSessionCookie(req: IncomingMessage): string | undefined {
   return parseCookieHeader(header)[SESSION_COOKIE]
 }
 
-export function getSessionUser(req: IncomingMessage): SessionPayload | null {
+// Beyond the signature/expiry check in verifySession, this also confirms
+// the cookie's tokenVersion still matches the user's *current* token_version
+// in the DB. api/auth/reset-password.ts bumps that column on every
+// successful reset, so every cookie signed before the reset — on any
+// device — fails this check from that moment on, even though its signature
+// and expiry are still otherwise valid. This is the only invalidation path:
+// sessions are stateless (never stored server-side), so there is no session
+// row to delete.
+export async function getSessionUser(req: IncomingMessage): Promise<SessionPayload | null> {
   const token = readSessionCookie(req)
-  return token ? verifySession(token) : null
+  if (!token) return null
+
+  const payload = verifySession(token)
+  if (!payload) return null
+
+  await ensureUsersTable()
+  const result = await sql<{ token_version: number }>`
+    SELECT token_version FROM users WHERE id = ${payload.sub}
+  `
+  const currentVersion = result.rows[0]?.token_version
+  if (currentVersion === undefined || currentVersion !== payload.tokenVersion) {
+    return null
+  }
+
+  return payload
 }
 
 export function buildSessionCookie(token: string): string {
