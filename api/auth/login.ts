@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await ensureUsersTable()
 
     const result = await sql<UserRow>`
-      SELECT id, email, password_hash FROM users WHERE email = ${normalizedEmail}
+      SELECT id, email, password_hash, token_version FROM users WHERE email = ${normalizedEmail}
     `
     const user = result.rows[0]
 
@@ -37,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
-    const token = signSession({ sub: user.id, email: user.email })
+    const token = signSession({ sub: user.id, email: user.email, tokenVersion: user.token_version })
     res.setHeader('Set-Cookie', buildSessionCookie(token))
     res.status(200).json({ user: { id: user.id, email: user.email } })
   } catch (err) {

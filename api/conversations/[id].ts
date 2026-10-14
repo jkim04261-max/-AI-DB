@@ -168,7 +168,7 @@ export const config = { maxDuration: 90 }
 // [id] existed as both a file and a sibling directory — merging removes any
 // chance of that ambiguity.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const session = getSessionUser(req)
+  const session = await getSessionUser(req)
   if (!session) {
     res.status(401).json({ error: '로그인이 필요해요.' })
     return

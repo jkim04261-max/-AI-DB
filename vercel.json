@@ -1,6 +1,8 @@
 {
   "framework": "vite",
   "routes": [
+    { "src": "/api/auth/request-password-reset", "dest": "/api/auth/password-reset?action=request" },
+    { "src": "/api/auth/reset-password", "dest": "/api/auth/password-reset?action=reset" },
     { "handle": "filesystem" },
     { "src": "^(?!/api/).*", "dest": "/index.html" }
   ]

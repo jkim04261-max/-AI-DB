@@ -39,14 +39,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const inserted = await sql<{ id: number; email: string }>`
+    const inserted = await sql<{ id: number; email: string; token_version: number }>`
       INSERT INTO users (email, password_hash)
       VALUES (${normalizedEmail}, ${passwordHash})
-      RETURNING id, email
+      RETURNING id, email, token_version
     `
     const user = inserted.rows[0]
 
-    const token = signSession({ sub: user.id, email: user.email })
+    const token = signSession({ sub: user.id, email: user.email, tokenVersion: user.token_version })
     res.setHeader('Set-Cookie', buildSessionCookie(token))
     res.status(201).json({ user })
   } catch (err) {

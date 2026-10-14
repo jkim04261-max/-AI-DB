@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const session = getSessionUser(req)
+  const session = await getSessionUser(req)
   if (!session) {
     res.status(401).json({ error: '로그인이 필요해요.' })
     return
