@@ -16,9 +16,11 @@ const state = {
   messages: [], // { id, conversation_id, role, content, ai_provider, is_error, client_request_id }
   attachments: [], // { message_id, position, url, mime_type, name }
   dailyUsage: new Map(), // `${userId}|${date}` -> { used_count }
+  passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
   nextUserId: 1,
   nextMessageId: 1,
   nextConversationId: 1,
+  nextTokenId: 1,
   fakeDateKST: '2026-01-01',
   calls: [],
 }
@@ -42,9 +44,11 @@ function reset() {
   state.messages = []
   state.attachments = []
   state.dailyUsage.clear()
+  state.passwordResetTokens = []
   state.nextUserId = 1
   state.nextMessageId = 1
   state.nextConversationId = 1
+  state.nextTokenId = 1
   state.fakeDateKST = '2026-01-01'
   state.calls = []
 }
@@ -284,6 +288,114 @@ function sql(strings, ...values) {
     if (m) {
       m.content = content
       m.is_error = isError
+    }
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- conversations/[id].ts handleGet: messages LEFT JOIN attachments ---
+  if (has(text, 'SELECT m.id AS message_id')) {
+    const [convId] = values
+    const rows = []
+    for (const m of state.messages.filter((m) => m.conversation_id === convId)) {
+      const atts = state.attachments.filter((a) => a.message_id === m.id).sort((a, b) => a.position - b.position)
+      if (atts.length === 0) {
+        rows.push({
+          message_id: m.id,
+          role: m.role,
+          content: m.content,
+          ai_provider: m.ai_provider,
+          is_error: m.is_error,
+          attachment_url: null,
+          attachment_mime_type: null,
+          attachment_name: null,
+        })
+      } else {
+        for (const a of atts) {
+          rows.push({
+            message_id: m.id,
+            role: m.role,
+            content: m.content,
+            ai_provider: m.ai_provider,
+            is_error: m.is_error,
+            attachment_url: a.url,
+            attachment_mime_type: a.mime_type,
+            attachment_name: a.name,
+          })
+        }
+      }
+    }
+    return Promise.resolve({ rows })
+  }
+
+  // --- password-reset.ts: request action ---
+  if (has(text, 'SELECT id, email FROM users WHERE email')) {
+    const id = state.usersByEmail.get(values[0])
+    const u = id != null ? state.users.get(id) : undefined
+    return Promise.resolve({ rows: u ? [{ id: u.id, email: u.email }] : [] })
+  }
+
+  if (has(text, 'SELECT created_at FROM password_reset_tokens')) {
+    const [userId] = values
+    const rows = state.passwordResetTokens
+      .filter((t) => t.user_id === userId)
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, 1)
+      .map((t) => ({ created_at: new Date(t.created_at).toISOString() }))
+    return Promise.resolve({ rows })
+  }
+
+  if (has(text, 'UPDATE password_reset_tokens SET used_at', 'user_id', 'used_at IS NULL')) {
+    const [userId] = values
+    for (const t of state.passwordResetTokens) {
+      if (t.user_id === userId && t.used_at === null) t.used_at = Date.now()
+    }
+    return Promise.resolve({ rows: [] })
+  }
+
+  if (has(text, 'INSERT INTO password_reset_tokens')) {
+    const [userId, tokenHash, expiresAt] = values
+    const id = state.nextTokenId++
+    state.passwordResetTokens.push({
+      id,
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: new Date(expiresAt).getTime(),
+      used_at: null,
+      created_at: Date.now(),
+    })
+    return Promise.resolve({ rows: [] })
+  }
+
+  if (has(text, 'SELECT id, user_id, expires_at, used_at FROM password_reset_tokens')) {
+    const [tokenHash] = values
+    const row = state.passwordResetTokens.find((t) => t.token_hash === tokenHash)
+    return Promise.resolve({
+      rows: row
+        ? [
+            {
+              id: row.id,
+              user_id: row.user_id,
+              expires_at: new Date(row.expires_at).toISOString(),
+              used_at: row.used_at === null ? null : new Date(row.used_at).toISOString(),
+            },
+          ]
+        : [],
+    })
+  }
+
+  if (has(text, 'UPDATE password_reset_tokens SET used_at', 'WHERE id')) {
+    const [tokenId] = values
+    const row = state.passwordResetTokens.find((t) => t.id === tokenId)
+    if (row) row.used_at = Date.now()
+    return Promise.resolve({ rows: [] })
+  }
+
+  if (has(text, 'UPDATE users SET password_hash')) {
+    const [passwordHash, userId] = values
+    const u = state.users.get(userId)
+    if (u) {
+      u.password_hash = passwordHash
+      u.token_version += 1
     }
     return Promise.resolve({ rows: [] })
   }

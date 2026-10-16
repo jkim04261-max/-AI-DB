@@ -7,6 +7,8 @@ const bcrypt = require('bcryptjs')
 const { bundle } = require('./bundle.cjs')
 const { mockRes, cookieHeaderFor, Tracker } = require('./helpers.cjs')
 
+const TRUSTED_BLOB_HOST = 'https://x.public.blob.vercel-storage.com'
+
 async function run() {
   process.env.AUTH_SECRET = 'test-secret-for-ci-only'
   process.env.GEMINI_API_KEY = 'fake-key-for-ci-only'
@@ -17,6 +19,7 @@ async function run() {
   const loginHandler = bundle('api/auth/login.ts').default
   const signupHandler = bundle('api/auth/signup.ts').default
   const convHandler = bundle('api/conversations/[id].ts').default
+  const convIndexHandler = bundle('api/conversations/index.ts').default
 
   global.fetch = async (url) => {
     if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
@@ -154,6 +157,76 @@ async function run() {
       res,
     )
     t.assert(res.statusCode === 400, 'more than 5 attachments is rejected (400)')
+  }
+
+  // --- successful attachment: accepted, stored, and retrievable afterward ---
+  mock.reset()
+  mock.seedUser(7, { tokenVersion: 0 })
+  mock.seedConversation(700, 7)
+  {
+    const res = mockRes()
+    const cookie = cookieHeaderFor(auth, 7, 0)
+    await convHandler(
+      {
+        method: 'POST',
+        query: { id: '700' },
+        body: {
+          text: 'here is a picture',
+          attachments: [{ url: `${TRUSTED_BLOB_HOST}/a.png`, mimeType: 'image/png', name: 'a.png' }],
+        },
+        headers: { cookie, host: 'test.local' },
+      },
+      res,
+    )
+    t.assert(res.statusCode === 201, 'a valid attachment from the trusted Blob host is accepted (201)')
+    t.assert(res.body.userMessage.attachments.length === 1, 'the accepted attachment is echoed back in the response')
+  }
+  {
+    const res = mockRes()
+    const cookie = cookieHeaderFor(auth, 7, 0)
+    await convHandler({ method: 'GET', query: { id: '700' }, headers: { cookie } }, res)
+    t.assert(res.statusCode === 200, 'the conversation can be read back (200)')
+    const userMsg = res.body.conversation.messages.find((m) => m.role === 'user')
+    t.assert(userMsg?.attachments?.[0]?.url === `${TRUSTED_BLOB_HOST}/a.png`, 'the stored attachment survives a GET round trip')
+  }
+
+  // --- conversation list and creation (api/conversations/index.ts) ---
+  mock.reset()
+  mock.seedUser(8, { tokenVersion: 0 })
+  {
+    const cookie = cookieHeaderFor(auth, 8, 0)
+    const createRes = mockRes()
+    await convIndexHandler({ method: 'POST', body: { title: 'my chat' }, headers: { cookie } }, createRes)
+    t.assert(createRes.statusCode === 201, 'creating a conversation succeeds (201)')
+
+    const listRes = mockRes()
+    await convIndexHandler({ method: 'GET', body: {}, headers: { cookie } }, listRes)
+    t.assert(listRes.statusCode === 200, 'listing conversations succeeds (200)')
+    t.assert(listRes.body.conversations.length === 1, 'the newly created conversation appears in the list')
+
+    const unauthRes = mockRes()
+    await convIndexHandler({ method: 'GET', body: {}, headers: {} }, unauthRes)
+    t.assert(unauthRes.statusCode === 401, 'listing conversations without a session is rejected (401)')
+  }
+
+  // --- conversation delete scoped to owner ---
+  mock.reset()
+  mock.seedUser(9, { tokenVersion: 0 })
+  mock.seedUser(10, { tokenVersion: 0 })
+  mock.seedConversation(900, 9)
+  {
+    const otherCookie = cookieHeaderFor(auth, 10, 0)
+    const res = mockRes()
+    await convHandler({ method: 'DELETE', query: { id: '900' }, headers: { cookie: otherCookie } }, res)
+    t.assert(res.statusCode === 404, "a different account can't delete someone else's conversation (404)")
+    t.assert(mock.state.conversations.has(900), 'the conversation still exists after the rejected delete attempt')
+  }
+  {
+    const ownerCookie = cookieHeaderFor(auth, 9, 0)
+    const res = mockRes()
+    await convHandler({ method: 'DELETE', query: { id: '900' }, headers: { cookie: ownerCookie } }, res)
+    t.assert(res.statusCode === 200, 'the owner can delete their own conversation (200)')
+    t.assert(!mock.state.conversations.has(900), 'the conversation is actually removed')
   }
 
   return t.summary()
