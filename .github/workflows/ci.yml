@@ -36,3 +36,26 @@ jobs:
 
       - name: Test
         run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The runner has no browser pre-installed (unlike the local sandbox
+      # used to develop these tests), so Chromium is downloaded here. This
+      # is the only part of the E2E job with a real added cost: extra
+      # download time per run, no paid API/service usage (every e2e/*.spec.ts
+      # test mocks all /api/** calls — see e2e/README.md).
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run test:e2e

@@ -64,7 +64,9 @@
 
 PR을 생성·갱신하거나 main에 push하면 `.github/workflows/ci.yml`이 자동으로 API 타입 검사, 프런트엔드 타입 검사·빌드, lint, `npm test`(`tests/`)를 실행한다. 모두 외부 API 호출 없이(Gemini·Resend는 모의 응답으로 대체) 비용 없이 돌아간다 — `tests/README.md` 참고.
 
-새 API 핸들러나 기존 핵심 기능(로그인·Gemini·대화 저장·이미지 첨부 등)에 영향을 주는 변경을 할 때는 `tests/*.test.cjs`에 해당 동작(정상 + 실패 + 경계 조건)을 테스트로 추가하고, PR을 올리기 전에 로컬에서 `npm test`가 통과하는지 먼저 확인한다. CI가 실패한 PR은 원인을 고치지 않고 main에 병합하지 않는다.
+같은 워크플로우의 `e2e` job은 Playwright로 실제 브라우저(Chromium)에서 로그인 화면, 대화 입력·전송·응답, 새로고침 후 유지, 이미지 첨부·삭제 UI, 모바일 화면 같은 핵심 사용자 흐름을 검증한다. 이 job도 모든 `/api/**` 호출을 모의 응답으로 가로채 실제 DB·Gemini·Blob을 건드리지 않는다 — `e2e/README.md` 참고. 다만 매 실행마다 러너에 Chromium을 새로 내려받으므로(`npx playwright install --with-deps chromium`) `checks` job보다 실행 시간이 더 걸린다.
+
+새 API 핸들러나 기존 핵심 기능(로그인·Gemini·대화 저장·이미지 첨부 등)에 영향을 주는 변경을 할 때는 `tests/*.test.cjs`에 해당 동작(정상 + 실패 + 경계 조건)을 테스트로 추가하고, 실제 브라우저 화면·흐름에 영향을 주는 변경이면 `e2e/*.spec.ts`에도 추가한다. PR을 올리기 전에 로컬에서 `npm test`와 `npm run test:e2e`가 모두 통과하는지 먼저 확인한다. CI가 실패한 PR은 원인을 고치지 않고 main에 병합하지 않는다.
 
 ## 8. DB 구조에 큰 영향을 주는 기능은 화면 코딩부터 시작하지 않는다
 
