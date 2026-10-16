@@ -1,0 +1,38 @@
+name: CI
+
+# Runs on every PR targeting main (open, new commits, reopen) and on
+# direct pushes to main, so a change is checked both before and after it
+# lands. No repository secrets are required — every external call (Gemini,
+# Resend) a test exercises is mocked in tests/*.test.cjs, and api/*.ts
+# itself only needs real env vars (AUTH_SECRET, GEMINI_API_KEY, Postgres)
+# at actual runtime on Vercel, never at type-check/build/test time here.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck API
+        run: npm run typecheck:api
+
+      - name: Typecheck + build frontend
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
