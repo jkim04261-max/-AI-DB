@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { MoreHorizontal, RotateCcw, Sparkles, Trash2, User } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
+import { useAuth } from '../context/AuthContext'
 import type { ChatAttachment } from '../data/chats'
 import MarkdownMessage from '../components/MarkdownMessage'
 import ChatInput from '../components/ChatInput'
@@ -12,6 +13,7 @@ export default function ChatPage() {
   const navigate = useNavigate()
   const { getChat, sendMessage, loadConversation, pendingIds, retryLastMessage, deleteChat } =
     useChats()
+  const { dailyQuestionLimit, remainingQuestions } = useAuth()
   const [attachError, setAttachError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -198,6 +200,14 @@ export default function ChatPage() {
       </div>
 
       {attachError && <p className="mb-2 text-xs text-red-500">{attachError}</p>}
+
+      {dailyQuestionLimit != null && remainingQuestions != null && (
+        <p className="mb-2 text-center text-xs text-slate-400">
+          {remainingQuestions > 0
+            ? `오늘 남은 무료 질문: ${remainingQuestions}/${dailyQuestionLimit}`
+            : '오늘의 무료 질문 10회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.'}
+        </p>
+      )}
 
       <div className="mb-4">
         <ChatInput onSendMessage={handleSend} isLoading={isBusy} />

@@ -40,7 +40,7 @@ interface ChatContextValue {
 const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, setRemainingQuestions } = useAuth()
   const navigate = useNavigate()
   const [chats, setChats] = useState<ChatItem[]>([])
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
@@ -142,25 +142,43 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       )
       setPending(id, true)
 
+      // A fresh key per send attempt — if this exact request somehow
+      // reaches the server twice (e.g. a retried fetch after a dropped
+      // response), the server recognizes the repeat and returns the
+      // original result instead of answering (and charging) twice.
+      const requestId = crypto.randomUUID()
+
       fetch(`/api/conversations/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, attachments }),
+        body: JSON.stringify({ text, attachments, requestId }),
       })
         .then(async (res) => {
           const data = (await res.json().catch(() => ({}))) as {
             aiMessage?: ChatMessage
             error?: string
+            remaining?: number
+          }
+          if (res.status === 429) {
+            // Daily free-question limit reached — a policy notice, not a
+            // failed Gemini call, so it's appended without `error` (no
+            // "다시 시도" button, since retrying can't succeed today).
+            setRemainingQuestions(0)
+            appendAiReply(id, data.error || '오늘의 무료 질문을 모두 사용했어요.', false)
+            return
           }
           if (!res.ok || !data.aiMessage) {
             throw new Error(data.error || 'Gemini 응답을 받지 못했어요.')
+          }
+          if (typeof data.remaining === 'number') {
+            setRemainingQuestions(data.remaining)
           }
           appendAiReply(id, data.aiMessage.text, data.aiMessage.error)
         })
         .catch((err: Error) => appendAiReply(id, err.message, true))
         .finally(() => setPending(id, false))
     },
-    [appendAiReply, setPending],
+    [appendAiReply, setPending, setRemainingQuestions],
   )
 
   // Replaces the last message (the failed AI reply) rather than appending,
@@ -201,16 +219,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const data = (await res.json().catch(() => ({}))) as {
             aiMessage?: ChatMessage
             error?: string
+            remaining?: number
+          }
+          if (res.status === 429) {
+            setRemainingQuestions(0)
+            replaceLastAiReply(id, data.error || '오늘의 무료 질문을 모두 사용했어요.', false)
+            return
           }
           if (!res.ok || !data.aiMessage) {
             throw new Error(data.error || 'Gemini 응답을 받지 못했어요.')
+          }
+          if (typeof data.remaining === 'number') {
+            setRemainingQuestions(data.remaining)
           }
           replaceLastAiReply(id, data.aiMessage.text, data.aiMessage.error)
         })
         .catch((err: Error) => replaceLastAiReply(id, err.message, true))
         .finally(() => setPending(id, false))
     },
-    [chats, replaceLastAiReply, setPending],
+    [chats, replaceLastAiReply, setPending, setRemainingQuestions],
   )
 
   // Returns whether the delete succeeded so the caller (the confirm dialog)

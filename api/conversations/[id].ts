@@ -13,6 +13,14 @@ import {
   getGeminiReply,
   type GeminiImageAttachment,
 } from '../_lib/gemini'
+import {
+  DAILY_QUESTION_LIMIT,
+  ensureDailyUsageTable,
+  isDailyLimitEnabled,
+  refundQuestion,
+  reserveQuestion,
+  type ReserveResult,
+} from '../_lib/dailyLimit'
 
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   'image/png',
@@ -288,16 +296,82 @@ async function handleGet(_req: VercelRequest, res: VercelResponse, id: number, u
   }
 }
 
+const DAILY_LIMIT_REACHED_MESSAGE =
+  '오늘의 무료 질문 10회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.'
+
+interface ReplayResult {
+  userMessage: { role: 'user'; text: string; attachments: IncomingAttachment[] }
+  aiMessage: { role: 'ai'; ai: string; text: string; error: boolean }
+}
+
+// If `requestId` was already fully processed for this conversation (a user
+// message row carrying it, plus the AI reply that followed), returns that
+// same result instead of letting the caller insert a duplicate user message
+// and reserve a second question for what is really one request replayed —
+// by a flaky network retry, a double-tapped send button, etc. Returns null
+// for "not seen before" (the normal case), so the caller proceeds as usual.
+async function findReplay(conversationId: number, requestId: string): Promise<ReplayResult | null> {
+  const userRow = await sql<{ id: number; content: string }>`
+    SELECT id, content FROM messages
+    WHERE conversation_id = ${conversationId} AND client_request_id = ${requestId} AND role = 'user'
+  `
+  const userMessage = userRow.rows[0]
+  if (!userMessage) return null
+
+  const attachmentsResult = await sql<MessageAttachmentRow>`
+    SELECT message_id, position, url, mime_type, name
+    FROM message_attachments
+    WHERE message_id = ${userMessage.id}
+    ORDER BY position
+  `
+  const attachments: IncomingAttachment[] = attachmentsResult.rows.map((a) => ({
+    url: a.url,
+    mimeType: a.mime_type ?? '',
+    name: a.name ?? '',
+  }))
+
+  const aiRow = await sql<{ content: string; ai_provider: string | null; is_error: boolean }>`
+    SELECT content, ai_provider, is_error FROM messages
+    WHERE conversation_id = ${conversationId} AND role = 'ai' AND id > ${userMessage.id}
+    ORDER BY id ASC
+    LIMIT 1
+  `
+  const aiMessage = aiRow.rows[0]
+  // No AI reply yet almost certainly means the earlier request never
+  // finished (e.g. the function crashed between the two inserts) rather
+  // than "still in flight" — a single request handles both inserts
+  // synchronously. Returning null here means the retry falls through to
+  // the normal insert path, which will hit the unique index on
+  // (conversation_id, client_request_id) and fail with a clean 500 rather
+  // than silently reprocessing — rare enough not to special-case further.
+  if (!aiMessage) return null
+
+  return {
+    userMessage: { role: 'user', text: userMessage.content, attachments },
+    aiMessage: {
+      role: 'ai',
+      ai: aiMessage.ai_provider ?? 'Gemini',
+      text: aiMessage.content,
+      error: aiMessage.is_error,
+    },
+  }
+}
+
 async function handlePost(req: VercelRequest, res: VercelResponse, id: number, userId: number) {
-  const { text, attachments } = (req.body ?? {}) as {
+  const { text, attachments, requestId: rawRequestId } = (req.body ?? {}) as {
     text?: unknown
     attachments?: unknown
+    requestId?: unknown
   }
   if (typeof text !== 'string') {
     res.status(400).json({ error: '메시지를 입력해주세요.' })
     return
   }
   const messageText = text.trim()
+  // Client-generated idempotency key (see findReplay above). Absent or
+  // malformed is treated as "no key" — the request is processed normally,
+  // it just isn't protected against being replayed.
+  const requestId = typeof rawRequestId === 'string' && rawRequestId ? rawRequestId : null
 
   const incomingAttachments = parseIncomingAttachments(attachments)
   if (incomingAttachments === null) {
@@ -324,6 +398,36 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
       return
     }
 
+    const limitEnabled = isDailyLimitEnabled()
+
+    if (limitEnabled && requestId) {
+      await ensureDailyUsageTable()
+      const replay = await findReplay(id, requestId)
+      if (replay) {
+        res.status(201).json(replay)
+        return
+      }
+    }
+
+    // Reserved *before* anything else is written, so a request that's over
+    // the daily cap leaves no trace (no user message row, no attachment
+    // rows) instead of saving a question that will never get an answer.
+    // If this throws (DB outage, etc.), the outer catch below rejects the
+    // request with a 500 — Gemini is never reached, so a DB failure here
+    // can't result in unmetered calls.
+    let reserved: ReserveResult | null = null
+    if (limitEnabled) {
+      reserved = await reserveQuestion(userId)
+      if (!reserved.ok) {
+        res.status(429).json({
+          error: DAILY_LIMIT_REACHED_MESSAGE,
+          remaining: 0,
+          dailyQuestionLimit: DAILY_QUESTION_LIMIT,
+        })
+        return
+      }
+    }
+
     // Cap what we send Gemini as context to the most recent messages: an
     // unbounded history means both the DB round trip and the prompt (and
     // so Gemini's response time) grow with every message a conversation
@@ -339,12 +443,28 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     `
     const history = historyResult.rows.map((m) => ({ role: m.role, text: m.content }))
 
-    const insertResult = await sql<{ id: number }>`
-      INSERT INTO messages (conversation_id, role, content)
-      VALUES (${id}, 'user', ${messageText})
-      RETURNING id
-    `
-    const userMessageId = insertResult.rows[0].id
+    // Two separate INSERTs (rather than one with a conditionally-included
+    // column) so this never references messages.client_request_id unless
+    // the feature flag is on — that column only exists once
+    // ensureDailyUsageTable() has run at least once, which only happens
+    // when limitEnabled is true. With the flag off, a fresh database that
+    // has never had it on must still be able to insert a plain message.
+    let userMessageId: number
+    if (limitEnabled) {
+      const insertResult = await sql<{ id: number }>`
+        INSERT INTO messages (conversation_id, role, content, client_request_id)
+        VALUES (${id}, 'user', ${messageText}, ${requestId})
+        RETURNING id
+      `
+      userMessageId = insertResult.rows[0].id
+    } else {
+      const insertResult = await sql<{ id: number }>`
+        INSERT INTO messages (conversation_id, role, content)
+        VALUES (${id}, 'user', ${messageText})
+        RETURNING id
+      `
+      userMessageId = insertResult.rows[0].id
+    }
     for (const [position, a] of incomingAttachments.entries()) {
       await sql`
         INSERT INTO message_attachments (message_id, position, url, mime_type, name)
@@ -360,6 +480,11 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     } catch (err) {
       isError = true
       replyText = resolveGeminiFailureMessage(err)
+      // The question wasn't actually answered, so it shouldn't count
+      // against today's limit — give the reservation back.
+      if (limitEnabled && reserved) {
+        await refundQuestion(userId)
+      }
     }
 
     await sql`
@@ -368,10 +493,23 @@ async function handlePost(req: VercelRequest, res: VercelResponse, id: number, u
     `
     await sql`UPDATE conversations SET updated_at = now() WHERE id = ${id}`
 
-    res.status(201).json({
+    const responseBody: {
+      userMessage: { role: 'user'; text: string; attachments: IncomingAttachment[] }
+      aiMessage: { role: 'ai'; ai: string; text: string; error: boolean }
+      dailyQuestionLimit?: number
+      remaining?: number
+    } = {
       userMessage: { role: 'user', text: messageText, attachments: incomingAttachments },
       aiMessage: { role: 'ai', ai: 'Gemini', text: replyText, error: isError },
-    })
+    }
+    if (limitEnabled && reserved) {
+      responseBody.dailyQuestionLimit = DAILY_QUESTION_LIMIT
+      // The refund above (if it ran) already put the DB count back, so the
+      // count the client should show is one higher than what the initial
+      // reservation returned.
+      responseBody.remaining = isError ? reserved.remaining + 1 : reserved.remaining
+    }
+    res.status(201).json(responseBody)
   } catch (err) {
     console.error('[api/conversations/[id]] unexpected error', err)
     res.status(500).json({ error: '메시지를 처리하는 중 오류가 발생했어요.' })
@@ -411,6 +549,25 @@ async function handleRetry(res: VercelResponse, id: number, userId: number) {
       return
     }
 
+    // Reserved only after confirming there's actually something to retry —
+    // a retry on an already-succeeded or nonexistent turn is rejected above
+    // without touching the quota. The original attempt for this same turn
+    // never counted (it failed, and handlePost refunds on failure), so this
+    // reservation is for that same logical question, not a new one.
+    const limitEnabled = isDailyLimitEnabled()
+    let reserved: ReserveResult | null = null
+    if (limitEnabled) {
+      reserved = await reserveQuestion(userId)
+      if (!reserved.ok) {
+        res.status(429).json({
+          error: DAILY_LIMIT_REACHED_MESSAGE,
+          remaining: 0,
+          dailyQuestionLimit: DAILY_QUESTION_LIMIT,
+        })
+        return
+      }
+    }
+
     const historyResult = await sql<Pick<MessageRow, 'role' | 'content'>>`
       SELECT role, content FROM (
         SELECT role, content, created_at, id FROM messages
@@ -442,6 +599,9 @@ async function handleRetry(res: VercelResponse, id: number, userId: number) {
     } catch (err) {
       isError = true
       replyText = resolveGeminiFailureMessage(err)
+      if (limitEnabled && reserved) {
+        await refundQuestion(userId)
+      }
     }
 
     await sql`
@@ -450,9 +610,18 @@ async function handleRetry(res: VercelResponse, id: number, userId: number) {
     `
     await sql`UPDATE conversations SET updated_at = now() WHERE id = ${id}`
 
-    res.status(200).json({
+    const responseBody: {
+      aiMessage: { role: 'ai'; ai: string; text: string; error: boolean }
+      dailyQuestionLimit?: number
+      remaining?: number
+    } = {
       aiMessage: { role: 'ai', ai: 'Gemini', text: replyText, error: isError },
-    })
+    }
+    if (limitEnabled && reserved) {
+      responseBody.dailyQuestionLimit = DAILY_QUESTION_LIMIT
+      responseBody.remaining = isError ? reserved.remaining + 1 : reserved.remaining
+    }
+    res.status(200).json(responseBody)
   } catch (err) {
     console.error('[api/conversations/[id]] unexpected error on retry', err)
     res.status(500).json({ error: '메시지를 처리하는 중 오류가 발생했어요.' })
