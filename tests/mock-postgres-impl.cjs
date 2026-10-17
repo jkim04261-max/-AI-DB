@@ -17,6 +17,8 @@ const state = {
   attachments: [], // { message_id, position, url, mime_type, name }
   dailyUsage: new Map(), // `${userId}|${date}` -> { used_count }
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
+  characters: [], // { id, user_id, companion_type, stage }
+  nextCharacterId: 1,
   nextUserId: 1,
   nextMessageId: 1,
   nextConversationId: 1,
@@ -45,6 +47,8 @@ function reset() {
   state.attachments = []
   state.dailyUsage.clear()
   state.passwordResetTokens = []
+  state.characters = []
+  state.nextCharacterId = 1
   state.nextUserId = 1
   state.nextMessageId = 1
   state.nextConversationId = 1
@@ -398,6 +402,32 @@ function sql(strings, ...values) {
       u.token_version += 1
     }
     return Promise.resolve({ rows: [] })
+  }
+
+  // --- api/character.ts: list ---
+  if (has(text, 'FROM characters')) {
+    const [userId] = values
+    const now = new Date().toISOString()
+    const rows = state.characters
+      .filter((c) => c.user_id === userId)
+      .map((c) => ({ id: c.id, user_id: c.user_id, companion_type: c.companion_type, stage: c.stage, created_at: now }))
+    return Promise.resolve({ rows })
+  }
+
+  // --- api/character.ts: create (ON CONFLICT DO NOTHING) ---
+  // 'child' is a literal in the real query (api/character.ts never takes a
+  // client-sent stage), not a bound parameter, so it's not in `values`.
+  if (has(text, 'INSERT INTO characters')) {
+    const [userId, companionType] = values
+    const stage = 'child'
+    const exists = state.characters.some((c) => c.user_id === userId && c.companion_type === companionType)
+    if (exists) return Promise.resolve({ rows: [] })
+    const id = state.nextCharacterId++
+    const now = new Date().toISOString()
+    state.characters.push({ id, user_id: userId, companion_type: companionType, stage })
+    return Promise.resolve({
+      rows: [{ id, user_id: userId, companion_type: companionType, stage, created_at: now }],
+    })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)

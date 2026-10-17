@@ -14,8 +14,8 @@
 
 ## Gemini API 연동
 
-`api/gemini.ts`는 Vercel Serverless Function으로, 브라우저가 아니라 서버에서만 Gemini API 키를 사용합니다.
-프론트엔드는 `/api/gemini`를 호출할 뿐, API 키를 직접 다루지 않습니다 — 키가 클라이언트 번들에 노출되지 않습니다.
+실제 채팅은 `api/conversations/[id].ts`가 `api/_lib/gemini.ts`를 통해 Gemini API를 호출하는 Vercel Serverless Function으로 처리합니다 — 브라우저가 아니라 서버에서만 Gemini API 키를 사용합니다.
+프론트엔드는 `/api/conversations/:id`를 호출할 뿐, API 키를 직접 다루지 않습니다 — 키가 클라이언트 번들에 노출되지 않습니다.
 
 ### 로컬 개발
 

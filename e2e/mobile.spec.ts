@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
+import { failUnmockedApiCalls, mockMe, mockEmptyCharacters } from './fixtures/mock-api'
 
 // Runs only under the `mobile-chromium` project (see playwright.config.ts),
 // which uses a phone-sized viewport/UA via devices['Pixel 7'].
@@ -11,6 +11,7 @@ test('the mobile bottom nav is visible and basic navigation works', async ({ pag
   await page.route('**/api/conversations', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
   })
+  await mockEmptyCharacters(page)
 
   await page.goto('/')
 

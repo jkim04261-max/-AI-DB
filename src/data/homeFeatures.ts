@@ -47,7 +47,7 @@ export const homeFeatures: HomeFeature[] = [
     title: 'AI 키우기',
     tag: '누리·두리',
     description: '나만의 AI를 성장시켜 보세요',
-    action: { kind: 'comingSoon' },
+    action: { kind: 'link', to: '/grow' },
   },
   {
     id: 'assistant',

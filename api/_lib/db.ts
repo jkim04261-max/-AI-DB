@@ -149,6 +149,40 @@ export function ensureConversationsTables() {
   return conversationsTablesReady
 }
 
+let characterTablesReady: Promise<unknown> | null = null
+
+// One row per character a user has started growing. `companion_type` fixes
+// which of the two fixed companions (누리/두리) the row is — a user may
+// have at most one of each (see the UNIQUE constraint), never two of the
+// same. `stage` starts at 'child' for every account today: there is no
+// payment/plan system yet, so nothing can create a character as 'adult' —
+// see api/character.ts, which never reads a client-sent stage at all.
+export function ensureCharacterTables() {
+  if (!characterTablesReady) {
+    characterTablesReady = (async () => {
+      await ensureUsersTable()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS characters (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          companion_type TEXT NOT NULL CHECK (companion_type IN ('nuri', 'duri')),
+          stage TEXT NOT NULL DEFAULT 'child' CHECK (stage IN ('child', 'adult')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (user_id, companion_type)
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS characters_user_id_idx ON characters (user_id)
+      `
+    })().catch((err) => {
+      characterTablesReady = null
+      throw err
+    })
+  }
+  return characterTablesReady
+}
+
 export { sql }
 
 export interface UserRow {
@@ -198,4 +232,12 @@ export interface MessageAttachmentRow {
   url: string
   mime_type: string | null
   name: string | null
+}
+
+export interface CharacterRow {
+  id: number
+  user_id: number
+  companion_type: 'nuri' | 'duri'
+  stage: 'child' | 'adult'
+  created_at: string
 }
