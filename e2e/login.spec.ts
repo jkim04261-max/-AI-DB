@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { failUnmockedApiCalls, mockMe, mockLogin } from './fixtures/mock-api'
+import { failUnmockedApiCalls, mockMe, mockLogin, mockEmptyCharacters } from './fixtures/mock-api'
 
 // Every scenario here is mocked — no real /api/auth/* call reaches a
 // network, Postgres, or AUTH_SECRET. See e2e/README.md.
@@ -48,6 +48,8 @@ test.describe('login', () => {
     await page.route('**/api/conversations', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
     })
+    // GrowthProvider does the same for /api/character.
+    await mockEmptyCharacters(page)
 
     await page.goto('/login')
     await page.getByPlaceholder('이메일').fill('alice@test.com')

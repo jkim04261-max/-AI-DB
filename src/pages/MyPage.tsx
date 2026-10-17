@@ -1,14 +1,19 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Crown, LogOut, LogIn, UserPlus, MessageSquare, Trash2 } from 'lucide-react'
+import { User, Crown, LogOut, LogIn, UserPlus, MessageSquare, Trash2, Sprout } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useChats } from '../context/ChatContext'
+import { useGrowth } from '../context/GrowthContext'
 import { useComingSoonNotice } from '../lib/comingSoon'
 import ComingSoonToast from '../components/ComingSoonToast'
+
+const COMPANION_LABEL = { nuri: '누리', duri: '두리' } as const
+const STAGE_LABEL = { child: '어린이', adult: '성인' } as const
 
 export default function MyPage() {
   const { user, loading, logout, deleteAccount } = useAuth()
   const { chats } = useChats()
+  const { characters } = useGrowth()
   const navigate = useNavigate()
   const { notice, showComingSoon } = useComingSoonNotice()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -108,6 +113,36 @@ export default function MyPage() {
           className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
         >
           내 대화 보기
+        </button>
+      </div>
+
+      {/* 내 AI (누리·두리) */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5">
+        <h2 className="text-sm font-semibold text-slate-700">내 AI</h2>
+        {characters.length === 0 ? (
+          <p className="text-sm text-slate-400">아직 키우고 있는 AI가 없어요.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {characters.map((character) => (
+              <div key={character.id} className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500">
+                  <Sprout size={18} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {COMPANION_LABEL[character.companionType]}
+                  </p>
+                  <p className="text-xs text-slate-400">{STAGE_LABEL[character.stage]}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => navigate('/grow')}
+          className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          AI 키우기로 이동
         </button>
       </div>
 

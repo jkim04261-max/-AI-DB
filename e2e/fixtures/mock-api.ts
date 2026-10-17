@@ -25,6 +25,16 @@ export async function mockMe(page: Page, body: MeResponse) {
   })
 }
 
+// GrowthProvider mounts at the app root (src/main.tsx) alongside
+// ChatProvider, so it fetches /api/character as soon as `user` is set,
+// regardless of which page is open — any test that mocks a signed-in user
+// needs this mocked too, exactly like /api/conversations.
+export async function mockEmptyCharacters(page: Page) {
+  await page.route('**/api/character', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+  })
+}
+
 // ChatPage redirects to /chat (`<Navigate to="/chat" replace />`) whenever
 // `getChat(id)` doesn't find the conversation yet — which is always true on
 // the very first render, since ChatProvider's conversation-list fetch is
@@ -34,6 +44,7 @@ export async function mockMe(page: Page, body: MeResponse) {
 // list is already loaded, so this helper reproduces that same real path:
 // load the list first, then navigate in via the actual link.
 export async function openChat(page: Page, id: number | string) {
+  await mockEmptyCharacters(page)
   await page.goto('/chat')
   const link = page.locator(`a[href="/chat/${id}"]`)
   await link.waitFor()
