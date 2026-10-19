@@ -3,12 +3,16 @@ import { ensureCharacterTables, sql, type CharacterRow } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
+// PR #43's first two supported professions. Extending this later (e.g. a
+// third job) is a one-line change here — a plain nullable column, not a
+// separate table, so no migration is needed either.
+const PROFESSIONS = new Set(['accountant', 'singer'])
 
-// GET lists the caller's characters; POST creates one. Both live in one
-// file (the same "merge instead of add a new endpoint file" pattern as
-// api/conversations/[id].ts and api/auth/password-reset.ts) because the
-// Vercel Hobby plan caps this project at 12 serverless functions — see
-// docs/design/PR41-plan.md.
+// GET lists the caller's characters; POST creates one; PATCH sets/changes
+// a character's profession. All three live in one file (the same "merge
+// instead of add a new endpoint file" pattern as api/conversations/[id].ts
+// and api/auth/password-reset.ts) because the Vercel Hobby plan caps this
+// project at 12 serverless functions — see docs/design/PR41-plan.md.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const session = await getSessionUser(req)
   if (!session) {
@@ -26,6 +30,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  if (req.method === 'PATCH') {
+    await handlePatch(req, res, session.sub)
+    return
+  }
+
   res.status(405).json({ error: 'Method not allowed' })
 }
 
@@ -34,7 +43,7 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, created_at
+      SELECT id, user_id, companion_type, stage, profession, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
@@ -66,7 +75,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, created_at
+      RETURNING id, user_id, companion_type, stage, profession, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -78,5 +87,48 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
   } catch (err) {
     console.error('[api/character] unexpected error on POST', err)
     res.status(500).json({ error: '캐릭터를 만드는 중 오류가 발생했어요.' })
+  }
+}
+
+// Sets or changes which profession a character has — never touches the
+// character row itself beyond that one column, so this can never delete or
+// reset a character (matches the "직업 변경 시 캐릭터 자체는 삭제하지
+// 않는다" requirement). `companionType` + `userId` together are both the
+// ownership check and the update target in one round trip, the same
+// pattern handlePost's insert and api/conversations/[id].ts's delete use —
+// a request naming another user's character simply matches no row.
+async function handlePatch(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, profession } = (req.body ?? {}) as {
+    companionType?: unknown
+    profession?: unknown
+  }
+  if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) {
+    res.status(400).json({ error: '누리 또는 두리 중 하나를 선택해주세요.' })
+    return
+  }
+  if (typeof profession !== 'string' || !PROFESSIONS.has(profession)) {
+    res.status(400).json({ error: '회계사 또는 가수 중 하나를 선택해주세요.' })
+    return
+  }
+
+  try {
+    await ensureCharacterTables()
+
+    const updated = await sql<CharacterRow>`
+      UPDATE characters
+      SET profession = ${profession}
+      WHERE user_id = ${userId} AND companion_type = ${companionType}
+      RETURNING id, user_id, companion_type, stage, profession, created_at
+    `
+    const character = updated.rows[0]
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    res.status(200).json({ character })
+  } catch (err) {
+    console.error('[api/character] unexpected error on PATCH', err)
+    res.status(500).json({ error: '직업을 저장하는 중 오류가 발생했어요.' })
   }
 }

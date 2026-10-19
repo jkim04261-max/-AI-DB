@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
+import type { ProfessionId } from '../data/characterProfessions'
 
 export type CompanionType = 'nuri' | 'duri'
 
@@ -7,6 +8,7 @@ export interface Character {
   id: number
   companionType: CompanionType
   stage: 'child' | 'adult'
+  profession: ProfessionId | null
   createdAt: string
 }
 
@@ -14,17 +16,25 @@ interface GrowthContextValue {
   characters: Character[]
   loading: boolean
   createCharacter: (companionType: CompanionType) => Promise<void>
+  setProfession: (companionType: CompanionType, profession: ProfessionId) => Promise<void>
 }
 
 interface CharacterApiRow {
   id: number
   companion_type: CompanionType
   stage: 'child' | 'adult'
+  profession: ProfessionId | null
   created_at: string
 }
 
 function fromApiRow(row: CharacterApiRow): Character {
-  return { id: row.id, companionType: row.companion_type, stage: row.stage, createdAt: row.created_at }
+  return {
+    id: row.id,
+    companionType: row.companion_type,
+    stage: row.stage,
+    profession: row.profession,
+    createdAt: row.created_at,
+  }
 }
 
 const GrowthContext = createContext<GrowthContextValue | null>(null)
@@ -78,8 +88,22 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     setCharacters((prev) => [...prev, created])
   }, [])
 
+  const setProfession = useCallback(async (companionType: CompanionType, profession: ProfessionId) => {
+    const res = await fetch('/api/character', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companionType, profession }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
+    if (!res.ok || !data.character) {
+      throw new Error(data.error || '직업을 저장하는 중 오류가 발생했어요.')
+    }
+    const updated = fromApiRow(data.character)
+    setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? updated : c)))
+  }, [])
+
   return (
-    <GrowthContext.Provider value={{ characters, loading, createCharacter }}>
+    <GrowthContext.Provider value={{ characters, loading, createCharacter, setProfession }}>
       {children}
     </GrowthContext.Provider>
   )

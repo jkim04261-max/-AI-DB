@@ -6,6 +6,7 @@ import { useChats } from '../context/ChatContext'
 import { useGrowth } from '../context/GrowthContext'
 import { useComingSoonNotice } from '../lib/comingSoon'
 import ComingSoonToast from '../components/ComingSoonToast'
+import { PROFESSION_LABEL } from '../data/characterProfessions'
 
 const COMPANION_LABEL = { nuri: '누리', duri: '두리' } as const
 const STAGE_LABEL = { child: '어린이', adult: '성인' } as const
@@ -132,7 +133,10 @@ export default function MyPage() {
                   <p className="text-sm font-semibold text-slate-900">
                     {COMPANION_LABEL[character.companionType]}
                   </p>
-                  <p className="text-xs text-slate-400">{STAGE_LABEL[character.stage]}</p>
+                  <p className="text-xs text-slate-400">
+                    {STAGE_LABEL[character.stage]} ·{' '}
+                    {character.profession ? PROFESSION_LABEL[character.profession] : '직업 미선택'}
+                  </p>
                 </div>
               </div>
             ))}
