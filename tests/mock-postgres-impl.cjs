@@ -16,8 +16,11 @@ const state = {
   messages: [], // { id, conversation_id, role, content, ai_provider, is_error, client_request_id }
   attachments: [], // { message_id, position, url, mime_type, name }
   dailyUsage: new Map(), // `${userId}|${date}` -> { used_count }
+  teachUsage: new Map(), // `${userId}|${date}` -> { used_count }
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
   characters: [], // { id, user_id, companion_type, stage }
+  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id }
+  nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
   nextMessageId: 1,
@@ -46,8 +49,11 @@ function reset() {
   state.messages = []
   state.attachments = []
   state.dailyUsage.clear()
+  state.teachUsage.clear()
   state.passwordResetTokens = []
   state.characters = []
+  state.knowledgeEntries = []
+  state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
   state.nextMessageId = 1
@@ -418,6 +424,21 @@ function sql(strings, ...values) {
     })
   }
 
+  // --- api/character.ts: findOwnCharacter (verify/save/list-knowledge's
+  // shared ownership lookup) — checked before the generic 'FROM characters'
+  // list matcher below, since that one only filters by user_id and would
+  // otherwise return the wrong character when a user has both 누리 and 두리.
+  if (has(text, 'FROM characters', 'companion_type =')) {
+    const [userId, companionType] = values
+    const row = state.characters.find((c) => c.user_id === userId && c.companion_type === companionType)
+    const now = new Date().toISOString()
+    return Promise.resolve({
+      rows: row
+        ? [{ id: row.id, user_id: row.user_id, companion_type: row.companion_type, stage: row.stage, profession: row.profession, created_at: now }]
+        : [],
+    })
+  }
+
   // --- api/character.ts: list ---
   if (has(text, 'FROM characters')) {
     const [userId] = values
@@ -442,6 +463,84 @@ function sql(strings, ...values) {
     return Promise.resolve({
       rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, created_at: now }],
     })
+  }
+
+  // --- api/_lib/knowledgeLimit.ts: reserveTeach (atomic conditional upsert,
+  // same shape as daily_question_usage above but a fully separate table) ---
+  if (has(text, 'INSERT INTO daily_teach_usage')) {
+    const [userId, limit] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.teachUsage.get(key)
+    if (!row) {
+      state.teachUsage.set(key, { used_count: 1 })
+      return Promise.resolve({ rows: [{ used_count: 1 }] })
+    }
+    if (row.used_count < limit) {
+      row.used_count += 1
+      return Promise.resolve({ rows: [{ used_count: row.used_count }] })
+    }
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- api/_lib/knowledgeLimit.ts: refundTeach ---
+  if (has(text, 'UPDATE daily_teach_usage')) {
+    const [userId] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.teachUsage.get(key)
+    if (row && row.used_count > 0) row.used_count -= 1
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- api/character.ts: handleSaveKnowledge's idempotency lookup (checked
+  // before the general list/count matchers below, since this one also
+  // selects FROM character_knowledge_entries) ---
+  if (has(text, 'FROM character_knowledge_entries', 'client_request_id =')) {
+    const [characterId, requestId] = values
+    const row = state.knowledgeEntries.find((e) => e.character_id === characterId && e.client_request_id === requestId)
+    return Promise.resolve({ rows: row ? [{ ...row }] : [] })
+  }
+
+  // --- api/character.ts: handleListKnowledge's count ---
+  if (has(text, 'COUNT(*)', 'character_knowledge_entries')) {
+    const [characterId, userId] = values
+    const count = state.knowledgeEntries.filter((e) => e.character_id === characterId && e.user_id === userId).length
+    return Promise.resolve({ rows: [{ count }] })
+  }
+
+  // --- api/character.ts: handleListKnowledge's page of entries ---
+  if (has(text, 'FROM character_knowledge_entries')) {
+    const [characterId, userId, limit, offset] = values
+    const rows = state.knowledgeEntries
+      .filter((e) => e.character_id === characterId && e.user_id === userId)
+      .slice()
+      .reverse() // newest first, matching ORDER BY created_at DESC on insertion order
+      .slice(offset, offset + limit)
+      .map((e) => ({ ...e }))
+    return Promise.resolve({ rows })
+  }
+
+  // --- api/character.ts: handleSaveKnowledge's insert. 'appropriate' is a
+  // literal in the real query (only ever-'appropriate' rows get inserted),
+  // not a bound parameter, so it's not in `values`. ---
+  if (has(text, 'INSERT INTO character_knowledge_entries')) {
+    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId] = values
+    const id = state.nextKnowledgeEntryId++
+    const now = new Date().toISOString()
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      profession,
+      title,
+      original_content: originalContent,
+      final_content: finalContent,
+      verification_status: 'appropriate',
+      verification_explanation: verificationExplanation,
+      client_request_id: requestId,
+      created_at: now,
+    }
+    state.knowledgeEntries.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)
