@@ -404,13 +404,27 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- api/character.ts: change/set profession (checked before the
+  // generic 'FROM characters' list matcher below, since this statement has
+  // no FROM clause at all) ---
+  if (has(text, 'UPDATE characters')) {
+    const [profession, userId, companionType] = values
+    const row = state.characters.find((c) => c.user_id === userId && c.companion_type === companionType)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.profession = profession
+    const now = new Date().toISOString()
+    return Promise.resolve({
+      rows: [{ id: row.id, user_id: row.user_id, companion_type: row.companion_type, stage: row.stage, profession: row.profession, created_at: now }],
+    })
+  }
+
   // --- api/character.ts: list ---
   if (has(text, 'FROM characters')) {
     const [userId] = values
     const now = new Date().toISOString()
     const rows = state.characters
       .filter((c) => c.user_id === userId)
-      .map((c) => ({ id: c.id, user_id: c.user_id, companion_type: c.companion_type, stage: c.stage, created_at: now }))
+      .map((c) => ({ id: c.id, user_id: c.user_id, companion_type: c.companion_type, stage: c.stage, profession: c.profession, created_at: now }))
     return Promise.resolve({ rows })
   }
 
@@ -424,9 +438,9 @@ function sql(strings, ...values) {
     if (exists) return Promise.resolve({ rows: [] })
     const id = state.nextCharacterId++
     const now = new Date().toISOString()
-    state.characters.push({ id, user_id: userId, companion_type: companionType, stage })
+    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null })
     return Promise.resolve({
-      rows: [{ id, user_id: userId, companion_type: companionType, stage, created_at: now }],
+      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, created_at: now }],
     })
   }
 

@@ -175,6 +175,20 @@ export function ensureCharacterTables() {
       await sql`
         CREATE INDEX IF NOT EXISTS characters_user_id_idx ON characters (user_id)
       `
+
+      // Nullable, additive column (PR #43) — every existing character row
+      // already satisfies "no value yet" (NULL), so this never touches or
+      // resets a single existing row. NULL means '직업 미선택'. Kept as a
+      // plain column on `characters` itself (not a separate table) since a
+      // character has at most one current profession; a future
+      // knowledge/exp system should key its own rows by character_id and
+      // snapshot whichever profession applied at the time, rather than
+      // always deferring to this (mutable) column — see api/character.ts's
+      // handlePatch for why changing it never deletes the character.
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS profession TEXT
+          CHECK (profession IN ('accountant', 'singer'))
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -239,5 +253,6 @@ export interface CharacterRow {
   user_id: number
   companion_type: 'nuri' | 'duri'
   stage: 'child' | 'adult'
+  profession: 'accountant' | 'singer' | null
   created_at: string
 }
