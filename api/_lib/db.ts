@@ -197,6 +197,62 @@ export function ensureCharacterTables() {
   return characterTablesReady
 }
 
+let knowledgeTableReady: Promise<unknown> | null = null
+
+// One row per *confirmed* (user-approved, Gemini-verified as 'appropriate')
+// piece of knowledge taught to a character — see api/character.ts's
+// handleSaveKnowledge, the only place that ever inserts here. A rejected
+// ('needs_revision'/'unverifiable') or never-confirmed verification result
+// never gets a row at all, matching "검증이 끝났다는 이유만으로 자동
+// 저장하지 않는다" and "검증 불가 상태에서는 검증된 지식으로 저장하지
+// 않는다". `user_id` is denormalized alongside `character_id` (same
+// deliberate choice as the growth-system design doc's 7절) so every query
+// can filter on both without a join, and `profession` is captured as it
+// was *at teaching time* — if the character's profession changes later
+// (api/character.ts's PATCH), existing knowledge rows keep the job they
+// were actually taught under instead of silently drifting.
+export function ensureKnowledgeTable() {
+  if (!knowledgeTableReady) {
+    knowledgeTableReady = (async () => {
+      await ensureCharacterTables()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_knowledge_entries (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          profession TEXT NOT NULL CHECK (profession IN ('accountant', 'singer')),
+          title TEXT NOT NULL,
+          original_content TEXT NOT NULL,
+          final_content TEXT NOT NULL,
+          verification_status TEXT NOT NULL CHECK (verification_status IN ('appropriate', 'needs_revision', 'unverifiable')),
+          verification_explanation TEXT NOT NULL,
+          client_request_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_knowledge_entries_character_created_idx
+          ON character_knowledge_entries (character_id, created_at DESC)
+      `
+      // Lets the client tag a save request with its own idempotency key —
+      // handleSaveKnowledge uses this to detect "this exact save was
+      // already processed" (double-click, retried request) and return the
+      // existing row instead of inserting a duplicate — same mechanism as
+      // messages.client_request_id in dailyLimit.ts.
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS character_knowledge_entries_character_request_idx
+          ON character_knowledge_entries (character_id, client_request_id)
+          WHERE client_request_id IS NOT NULL
+      `
+    })().catch((err) => {
+      knowledgeTableReady = null
+      throw err
+    })
+  }
+  return knowledgeTableReady
+}
+
 export { sql }
 
 export interface UserRow {
@@ -254,5 +310,18 @@ export interface CharacterRow {
   companion_type: 'nuri' | 'duri'
   stage: 'child' | 'adult'
   profession: 'accountant' | 'singer' | null
+  created_at: string
+}
+
+export interface KnowledgeEntryRow {
+  id: number
+  user_id: number
+  character_id: number
+  profession: 'accountant' | 'singer'
+  title: string
+  original_content: string
+  final_content: string
+  verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
+  verification_explanation: string
   created_at: string
 }
