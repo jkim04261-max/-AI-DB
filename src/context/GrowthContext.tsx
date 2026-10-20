@@ -55,13 +55,13 @@ interface GrowthContextValue {
     companionType: CompanionType,
     title: string,
     content: string,
-  ) => Promise<{ verification: KnowledgeVerification; remaining: number; dailyTeachLimit: number }>
+  ) => Promise<{ verification: KnowledgeVerification; verificationToken: string; remaining: number; dailyTeachLimit: number }>
   saveKnowledge: (
     companionType: CompanionType,
     title: string,
     originalContent: string,
     finalContent: string,
-    verification: KnowledgeVerification,
+    verificationToken: string,
   ) => Promise<KnowledgeEntry>
   listKnowledge: (
     companionType: CompanionType,
@@ -176,14 +176,20 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     })
     const data = (await res.json().catch(() => ({}))) as {
       verification?: KnowledgeVerification
+      verificationToken?: string
       remaining?: number
       dailyTeachLimit?: number
       error?: string
     }
-    if (!res.ok || !data.verification) {
+    if (!res.ok || !data.verification || !data.verificationToken) {
       throw new Error(data.error || '지식을 검증하는 중 오류가 발생했어요.')
     }
-    return { verification: data.verification, remaining: data.remaining ?? 0, dailyTeachLimit: data.dailyTeachLimit ?? 0 }
+    return {
+      verification: data.verification,
+      verificationToken: data.verificationToken,
+      remaining: data.remaining ?? 0,
+      dailyTeachLimit: data.dailyTeachLimit ?? 0,
+    }
   }, [])
 
   const saveKnowledge = useCallback(
@@ -192,17 +198,19 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       title: string,
       originalContent: string,
       finalContent: string,
-      verification: KnowledgeVerification,
+      verificationToken: string,
     ) => {
       // A fresh key per save attempt — if this exact request somehow reaches
       // the server twice (a retried fetch, a double click that got through
       // before the button disabled), the server recognizes the repeat and
-      // returns the original row instead of saving a duplicate.
+      // returns the original row instead of saving a duplicate. The server
+      // no longer trusts a client-sent verification object at all — it
+      // only trusts verificationToken, a signature it issued itself.
       const requestId = crypto.randomUUID()
       const res = await fetch('/api/character?action=save-knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companionType, title, originalContent, finalContent, verification, requestId }),
+        body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId }),
       })
       const data = (await res.json().catch(() => ({}))) as { entry?: KnowledgeEntryApiRow; error?: string }
       if (!res.ok || !data.entry) {

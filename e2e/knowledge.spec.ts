@@ -76,6 +76,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCalled = false
+  let saveRequestBody: Record<string, unknown> | null = null
   await mockCharacterApi(page, {
     characters: [NURI_ACCOUNTANT],
     onVerify: async (route) => {
@@ -84,6 +85,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
         contentType: 'application/json',
         body: JSON.stringify({
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-appropriate',
           remaining: 9,
           dailyTeachLimit: 10,
         }),
@@ -91,6 +93,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
     },
     onSave: async (route) => {
       saveCalled = true
+      saveRequestBody = route.request().postDataJSON()
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
@@ -128,6 +131,11 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   await saveButton.click()
   await expect(page.getByText('학습 기록으로 저장했어요.')).toBeVisible()
   expect(saveCalled).toBe(true)
+  // The frontend must send the server-issued verificationToken, not a raw
+  // verification object the server would have to trust as-is — this is
+  // the client side of PR #44's follow-up security fix.
+  expect(saveRequestBody?.verificationToken).toBe('mock-token-appropriate')
+  expect(saveRequestBody?.verification).toBeUndefined()
 })
 
 test('needs_revision disables 저장 and shows guidance to revise and re-verify', async ({ page }) => {
@@ -142,6 +150,7 @@ test('needs_revision disables 저장 and shows guidance to revise and re-verify'
         contentType: 'application/json',
         body: JSON.stringify({
           verification: { status: 'needs_revision', explanation: '일부 틀렸어요', relevance: '관련 있음', issues: '연도 오류', suggestion: '연도를 고치세요' },
+          verificationToken: 'mock-token-needs-revision',
           remaining: 8,
           dailyTeachLimit: 10,
         }),
@@ -172,6 +181,7 @@ test('editing content after a result makes it stale and requires re-verifying be
         contentType: 'application/json',
         body: JSON.stringify({
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-stale-check',
           remaining: 9,
           dailyTeachLimit: 10,
         }),

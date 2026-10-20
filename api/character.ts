@@ -3,6 +3,7 @@ import { ensureCharacterTables, ensureKnowledgeTable, sql, type CharacterRow, ty
 import { getSessionUser } from './_lib/auth'
 import { GeminiApiError, GeminiConfigError, verifyKnowledge, type KnowledgeVerificationResult } from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach } from './_lib/knowledgeLimit'
+import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #43's first two supported professions. Extending this later (e.g. a
@@ -10,7 +11,6 @@ const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // separate table, so no migration is needed either.
 const PROFESSIONS = new Set(['accountant', 'singer'])
 const PROFESSION_LABEL: Record<string, string> = { accountant: '회계사', singer: '가수' }
-const VERIFICATION_STATUSES = new Set(['appropriate', 'needs_revision', 'unverifiable'])
 
 const MAX_TITLE_LENGTH = 100
 const MAX_CONTENT_LENGTH = 2000
@@ -263,7 +263,24 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       return
     }
 
-    res.status(200).json({ verification, remaining: reserved.remaining, dailyTeachLimit: DAILY_TEACH_LIMIT })
+    // Signed server-side, over the exact (user, character, title, content)
+    // just graded — save-knowledge below requires this token instead of
+    // trusting a client-resent verification object, so neither the status
+    // nor the content can be altered between verifying and saving.
+    const verificationToken = signKnowledgeVerification({
+      userId,
+      characterId: character.id,
+      companionType: companionType as string,
+      title: title.trim(),
+      content: content.trim(),
+      status: verification.status,
+      explanation: verification.explanation,
+      relevance: verification.relevance,
+      issues: verification.issues,
+      suggestion: verification.suggestion,
+    })
+
+    res.status(200).json({ verification, verificationToken, remaining: reserved.remaining, dailyTeachLimit: DAILY_TEACH_LIMIT })
   } catch (err) {
     console.error('[api/character] unexpected error on verify-knowledge', err)
     res.status(500).json({ error: '지식을 검증하는 중 오류가 발생했어요.' })
@@ -271,26 +288,24 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
 }
 
 // Persists a knowledge entry the user has reviewed and confirmed. Only
-// ever inserts a row when the *resubmitted* verification result says
-// 'appropriate' — a 'needs_revision' or 'unverifiable' result can never be
-// saved through this endpoint, matching "검증 불가 상태에서는 검증된
-// 지식으로 저장하지 않는다". (This trusts the verification object the
-// client resends rather than re-deriving it server-side from a stored
-// draft row — a deliberate, documented scope boundary: the worst case is a
-// user mislabeling their own character's own knowledge entry inside their
-// own account, which never exposes another user's data or costs an extra
-// Gemini call, so the added complexity of a signed verification token
-// wasn't justified for this PR. See the PR description for this tradeoff.)
+// ever inserts a row when a *signed* verification token (minted by
+// handleVerifyKnowledge above, over the exact user/character/title/content
+// it graded) says 'appropriate' — a client can no longer save a
+// 'needs_revision'/'unverifiable' result, or any result at all, by simply
+// sending a different status or editing the content after verifying,
+// because the token's signature only matches the content it was issued
+// for. This replaces the earlier design, which trusted a client-resent
+// verification object; see PR #44's follow-up fix for the reasoning.
 async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, userId: number) {
   const body = (req.body ?? {}) as {
     companionType?: unknown
     title?: unknown
     originalContent?: unknown
     finalContent?: unknown
-    verification?: { status?: unknown; explanation?: unknown; relevance?: unknown; issues?: unknown; suggestion?: unknown }
+    verificationToken?: unknown
     requestId?: unknown
   }
-  const { companionType, title, originalContent, finalContent, verification } = body
+  const { companionType, title, originalContent, finalContent, verificationToken } = body
   const requestId = typeof body.requestId === 'string' && body.requestId ? body.requestId : null
 
   if (typeof title !== 'string' || !title.trim() || title.trim().length > MAX_TITLE_LENGTH) {
@@ -304,20 +319,20 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
   // finalContent may differ from originalContent (the user edited it, or
   // adopted Gemini's suggestion) but is never *silently* substituted by
   // this endpoint — the client must send whichever text the user actually
-  // confirmed, including if that's the unedited original.
+  // confirmed, including if that's the unedited original. Either way, both
+  // must match the verification token's bound content exactly (checked
+  // below) — this endpoint never saves text Gemini hasn't actually graded.
   if (typeof finalContent !== 'string' || !finalContent.trim() || finalContent.trim().length > MAX_CONTENT_LENGTH) {
     res.status(400).json({ error: `저장할 지식 내용을 ${MAX_CONTENT_LENGTH}자 이내로 입력해주세요.` })
     return
   }
-  if (
-    !verification ||
-    typeof verification.status !== 'string' ||
-    !VERIFICATION_STATUSES.has(verification.status)
-  ) {
-    res.status(400).json({ error: '검증 결과가 올바르지 않아요. 다시 검증해주세요.' })
+
+  const tokenPayload = verifyKnowledgeVerificationToken(verificationToken)
+  if (!tokenPayload) {
+    res.status(400).json({ error: '검증 결과가 만료되었거나 올바르지 않아요. 다시 검증해주세요.' })
     return
   }
-  if (verification.status !== 'appropriate') {
+  if (tokenPayload.status !== 'appropriate') {
     res.status(400).json({ error: '적합 판정을 받은 지식만 저장할 수 있어요. 수정 후 다시 검증해주세요.' })
     return
   }
@@ -333,6 +348,23 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     }
     if (!character.profession) {
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    // The core fix: the token must have been issued for this exact user,
+    // character, title and content. Any mismatch — a tampered status, a
+    // token replayed against another character, or content edited after
+    // verifying — fails here rather than silently saving something Gemini
+    // never actually graded.
+    if (
+      tokenPayload.userId !== userId ||
+      tokenPayload.characterId !== character.id ||
+      tokenPayload.companionType !== companionType ||
+      tokenPayload.title !== title.trim() ||
+      tokenPayload.content !== originalContent.trim() ||
+      tokenPayload.content !== finalContent.trim()
+    ) {
+      res.status(400).json({ error: '검증 당시의 내용과 달라요. 내용을 바꾼 뒤에는 다시 검증해주세요.' })
       return
     }
 
@@ -353,10 +385,10 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     }
 
     const explanationParts = [
-      verification.explanation ? `설명: ${verification.explanation}` : null,
-      verification.relevance ? `관련성: ${verification.relevance}` : null,
-      verification.issues ? `문제점: ${verification.issues}` : null,
-      verification.suggestion ? `제안: ${verification.suggestion}` : null,
+      tokenPayload.explanation ? `설명: ${tokenPayload.explanation}` : null,
+      tokenPayload.relevance ? `관련성: ${tokenPayload.relevance}` : null,
+      tokenPayload.issues ? `문제점: ${tokenPayload.issues}` : null,
+      tokenPayload.suggestion ? `제안: ${tokenPayload.suggestion}` : null,
     ].filter((p): p is string => typeof p === 'string')
     const verificationExplanation = explanationParts.join('\n') || '적합'
 

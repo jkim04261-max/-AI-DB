@@ -86,6 +86,7 @@ async function run() {
   t.assert(verifyRes.statusCode === 200, '누리(회계사)에게 지식 입력 시 검증 요청이 성공한다 (200)')
   t.assert(verifyRes.body.verification?.status === 'appropriate', 'Gemini가 적합으로 정상 검증한다')
   t.assert(typeof verifyRes.body.remaining === 'number', '남은 검증 횟수가 응답에 포함된다')
+  t.assert(typeof verifyRes.body.verificationToken === 'string' && verifyRes.body.verificationToken.length > 0, '검증 결과에 서명된 verificationToken이 포함된다')
 
   // --- 6: 사용자 확인 전 DB 미저장 ---
   {
@@ -105,7 +106,7 @@ async function run() {
         title: '복식부기',
         originalContent: '거래를 차변과 대변에 동시에 기록한다.',
         finalContent: '거래를 차변과 대변에 동시에 기록한다.',
-        verification: verifyRes.body.verification,
+        verificationToken: verifyRes.body.verificationToken,
         requestId: 'req-1',
       },
     }),
@@ -126,7 +127,7 @@ async function run() {
           title: '복식부기',
           originalContent: '거래를 차변과 대변에 동시에 기록한다.',
           finalContent: '거래를 차변과 대변에 동시에 기록한다.',
-          verification: verifyRes.body.verification,
+          verificationToken: verifyRes.body.verificationToken,
           requestId: 'req-1',
         },
       }),
@@ -159,7 +160,7 @@ async function run() {
         title: '발성법',
         originalContent: '복식호흡으로 소리를 낸다.',
         finalContent: '복식호흡으로 소리를 낸다.',
-        verification: duriVerify.body.verification,
+        verificationToken: duriVerify.body.verificationToken,
         requestId: 'req-2',
       },
     }),
@@ -209,7 +210,7 @@ async function run() {
           title: '틀린지식',
           originalContent: '잘못된 내용',
           finalContent: '잘못된 내용',
-          verification: revisionVerify.body.verification,
+          verificationToken: revisionVerify.body.verificationToken,
           requestId: 'req-3',
         },
       }),
@@ -237,7 +238,7 @@ async function run() {
           title: '이상한지식',
           originalContent: '내용',
           finalContent: '내용',
-          verification: unverifiableVerify.body.verification,
+          verificationToken: unverifiableVerify.body.verificationToken,
           requestId: 'req-4',
         },
       }),
@@ -295,10 +296,121 @@ async function run() {
   {
     const res = mockRes()
     await characterHandler(
-      authedReq({ method: 'POST', query: { action: 'save-knowledge' }, body: { companionType: 'nuri', title: 't', originalContent: 'c', finalContent: 'c', verification: { status: 'bogus' } } }),
+      authedReq({ method: 'POST', query: { action: 'save-knowledge' }, body: { companionType: 'nuri', title: 't', originalContent: 'c', finalContent: 'c' } }),
       res,
     )
-    t.assert(res.statusCode === 400, '알 수 없는 검증 상태는 저장이 거부된다 (400)')
+    t.assert(res.statusCode === 400, 'verificationToken이 없는 저장 요청은 거부된다 (400) — 더 이상 클라이언트의 검증 결과 주장을 신뢰하지 않는다')
+  }
+
+  // --- 보안 수정: 검증 상태·내용 변조 방지 (서명된 verificationToken으로 저장 내용을 검증 시점에 안전하게 연결) ---
+  {
+    // 새로 적합 검증을 하나 받아, 토큰을 변조해본다.
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' } }
+    const freshVerify = mockRes()
+    await characterHandler(
+      authedReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '변조테스트', content: '원본 내용' } }),
+      freshVerify,
+    )
+    t.assert(freshVerify.statusCode === 200, '변조 테스트용 검증 요청이 성공한다')
+    const validToken = freshVerify.body.verificationToken
+
+    // 1) 토큰 payload의 필드를 서명 없이 직접 조작(비밀키 없이) — 서명이 깨져 거부되어야 한다.
+    {
+      const [dataPart, signaturePart] = validToken.split('.')
+      const decoded = JSON.parse(Buffer.from(dataPart, 'base64url').toString('utf8'))
+      t.assert(decoded.status === 'appropriate', '원본 토큰의 상태는 적합이다 (변조 비교 기준)')
+      const forgedDecoded = { ...decoded, status: 'needs_revision' }
+      const forgedDataPart = Buffer.from(JSON.stringify(forgedDecoded)).toString('base64url')
+      const forgedToken = `${forgedDataPart}.${signaturePart}` // 서명은 원본 그대로 재사용(공격자는 비밀키가 없음)
+
+      const res = mockRes()
+      await characterHandler(
+        authedReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: { companionType: 'nuri', title: '변조테스트', originalContent: '원본 내용', finalContent: '원본 내용', verificationToken: forgedToken, requestId: 'req-tamper-status' },
+        }),
+        res,
+      )
+      t.assert(res.statusCode === 400, '검증 상태를 변조한 토큰은 서명이 깨져 저장이 거부된다 (400)')
+    }
+
+    // 2) 실제로 '수정 필요' 판정을 받은 뒤, 그 토큰의 상태만 '적합'으로 바꿔 저장을 시도 — 역시 서명이 깨져 거부되어야 한다.
+    {
+      geminiBehavior = { kind: 'json', result: { status: 'needs_revision', explanation: '틀림', relevance: '관련 있음', issues: '오류', suggestion: '수정하세요' } }
+      const badVerify = mockRes()
+      await characterHandler(
+        authedReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '변조테스트2', content: '틀린 내용' } }),
+        badVerify,
+      )
+      const [dataPart, signaturePart] = badVerify.body.verificationToken.split('.')
+      const decoded = JSON.parse(Buffer.from(dataPart, 'base64url').toString('utf8'))
+      t.assert(decoded.status === 'needs_revision', "'수정 필요' 검증의 토큰 상태는 needs_revision이다")
+      const forged = { ...decoded, status: 'appropriate' }
+      const forgedDataPart = Buffer.from(JSON.stringify(forged)).toString('base64url')
+      const forgedToken = `${forgedDataPart}.${signaturePart}`
+
+      const res = mockRes()
+      await characterHandler(
+        authedReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: { companionType: 'nuri', title: '변조테스트2', originalContent: '틀린 내용', finalContent: '틀린 내용', verificationToken: forgedToken, requestId: 'req-tamper-status-2' },
+        }),
+        res,
+      )
+      t.assert(res.statusCode === 400, "'수정 필요' 결과의 상태를 '적합'으로 바꿔 저장을 시도해도 서명이 깨져 거부된다 (400)")
+    }
+
+    // 3) 검증 후 내용을 바꿔서 저장 시도 — 토큰은 유효하지만 내용이 검증 시점과 달라 거부되어야 한다.
+    {
+      const res = mockRes()
+      await characterHandler(
+        authedReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: { companionType: 'nuri', title: '변조테스트', originalContent: '원본 내용', finalContent: '검증 후 몰래 바꾼 내용', verificationToken: validToken, requestId: 'req-content-change' },
+        }),
+        res,
+      )
+      t.assert(res.statusCode === 400, '검증 완료 후 내용을 바꿔 저장하려 하면 토큰과 내용이 일치하지 않아 거부된다 (400)')
+    }
+    {
+      const res = mockRes()
+      await characterHandler(
+        authedReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: { companionType: 'nuri', title: '제목도 변조', originalContent: '원본 내용', finalContent: '원본 내용', verificationToken: validToken, requestId: 'req-title-change' },
+        }),
+        res,
+      )
+      t.assert(res.statusCode === 400, '검증 완료 후 제목을 바꿔 저장하려 해도 토큰과 일치하지 않아 거부된다 (400)')
+    }
+
+    // 4) 올바른 토큰 그대로는 정상 저장된다 (변조 방지 로직이 정상 경로를 막지 않는지 확인).
+    {
+      const res = mockRes()
+      await characterHandler(
+        authedReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: { companionType: 'nuri', title: '변조테스트', originalContent: '원본 내용', finalContent: '원본 내용', verificationToken: validToken, requestId: 'req-tamper-ok' },
+        }),
+        res,
+      )
+      t.assert(res.statusCode === 201, '변조되지 않은 정상 토큰으로는 저장이 성공한다 (201)')
+    }
+
+    // 5) 다른 사용자(bob)가 alice의 유효한 토큰을 가로채 자기 캐릭터에 저장을 시도해도, 토큰의 userId가 달라 거부되어야 한다.
+    {
+      const res = mockRes()
+      await characterHandler(
+        { headers: { cookie: bobCookie }, query: { action: 'save-knowledge' }, method: 'POST', body: { companionType: 'nuri', title: '변조테스트', originalContent: '원본 내용', finalContent: '원본 내용', verificationToken: validToken, requestId: 'req-steal-token' } },
+        res,
+      )
+      t.assert(res.statusCode === 400 || res.statusCode === 404, 'alice의 검증 토큰을 bob이 가로채 사용해도 사용자 불일치로 거부된다')
+    }
   }
 
   // --- 12: API 호출량 제한 (하루 10회, 채팅 질문 제한과 완전히 분리) ---

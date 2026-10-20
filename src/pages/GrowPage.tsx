@@ -283,6 +283,11 @@ function KnowledgeTeachPanel({ character, profession }: { character: Character; 
   // editing either field after a result invalidates it (cleared below),
   // so "저장" can only ever save content that was actually just verified.
   const [verifiedSnapshot, setVerifiedSnapshot] = useState<{ title: string; content: string } | null>(null)
+  // The signed token the server returned for verifiedSnapshot — this is
+  // what actually authorizes saving, not the `verification` object above
+  // (which is for display only). It's only ever used while !isStale, i.e.
+  // while title/content still match verifiedSnapshot exactly.
+  const [verificationToken, setVerificationToken] = useState<string | null>(null)
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -313,10 +318,12 @@ function KnowledgeTeachPanel({ character, profession }: { character: Character; 
       const result = await verifyKnowledge(character.companionType, title, content)
       setVerification(result.verification)
       setVerifiedSnapshot({ title, content })
+      setVerificationToken(result.verificationToken)
       setRemaining({ remaining: result.remaining, limit: result.dailyTeachLimit })
     } catch (err) {
       setVerification(null)
       setVerifiedSnapshot(null)
+      setVerificationToken(null)
       setVerifyError(err instanceof Error ? err.message : '지식을 검증하는 중 오류가 발생했어요.')
     } finally {
       setVerifying(false)
@@ -331,16 +338,17 @@ function KnowledgeTeachPanel({ character, profession }: { character: Character; 
   }
 
   const handleSave = async () => {
-    if (!verification || isStale || verification.status !== 'appropriate' || !verifiedSnapshot) return
+    if (!verification || isStale || verification.status !== 'appropriate' || !verifiedSnapshot || !verificationToken) return
     setSaving(true)
     setSaveError(null)
     try {
-      await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verification)
+      await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken)
       setSaveSuccess(true)
       setTitle('')
       setContent('')
       setVerification(null)
       setVerifiedSnapshot(null)
+      setVerificationToken(null)
       if (recordsOpen) {
         await loadRecords()
       }
