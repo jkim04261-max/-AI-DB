@@ -6,7 +6,7 @@
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
 - **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험), 5(DB·보안·전체 기능 통합 검증)
-- **진행 중**: 6(GitHub PR 생성·Vercel Preview 배포·최종 검증) — PR 생성·푸시·Preview 배포 성공, **사용자가 Preview에서 직접 기능 검증 완료**(아래 표 참고). Production-Preview DB 분리 상태만 아직 미검증. **사용자의 최종 승인 전까지 main 병합·Production 배포 금지.**
+- **진행 중**: 6(GitHub PR 생성·Vercel Preview 배포·최종 검증) — PR 생성·푸시·Preview 배포 성공, **사용자가 Preview에서 직접 기능 검증 완료**. 사용자가 Neon 콘솔에서 Production(`main`)과 Preview(`preview/claude/pr45-2d-growth-game-mvp`) 브랜치가 별도로 존재함을 확인(아래 "병합 전 최종 확인" 섹션 참고) — 다만 Vercel의 실제 `POSTGRES_URL`이 각각 그 브랜치를 정확히 가리키는지는 아직 **미확인**. **사용자의 최종 승인 전까지 main 병합·Production 배포 금지.**
 
 ## 체크포인트 6 — GitHub PR 생성·Vercel Preview 배포·최종 검증 (진행 중 — 사용자 기능 검증 완료, 최종 승인 대기)
 
@@ -17,14 +17,30 @@
 4. 누리 경험치 60/100 XP 확인
 5. F5 새로고침 후에도 60XP 유지 확인(체크포인트 5에서 서버 재조회로 보장하려 했던 "새로고침 후 복원"이 실제 Preview 환경에서도 그대로 동작함을 실사용으로 재확인)
 
+### 병합 전 최종 확인 — Production/Preview DB 분리
+
+**사용자가 Neon 콘솔에서 직접 확인한 사실**: Production 브랜치 `main`(Default)과 PR #45 전용 Preview 브랜치 `preview/claude/pr45-2d-growth-game-mvp`가 별도로 존재함(총 브랜치 8개, 플랜 상한 10개). 이는 옵션 A(브랜치별 분리 유지)가 의도대로 Neon 쪽에 반영되어 있다는 직접적인 증거다.
+
+**아직 미확인인 것**: Vercel 프로젝트가 실제로 이 두 브랜치를 Production/Preview 환경변수에 올바르게 연결해서 쓰고 있는지(= Neon에 분리된 브랜치가 "존재"하는 것과, Vercel의 `POSTGRES_URL`이 "그 브랜치를 실제로 가리키는 것"은 별개 확인 사항이다). 이 세션은 Vercel 대시보드에 접근할 수 없어 직접 확인이 불가능하다 — **비밀값(연결 문자열 전체, 비밀번호)은 이 세션도 사용자도 서로 공유하지 않는다**, 아래는 호스트/브랜치 이름만 비교하는 절차다.
+
+**사용자가 Vercel 대시보드에서 확인할 정확한 경로** (UI 문구는 버전에 따라 다를 수 있음):
+1. https://vercel.com/nuri-ai/ai-db 프로젝트 열기 → 상단 **Settings** → 좌측 **Environment Variables**.
+2. 목록에서 `POSTGRES_URL`(및 Neon 통합이 함께 추가했을 `POSTGRES_URL_NON_POOLING`, `DATABASE_URL` 등 관련 변수들) 찾기. 변수 이름 옆에 어느 환경(Production/Preview/Development)에 적용되는지 뱃지가 표시된다.
+3. **Production** 뱃지가 붙은 값을 펼쳐서(Reveal/Edit) 호스트명(`@` 뒤, `.neon.tech` 앞부분)만 확인 — 이 부분만 읽고 전체 문자열을 복사해 공유하지 않는다.
+4. **Preview** 뱃지가 붙은 값도 동일하게 호스트명만 확인.
+5. Neon 콘솔 → 해당 프로젝트 → **Branches** → `main` 브랜치 클릭 → "Connection Details"에서 호스트명 확인 → 3번의 Production 호스트명과 **일치하는지**만 대조.
+6. 같은 방식으로 Neon의 `preview/claude/pr45-2d-growth-game-mvp` 브랜치 호스트명을 4번의 Preview 호스트명과 대조.
+7. 더 빠른 대안: Vercel 프로젝트 → **Storage** 탭 → 연결된 Neon 통합 클릭 → (버전에 따라) "환경별 연결된 브랜치"를 표로 보여주는 화면이 있다면 거기서 바로 Production→`main`, Preview→`preview/claude/...`로 매핑되어 있는지 한눈에 확인 가능.
+8. 호스트명이 각각 일치하면 격리 확인 완료, 불일치하거나(특히 Preview가 `main`과 같은 호스트를 가리키면) 즉시 공유해주시면 병합을 보류하고 원인을 조사하겠습니다.
+
 ### 체크포인트 6 최종 점검 결과
 
 | 항목 | 결과 | 근거 |
 | --- | --- | --- |
-| GitHub Actions 전체 통과 여부 | **PASS** | PR #45 최신 커밋(`c917729`) 기준 `checks`(Typecheck API·Typecheck+build frontend·Lint·Test) 전부 성공, `e2e`(Playwright) 전부 성공. GitHub Checks API로 직접 재확인. |
-| Preview 배포 정상 여부 | **PASS** | GitHub 커밋 상태 API: `state: "success"`, "Deployment has completed". 사용자가 실제 Preview URL에서 캐릭터·대화·시험·XP 기능까지 확인. |
+| GitHub Actions 전체 통과 여부 | **PASS** | PR #45 최신 커밋(`6eabb92`) 기준 `checks`(Typecheck API·Typecheck+build frontend·Lint·Test) 전부 성공, `e2e`(Playwright) 전부 성공. GitHub Checks API로 재확인(모든 세부 스텝 `completed`/`success`; 작업 전체의 최상위 `status` 필드만 수초간 `in_progress`로 지연 표시되는, 이전 커밋들에서도 반복 관찰된 GitHub 쪽 상태 전파 지연이었음). |
+| Preview 배포 정상 여부 | **PASS** | GitHub 커밋 상태 API: `state: "success"`, "Deployment has completed"(최신 커밋 `6eabb92` 기준 재확인). 사용자가 실제 Preview URL에서 캐릭터·대화·시험·XP 기능까지 확인. |
 | 기존 로그인·대화·이미지 첨부 기능 영향 여부 | **PASS** | (a) 코드 변경 없이 재확인된 회귀 테스트(`core-regression.test.cjs` 28/28, `e2e/chat.spec.ts`·`e2e/login.spec.ts`·`e2e/attachments.spec.ts`)가 전부 그대로 통과. (b) 사용자가 Preview에서 로그인 후 지식 검증(Gemini) 대화까지 정상 확인 — 로그인·Gemini 호출 경로가 실제로도 살아있음을 실사용으로 재확인. 이미지 첨부 자체는 이번 PR이 건드리지 않은 기능이라 사용자가 별도로 재확인하지는 않았음(해당 기능 코드 무변경, CI의 자동 테스트로만 커버). |
-| Production과 Preview DB 분리 상태 | **미검증** | 사용자의 5개 확인 항목은 기능 동작 검증이며 DB 분리 자체를 직접 확인한 항목은 아니었다. 이 세션은 Vercel/Neon 대시보드에 접근할 수 없어 Preview의 `POSTGRES_URL`이 Production과 다른 Neon 브랜치를 가리키는지 직접 확인하지 못한다. **구조적으로는** Neon 통합의 PR별 브랜칭(옵션 A 채택, Production 브랜치는 그대로 유지)이 의도대로 켜져 있다면 자동으로 분리되지만, 실제로 분리됐는지는 Vercel 대시보드(Settings → Environment Variables → Preview 환경의 `POSTGRES_URL`/Neon 브랜치명)에서 사용자가 직접 확인해 주셔야 main 병합을 진행할 수 있다(요청하신 조건 7). |
+| Production과 Preview DB 분리 상태 | **미확인 (부분 확인됨)** | 사용자가 Neon 콘솔에서 Production(`main`)과 PR #45 전용 Preview(`preview/claude/pr45-2d-growth-game-mvp`) 브랜치가 별도로 존재함을 직접 확인(브랜치 8/10개). 다만 Vercel의 실제 `POSTGRES_URL`이 각 환경에서 그 브랜치를 정확히 가리키는지는 이 세션이 대시보드에 접근할 수 없어 확인 못함 — 위 "병합 전 최종 확인" 섹션의 절차대로 사용자가 직접 대조해 주셔야 한다(요청하신 조건 7). 실제 DB 주소·비밀번호·연결 문자열은 이 세션이 요청하거나 출력한 적 없다. |
 | PR #45 변경 파일 및 보안 문제 | **PASS (이 세션의 자체 검토 기준)** | 25개 파일 변경(+4,432/-321줄, `git diff --stat origin/main...HEAD`로 확인). 전체 diff를 직접 재검토: SQL은 전부 `@vercel/postgres`의 태그드 템플릿(`sql\`...\``)만 사용해 문자열 결합 없음(인젝션 경로 없음), 새 프런트엔드 파일에 `dangerouslySetInnerHTML`/`eval`/`innerHTML` 등 위험 패턴 없음, 지식 검증 토큰의 `source` 필드는 서명된 토큰 안에서 허용 목록(`user_taught`/`ai_generated`)으로 검증 후에만 신뢰, 캐릭터 관련 action(quiz/exam 포함) 전부 `findOwnCharacter`로 소유권 검증(체크포인트 5에서 테스트로도 증명), 커밋에 비밀값·`.env` 파일 포함 없음. 다만 이는 **이 세션의 자체 코드 검토**이며 사람에 의한 실제 코드 리뷰는 아니다. |
 | 남아 있는 오류 | 없음 | 로컬/CI 테스트(258/258 + 40/40), Preview 실사용 검증 모두에서 오류 발견되지 않음. |
 | 미검증 항목 | 2건 | (1) Production-Preview DB 분리 상태(위 참고, main 병합 전 확인 필요). (2) 모바일 화면(요청하신 9번) — 사용자의 5개 확인 항목에 모바일 화면은 포함되지 않았음, CI의 `mobile-chromium` E2E 프로젝트(`e2e/mobile.spec.ts`)는 통과했으나 실제 기기에서의 확인은 아직 없음. |
