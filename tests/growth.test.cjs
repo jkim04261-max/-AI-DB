@@ -178,6 +178,40 @@ async function run() {
     )
     t.assert(res.statusCode === 404, 'carol이 alice의 누리로 시험을 보려 해도 404로 차단된다')
   }
+  // checkpoint 5: 위 두 건(quiz GET / exam-submit)뿐 아니라 quiz-submit과
+  // exam GET도 findOwnCharacter를 거치는지 — 네 action 모두 소유권 검증을
+  // 빠뜨리지 않았는지 직접 확인한다.
+  {
+    const res = mockRes()
+    await characterHandler(
+      {
+        headers: { cookie: carolCookie },
+        query: { action: 'quiz-submit' },
+        method: 'POST',
+        body: { companionType: 'nuri', questionId: 'accountant-1', answerIndex: 0 },
+      },
+      res,
+    )
+    t.assert(res.statusCode === 404, 'carol이 alice의 누리로 퀴즈를 제출해도 404로 차단된다')
+  }
+  {
+    const res = mockRes()
+    await characterHandler({ headers: { cookie: carolCookie }, query: { action: 'exam', companionType: 'nuri' }, method: 'GET' }, res)
+    t.assert(res.statusCode === 404, 'carol이 alice의 누리로 시험 문제를 조회해도 404로 차단된다')
+  }
+
+  // checkpoint 5: 재로그인 시뮬레이션 — 세션 쿠키를 새로 발급해도(기존
+  // 쿠키를 재사용하지 않고) 지금까지 쌓인 XP/레벨이 그대로 DB에서
+  // 다시 조회된다(서버 메모리가 아니라 DB가 진짭 소스임을 확인).
+  {
+    const freshLoginCookie = cookieHeaderFor(auth, 1, 0, 'alice@test.com')
+    const res = mockRes()
+    await characterHandler({ headers: { cookie: freshLoginCookie }, query: {}, method: 'GET' }, res)
+    const nuri = res.body.characters.find((c) => c.companion_type === 'nuri')
+    // 이 시점까지 alice의 누리는 퀴즈 정답(+5) + 시험 합격(+50) = 55XP가
+    // 누적되어 있다(위 3~11번 단계 참고) — 레벨업 임계값(100XP) 미달.
+    t.assert(nuri.exp === 55 && nuri.level === 1, '재로그인(새 세션 쿠키) 후에도 DB에 저장된 XP/레벨이 그대로 조회된다')
+  }
 
   // --- 2: 검증된 지식 저장 +10XP (save-knowledge 확장분) ---
   mock.seedUser(4, { email: 'dave@test.com' })
@@ -290,6 +324,69 @@ async function run() {
     await characterHandler(daveReq({ method: 'GET' }), res)
     const duri = res.body.characters.find((c) => c.companion_type === 'duri')
     t.assert(duri.level === 2 && duri.exp === 110, '캐릭터 목록 조회에도 최신 level/exp가 반영된다')
+  }
+
+  // checkpoint 5: 동시 중복 제출 — 같은 문제/같은 시험을 거의 동시에 두 번
+  // 요청해도(새로고침 중 더블클릭 등) character_quiz_firsts/
+  // character_exam_firsts의 원자적 INSERT ... ON CONFLICT DO NOTHING이
+  // 정확히 한 번만 XP를 지급하는지 확인한다. (이 모의 DB는 실제 Postgres
+  // 락 없이 동기적으로 동작하므로 진짜 레이스 컨디션을 재현하지는 않지만,
+  // 두 요청 모두가 "먼저 성공한 쪽만 XP, 나머지는 0"이 되는 멱등 분기
+  // 자체는 그대로 거친다 — 실제 동시성 보장은 DB의 UNIQUE 제약 자체에
+  // 있으며 PR45_PROGRESS.md 체크포인트 5에 남은 한계로 기록한다.)
+  mock.seedUser(5, { email: 'erin@test.com' })
+  const erinCookie = cookieHeaderFor(auth, 5, 0, 'erin@test.com')
+  const erinReq = (overrides = {}) => ({ headers: { cookie: erinCookie }, query: {}, ...overrides })
+  await characterHandler(erinReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+  await characterHandler(erinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+  {
+    const [r1, r2] = await Promise.all([
+      (async () => {
+        const res = mockRes()
+        await characterHandler(
+          erinReq({ method: 'POST', query: { action: 'quiz-submit' }, body: { companionType: 'nuri', questionId: 'accountant-1', answerIndex: KNOWN_CORRECT['accountant-1'] } }),
+          res,
+        )
+        return res
+      })(),
+      (async () => {
+        const res = mockRes()
+        await characterHandler(
+          erinReq({ method: 'POST', query: { action: 'quiz-submit' }, body: { companionType: 'nuri', questionId: 'accountant-1', answerIndex: KNOWN_CORRECT['accountant-1'] } }),
+          res,
+        )
+        return res
+      })(),
+    ])
+    const totalExpAwarded = r1.body.expAwarded + r2.body.expAwarded
+    t.assert(totalExpAwarded === 5, '같은 퀴즈 문제를 동시에 두 번 제출해도 +5XP는 합쳐서 딱 한 번만 지급된다')
+    const finalRes = mockRes()
+    await characterHandler(erinReq({ method: 'GET' }), finalRes)
+    const erinNuri = finalRes.body.characters.find((c) => c.companion_type === 'nuri')
+    t.assert(erinNuri.exp === 5, '최종 누적 XP도 5로, 두 번 지급되지 않았다')
+  }
+  {
+    const examQ = mockRes()
+    await characterHandler(erinReq({ method: 'GET', query: { action: 'exam', companionType: 'nuri' } }), examQ)
+    const answers = examQ.body.questions.map((q) => ({ questionId: q.id, answerIndex: KNOWN_CORRECT[q.id] }))
+    const [r1, r2] = await Promise.all([
+      (async () => {
+        const res = mockRes()
+        await characterHandler(erinReq({ method: 'POST', query: { action: 'exam-submit' }, body: { companionType: 'nuri', answers } }), res)
+        return res
+      })(),
+      (async () => {
+        const res = mockRes()
+        await characterHandler(erinReq({ method: 'POST', query: { action: 'exam-submit' }, body: { companionType: 'nuri', answers } }), res)
+        return res
+      })(),
+    ])
+    const totalExpAwarded = r1.body.expAwarded + r2.body.expAwarded
+    t.assert(totalExpAwarded === 50, '같은 시험을 동시에 두 번 제출해도 +50XP는 합쳐서 딱 한 번만 지급된다')
+    const finalRes = mockRes()
+    await characterHandler(erinReq({ method: 'GET' }), finalRes)
+    const erinNuri = finalRes.body.characters.find((c) => c.companion_type === 'nuri')
+    t.assert(erinNuri.exp === 55, '최종 누적 XP는 퀴즈(5) + 시험(50) = 55로, 중복 지급 없이 정확하다')
   }
 
   return t.summary()

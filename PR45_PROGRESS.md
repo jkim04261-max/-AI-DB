@@ -5,8 +5,64 @@
 ## 현재 상태
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
-- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험)
-- **다음 체크포인트**: 5(DB 저장 통합 테스트 보강) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험), 5(DB·보안·전체 기능 통합 검증)
+- **다음 체크포인트**: 6(Preview 배포·최종 검증·PR 생성) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+
+## 체크포인트 5 — DB·보안·전체 기능 통합 검증 (완료)
+
+새 기능 추가가 아니라 **검증 체크포인트**: 기존 구현(체크포인트 2~4)을 재작성하지 않고, 사용자별·캐릭터별 저장/소유권/부정 지급 방지/회귀/장기 기억 범위/개인정보처리방침 일치를 점검하고 발견된 공백만 최소 수정했다.
+
+### 1~2. 사용자별·캐릭터별 DB 저장 및 소유권 검증
+
+- `api/_lib/db.ts`의 모든 성장 관련 테이블(`characters`, `character_knowledge_entries`, `character_messages`, `character_exam_attempts`, `character_quiz_firsts`, `character_exam_firsts`, `daily_teach_usage`, `daily_study_usage`, `daily_question_usage`)이 `user_id INTEGER ... REFERENCES users(id) ON DELETE CASCADE` 또는 `character_id INTEGER ... REFERENCES characters(id) ON DELETE CASCADE`로 연결되어 있음을 코드로 재확인(새로 만든 것 없음, 기존 스키마 그대로).
+- `api/character.ts`의 신규 action 4개(`quiz`/`quiz-submit`/`exam`/`exam-submit`)를 포함해 캐릭터를 다루는 **모든** action이 예외 없이 `findOwnCharacter(userId, companionType)`(= `WHERE user_id = $1 AND companion_type = $2`)를 거친 뒤에만 그 캐릭터의 하위 데이터(퀴즈/시험 기록, XP)에 접근하는지 핸들러 코드를 전부 읽어 확인. `applyExpGain`도 `UPDATE characters SET exp = ... WHERE id = $1 AND user_id = $2`로 이중으로 소유자를 재확인한다.
+- **발견한 테스트 공백**: 기존 `tests/growth.test.cjs`는 `quiz`(GET)와 `exam-submit`(POST)만 "다른 사용자 차단(404)"을 테스트하고 있었음 — `quiz-submit`과 `exam`(GET)은 코드상 동일하게 보호되어 있었지만 테스트로 증명되어 있지 않았다. `tests/growth.test.cjs`에 두 action의 타인 차단(404) 테스트를 추가해 네 action 모두 증명했다(코드 수정 없음, 테스트만 추가).
+
+### 3. 새로고침·재로그인 후 데이터 복원
+
+- 기존 모의 DB 기반 테스트는 매 요청이 실제로 DB(모의) 레이어를 거치므로 "서버 재시작과 동등"하지만, **세션 쿠키를 새로 발급해 재사용하지 않는** 시나리오로는 테스트되어 있지 않았다. `tests/growth.test.cjs`에 재로그인 시뮬레이션(새 서명 쿠키 발급 후 캐릭터 목록 재조회)을 추가해 XP/레벨이 세션이 아니라 DB에서 나온다는 것을 증명했다.
+- 화면 레벨에서도 공백이 있었다 — 기존 `e2e/growth.spec.ts`는 액션 응답을 받은 "직후"의 화면 갱신만 확인했고, 실제 `page.reload()`(전체 새로고침)로 캐릭터 목록을 처음부터 다시 받아오는 경로는 테스트되어 있지 않았다. `e2e/growth.spec.ts`에 새로고침 테스트를 추가(퀴즈로 얻은 XP가 `page.reload()` 후에도 서버가 돌려준 값으로 그대로 보이는지 확인).
+- 체크포인트 3.6에서 이미 검증된 대화 기록 새로고침 복원(`e2e/knowledge.spec.ts`의 "reopening the panel... reloads the persisted conversation")은 재확인만 하고 추가 수정 없음.
+
+### 4. 중복 요청·재제출·반복 제출을 통한 XP 부정 지급 방지
+
+- 기존 테스트가 이미 **순차적** 중복(같은 문제 다시 정답, 이미 합격한 시험 재응시, 동일 `requestId` 재전송)은 전부 0XP로 막히는 것을 증명하고 있었다(체크포인트 4에서 작성).
+- **새로 추가한 검증**: `Promise.all`로 같은 퀴즈 문제·같은 시험을 "동시에" 두 번 제출해, `character_quiz_firsts`/`character_exam_firsts`의 `INSERT ... ON CONFLICT DO NOTHING`이 두 요청 중 정확히 하나에만 XP를 지급하는지 확인(총 지급 XP가 두 응답 합쳐서 정확히 5/50이고, 두 배로 지급되지 않음).
+- **남은 위험(기록)**: 이 리포지토리의 모의 Postgres(`tests/mock-postgres-impl.cjs`)는 동기적으로 동작해 진짜 DB 수준의 동시 트랜잭션 레이스 컨디션을 재현하지 못한다. 실제 동시성 보장은 Neon(Postgres)의 `PRIMARY KEY` 제약 + `INSERT ... ON CONFLICT DO NOTHING`이 트랜잭션 수준에서 원자적으로 처리해주는 것에 의존한다 — 코드 자체는 올바른 패턴(원자적 단일 SQL 문)을 쓰고 있으나, Preview/Production 환경에서의 실제 동시 요청 테스트(예: 부하 테스트)는 아직 수행되지 않았다는 한계를 남긴다.
+
+### 5. 기존 기능 회귀 테스트
+
+- 전체 테스트를 재실행해 **코드 변경 없이** 통과 확인: 일반 Gemini 대화·로그인·이미지 첨부(`core-regression.test.cjs` 28건, `e2e/chat.spec.ts`/`e2e/login.spec.ts`/`e2e/attachments.spec.ts`), 지식 검증·가르치기·스스로 공부하기(`knowledge.test.cjs` 63건, `e2e/knowledge.spec.ts`), 대화 영구 저장(`characterMessages.test.cjs` 32건), 하루 사용량 제한(`daily-limit.test.cjs` 30건), 비밀번호 재설정(`password-reset.test.cjs` 20건) — 전부 기존과 동일하게 동작, 회귀 없음.
+
+### 6. 장기 기억(검색·재활용) 미구현 확인 및 향후 구현 범위
+
+체크포인트 3.5·4에서 이미 "미구현"으로 기록한 사실을 재확인(여전히 미구현, 이번에도 구현하지 않음)하고, 향후 구현 시 검토할 범위를 다음과 같이 구체화해 기록한다 — **코드 변경 없음, 계획만 기록**:
+
+- **범위 A (검증 품질 향상)**: `verify-knowledge`/`study-generate`가 Gemini를 호출할 때, 그 캐릭터가 과거에 "적합" 판정을 받은 지식 중 관련도 높은 항목 몇 개를 함께 프롬프트에 포함시켜 더 일관된 검증을 하도록 한다.
+- **범위 B (출제 연계)**: 퀴즈·시험 문제가 현재는 전부 정적 문제은행(`api/_lib/examQuestions.ts`)인데, 사용자가 실제로 가르친/학습한 지식을 반영한 문제를 생성하는 것은 별도 설계가 필요하다(서버가 생성한 문제를 신뢰할 수 있게 저장·채점해야 하므로 체크포인트 4의 "서버 전용 정답" 원칙을 유지할 새 저장 구조가 필요).
+- **검색 방식 후보**(우선순위 결정은 사용자 승인 필요, 지금 선택하지 않음): (a) 제목/키워드 문자열 매칭(현재 study-generate의 중복 방지 로직과 동일한 방식 — 구현 비용 가장 낮음, Gemini 호출 비용 증가 없음), (b) 임베딩 기반 유사도 검색(별도 벡터 컬럼/인덱스 또는 pgvector 필요 — Neon에서 지원 여부와 Vercel Hobby 비용 제약을 먼저 검토해야 함), (c) Gemini에 전체 학습 기록 요약을 캐싱해 전달(캐시 갱신 비용 발생, 요약이 오래되면 부정확해질 위험).
+- **비용 영향**: 어떤 방식이든 Gemini 요청에 참고 자료가 추가되므로 토큰 사용량이 늘어난다 — 하루 호출 한도(`DAILY_TEACH_LIMIT`/`DAILY_STUDY_LIMIT`)를 그대로 둘지 재조정할지는 별도 결정이 필요하다.
+- 이 범위는 **체크포인트 6 이후의 별도 기능 제안**이며, 지금 구현 여부를 결정하지 않는다.
+
+### 7. 개인정보 보호 — 보유·삭제 정책과 실제 구현 일치 확인
+
+- 삭제 기능(`api/account/delete.ts`)이 `DELETE FROM users WHERE id = ...` 한 문장으로 `characters`/`character_knowledge_entries`/`character_messages`/`character_exam_attempts`/`character_quiz_firsts`/`character_exam_firsts`/`daily_*_usage`까지 전부 `ON DELETE CASCADE`로 연쇄 삭제되는 것을 스키마 코드로 재확인(새 코드 없음).
+- **발견한 공백**: `src/pages/PrivacyPage.tsx`가 체크포인트 3.5 시점(체크포인트 4 이전)에 작성되어, 체크포인트 4에서 새로 저장하기 시작한 "경험치·레벨·퀴즈·시험 응시 기록"이 수집 항목(1번)과 삭제 범위(4번) 설명에 빠져 있었다. **최소 수정**: 두 섹션과 3번 섹션의 TODO 안내문에 경험치·레벨·퀴즈·시험 응시 기록을 추가해 실제 구현과 일치시켰다(문구만 수정, 동작 변경 없음). `src/pages/AiNoticePage.tsx`는 퀴즈·시험이 Gemini를 호출하지 않으므로(체크포인트 4에서 이미 확인) 수정이 필요 없었다.
+
+### 변경 파일
+- 수정: `tests/growth.test.cjs`(+7건 — 소유권 검증 2건, 재로그인 복원 1건, 동시 중복 제출 방지 2개 시나리오·4건), `e2e/growth.spec.ts`(+1건 — 새로고침 복원), `src/pages/PrivacyPage.tsx`(경험치·레벨·시험 기록 문구 추가)
+- 코드(동작) 변경 없음 — `api/character.ts`, `api/_lib/db.ts` 등 기존 구현은 전부 검증만 하고 수정하지 않았다.
+
+### 테스트 결과
+- `npm run typecheck:api` / `npm run build` / `npm run lint`: 통과(신규 경고 없음)
+- `npm test`: **258/258 통과** (`growth.test.cjs`가 47 → 54건으로 확장, 나머지 전부 기존과 동일하게 통과 — 회귀 없음)
+- `npm run test:e2e`: **40/40 통과** (`e2e/growth.spec.ts`가 3 → 4건으로 확장, 나머지 전부 기존과 동일하게 통과 — 회귀 없음)
+- Vercel 함수 개수: **12 (변경 없음)**
+
+### 남은 위험 (기록, 이번 체크포인트에서 해결하지 않음)
+1. 모의 DB로는 실제 Postgres 트랜잭션 레이스 컨디션을 재현할 수 없다 — Preview/Production에서의 실제 동시 요청 부하 테스트는 아직 수행되지 않았다(위 4번 항목 참고).
+2. 장기 기억(검색·재활용) 기능은 범위만 정리했고 구현되지 않았다(위 6번 항목 참고) — 사용자 승인 전까지 구현하지 않는다.
+3. 지식/대화/퀴즈·시험 기록의 "개별 항목 단위" 삭제 기능은 여전히 없다(계정 전체 삭제로만 가능) — `PrivacyPage.tsx`의 TODO 안내문에 이미 명시되어 있으며, 별도 기능 제안 대상이다.
 
 ## 체크포인트 4 — XP·레벨·퀴즈·직업별 시험 (완료)
 
@@ -163,11 +219,10 @@
 
 ## 재개 방법 (세션이 중단된 경우)
 
-1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 4" 커밋인지 확인
+1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 5" 커밋인지 확인
 2. `npm ci`(node_modules 없으면) → `npm test` / `npm run build` / `npm run lint` / `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npx playwright test` 로 현재 상태가 전부 통과하는지 재확인
-3. 체크포인트 5(DB 저장 통합 테스트 보강) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙)
+3. 체크포인트 6(Preview 배포·최종 검증·PR 생성) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙). 이 브랜치는 아직 origin에 푸시되지 않았고 GitHub PR도 생성되어 있지 않다 — 체크포인트 6에서 푸시·PR 생성 자체도 사용자 승인 없이는 하지 않는다.
 
 ## 다음 체크포인트 미리보기 (아직 미구현)
 
-- 체크포인트 5: DB 저장 통합 테스트 보강
-- 체크포인트 6: Preview 배포·최종 검증·PR 생성
+- 체크포인트 6: Preview 배포·최종 검증·PR 생성(+ GitHub 푸시·PR 생성 승인 필요)

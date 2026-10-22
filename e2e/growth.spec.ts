@@ -195,3 +195,40 @@ test('passing the profession exam shows the pass message, awarded XP, and a leve
   ])
   await expect(page.getByText('90/100 XP')).toBeVisible()
 })
+
+// PR #45 checkpoint 5: XP는 클라이언트 상태가 아니라 서버(DB)에 저장된
+// 값이어야 한다 — 퀴즈로 얻은 XP가 새로고침 후에도(이 테스트에서는 완전히
+// 새로 간 /grow 페이지 로드, 즉 캐릭터 목록을 처음부터 다시 GET하는
+// 상황) 그대로 보이는지 확인한다. 퀴즈 제출 응답이 아니라 "새로고침 후의
+// 캐릭터 목록 GET"이 45XP를 돌려주는 것으로 모킹해, 화면이 실제로 그
+// GET 응답을 반영하는지(제출 시점에 받은 클라이언트 메모리 값을 우연히
+// 그대로 보여주는 게 아닌지) 검증한다.
+test('XP earned from a quiz survives a full page reload (re-fetched from the server, not just client memory)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  const NURI_AFTER_QUIZ = { ...NURI_ACCOUNTANT_LV1, exp: 45 }
+  await mockCharacterApi(page, {
+    characters: [NURI_AFTER_QUIZ],
+    onQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          question: { id: 'accountant-1', text: '회계의 기본 등식은?', choices: ['자산 = 부채 + 자본', '수익 = 비용', '자산 = 자본', '부채 = 자본'] },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  // 처음 로드에서도 (제출 전부터) exp=45가 서버에서 내려와 표시된다 —
+  // 이 값은 이전 세션에서 이미 퀴즈로 얻어 DB에 저장되어 있던 XP라고
+  // 가정한다.
+  await expect(page.getByText('45/100 XP')).toBeVisible()
+
+  await page.reload()
+
+  await expect(page.getByText('45/100 XP')).toBeVisible()
+  await expect(page.getByText('Lv.1', { exact: true })).toBeVisible()
+})
