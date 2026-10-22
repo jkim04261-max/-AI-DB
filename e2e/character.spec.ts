@@ -72,6 +72,9 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   await expect(page.getByText('어린이', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  // PR #45 checkpoint 2: the card shows a 2D CharacterSprite (idle pose by
+  // default) instead of the old generic sprout icon.
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
 })
 
 test('a user who already has both characters sees no creation UI, just their cards', async ({ page }) => {

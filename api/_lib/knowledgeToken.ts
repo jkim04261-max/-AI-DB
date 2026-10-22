@@ -7,6 +7,9 @@ import type { KnowledgeVerificationStatus } from './gemini'
 const TOKEN_TTL_MS = 30 * 60 * 1000
 
 const VERIFICATION_STATUSES = new Set<string>(['appropriate', 'needs_revision', 'unverifiable'])
+const KNOWLEDGE_SOURCES = new Set<string>(['user_taught', 'ai_generated'])
+
+export type KnowledgeSource = 'user_taught' | 'ai_generated'
 
 export interface KnowledgeVerificationTokenPayload {
   userId: number
@@ -19,6 +22,12 @@ export interface KnowledgeVerificationTokenPayload {
   relevance: string
   issues: string
   suggestion: string
+  // PR #45 checkpoint 3: which flow produced this entry — the user typed
+  // it in ('user_taught') or the character generated it itself via
+  // study-generate ('ai_generated'). Signed into the token like every
+  // other field here, so save-knowledge never has to trust a client claim
+  // about where a knowledge entry came from either.
+  source: KnowledgeSource
 }
 
 function getAuthSecret(): string {
@@ -85,6 +94,8 @@ export function verifyKnowledgeVerificationToken(token: unknown): KnowledgeVerif
       typeof parsed.relevance !== 'string' ||
       typeof parsed.issues !== 'string' ||
       typeof parsed.suggestion !== 'string' ||
+      typeof parsed.source !== 'string' ||
+      !KNOWLEDGE_SOURCES.has(parsed.source) ||
       typeof parsed.exp !== 'number'
     ) {
       return null
@@ -102,6 +113,7 @@ export function verifyKnowledgeVerificationToken(token: unknown): KnowledgeVerif
       relevance: parsed.relevance,
       issues: parsed.issues,
       suggestion: parsed.suggestion,
+      source: parsed.source as KnowledgeSource,
     }
   } catch {
     return null

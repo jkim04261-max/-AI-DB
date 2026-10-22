@@ -34,3 +34,114 @@ body {
   background: #d7d6de;
   border-radius: 999px;
 }
+
+/* 누리·두리 2D 캐릭터 애니메이션 (PR #45) — CharacterSprite.tsx 전용.
+   transform-box: fill-box로 SVG 그룹의 transform-origin이 그룹 자신의
+   bounding box 기준으로 동작하게 한다(기본값인 뷰포트 기준 대신). */
+.grow-sprite-body,
+.grow-sprite-eyelid,
+.grow-sprite-mouth-group,
+.grow-sprite-star {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.grow-sprite-pose-idle .grow-sprite-body {
+  animation: grow-sprite-breathe 3.2s ease-in-out infinite;
+}
+.grow-sprite-pose-studying .grow-sprite-body {
+  animation: grow-sprite-sway-study 2.4s ease-in-out infinite;
+}
+.grow-sprite-pose-happy .grow-sprite-body {
+  animation: grow-sprite-bounce-happy 0.9s ease-in-out infinite;
+}
+.grow-sprite-pose-sad .grow-sprite-body {
+  animation: grow-sprite-droop-sad 2.8s ease-in-out infinite;
+}
+
+.grow-sprite-eyelid {
+  transform-origin: top center;
+  animation: grow-sprite-blink 4.6s ease-in-out infinite;
+}
+.grow-sprite-eyelid-right {
+  animation-delay: 0.08s;
+}
+
+.grow-sprite-star {
+  animation: grow-sprite-twinkle 1.1s ease-in-out infinite;
+}
+.grow-sprite-star:nth-of-type(2) {
+  animation-delay: 0.25s;
+}
+.grow-sprite-star:nth-of-type(3) {
+  animation-delay: 0.5s;
+}
+
+@keyframes grow-sprite-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(-2px) scaleY(1.015);
+  }
+}
+@keyframes grow-sprite-sway-study {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  50% {
+    transform: rotate(2.5deg) translateY(1px);
+  }
+}
+@keyframes grow-sprite-bounce-happy {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+@keyframes grow-sprite-droop-sad {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(4px) rotate(-2deg);
+  }
+}
+@keyframes grow-sprite-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(0);
+  }
+  96% {
+    transform: scaleY(1);
+  }
+}
+@keyframes grow-sprite-twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grow-sprite-pose-idle .grow-sprite-body,
+  .grow-sprite-pose-studying .grow-sprite-body,
+  .grow-sprite-pose-happy .grow-sprite-body,
+  .grow-sprite-pose-sad .grow-sprite-body,
+  .grow-sprite-eyelid,
+  .grow-sprite-star {
+    animation: none;
+  }
+}

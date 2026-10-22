@@ -189,6 +189,16 @@ export function ensureCharacterTables() {
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS profession TEXT
           CHECK (profession IN ('accountant', 'singer'))
       `
+
+      // PR #45 checkpoint 4: level is a cached/denormalized value derived
+      // from exp (api/_lib/characterGrowth.ts's levelForExp) — exp is the
+      // real source of truth, level is recomputed and rewritten alongside
+      // it every time exp changes (applyExpGain in api/character.ts), the
+      // same "denormalize for read convenience, keep in sync on write"
+      // choice the growth-system design doc made for `stage`. DEFAULT 1/0
+      // backfills every existing character row with no data loss.
+      await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 1`
+      await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS exp INTEGER NOT NULL DEFAULT 0`
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -245,12 +255,133 @@ export function ensureKnowledgeTable() {
           ON character_knowledge_entries (character_id, client_request_id)
           WHERE client_request_id IS NOT NULL
       `
+
+      // PR #45 checkpoint 3: distinguishes a user-taught entry from one the
+      // character generated and verified itself ("스스로 공부하기").
+      // Nullable-safe additive column — DEFAULT 'user_taught' means every
+      // existing row (all of which were in fact user-taught, from PR #44)
+      // is correctly backfilled with no data loss, and no write path needs
+      // updating just because this column now exists.
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS source TEXT
+          NOT NULL DEFAULT 'user_taught' CHECK (source IN ('user_taught', 'ai_generated'))
+      `
     })().catch((err) => {
       knowledgeTableReady = null
       throw err
     })
   }
   return knowledgeTableReady
+}
+
+let characterMessagesTableReady: Promise<unknown> | null = null
+
+// PR #45 checkpoint 3.6: one row per line shown in a character's
+// InteractionPanel dialogue feed (가르치기/스스로 공부하기) — unlike
+// character_knowledge_entries, this logs *every* exchange, including a
+// 'needs_revision'/'unverifiable' attempt that never becomes a saved
+// knowledge entry, so nothing the user sees in the conversation
+// disappears on refresh. It is a *conversation log*, not a knowledge
+// base: `character_knowledge_entries` alone remains the only source of
+// "검증된 지식" a future exam/chat feature may treat as fact (see
+// resolveTeachReply/handleSaveKnowledge in api/character.ts — a
+// needs_revision/unverifiable row here never gets a knowledge_entry_id).
+// user_id is denormalized alongside character_id for the same reason as
+// character_knowledge_entries (db.ts:208-213) — every query filters on
+// both directly.
+export function ensureCharacterMessagesTable() {
+  if (!characterMessagesTableReady) {
+    characterMessagesTableReady = (async () => {
+      // character_messages.knowledge_entry_id references
+      // character_knowledge_entries(id), so that table must exist first.
+      await ensureKnowledgeTable()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_messages (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          speaker TEXT NOT NULL CHECK (speaker IN ('user', 'character')),
+          source TEXT NOT NULL CHECK (source IN ('user_taught', 'ai_generated')),
+          content TEXT NOT NULL,
+          verification_status TEXT CHECK (verification_status IN ('appropriate', 'needs_revision', 'unverifiable')),
+          knowledge_entry_id INTEGER REFERENCES character_knowledge_entries(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_messages_character_created_idx
+          ON character_messages (character_id, created_at ASC)
+      `
+    })().catch((err) => {
+      characterMessagesTableReady = null
+      throw err
+    })
+  }
+  return characterMessagesTableReady
+}
+
+let growthTablesReady: Promise<unknown> | null = null
+
+// PR #45 checkpoint 4: 퀴즈·시험 응시 기록(전체 이력, 감사/조회용) +
+// "최초 1회" 보상 여부를 원자적으로 판정하는 두 개의 작은 테이블.
+//
+// character_exam_attempts는 모든 시도를 남기는 append-only 로그다(정답
+// 여부·점수·실제로 지급된 XP 포함) — 재시도해도 몇 번이든 쌓이지만,
+// exp_awarded는 아래 두 "최초" 테이블에 실제로 새 행이 들어갔을 때만
+// 0보다 크다.
+//
+// character_quiz_firsts/character_exam_firsts는 PRIMARY KEY 자체가
+// "이미 보상을 받았는지"의 유일한 판단 기준이다 — `INSERT ... ON
+// CONFLICT DO NOTHING RETURNING ...`으로 한 문장에서 원자적으로
+// "이번이 처음이다/아니다"를 판정하므로(reserveTeach 등과 같은 원자적
+// 패턴), 동시에 두 요청이 들어와도 XP가 두 번 지급될 수 없다.
+export function ensureGrowthTables() {
+  if (!growthTablesReady) {
+    growthTablesReady = (async () => {
+      await ensureCharacterTables()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_exam_attempts (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('quiz', 'exam')),
+          profession TEXT NOT NULL CHECK (profession IN ('accountant', 'singer')),
+          question_id TEXT,
+          score INTEGER,
+          passed BOOLEAN NOT NULL,
+          exp_awarded INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_exam_attempts_character_created_idx
+          ON character_exam_attempts (character_id, created_at DESC)
+      `
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_quiz_firsts (
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          question_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (character_id, question_id)
+        )
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_exam_firsts (
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          profession TEXT NOT NULL CHECK (profession IN ('accountant', 'singer')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (character_id, profession)
+        )
+      `
+    })().catch((err) => {
+      growthTablesReady = null
+      throw err
+    })
+  }
+  return growthTablesReady
 }
 
 export { sql }
@@ -310,6 +441,8 @@ export interface CharacterRow {
   companion_type: 'nuri' | 'duri'
   stage: 'child' | 'adult'
   profession: 'accountant' | 'singer' | null
+  level: number
+  exp: number
   created_at: string
 }
 
@@ -323,5 +456,31 @@ export interface KnowledgeEntryRow {
   final_content: string
   verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
   verification_explanation: string
+  source: 'user_taught' | 'ai_generated'
+  created_at: string
+}
+
+export interface CharacterMessageRow {
+  id: number
+  user_id: number
+  character_id: number
+  speaker: 'user' | 'character'
+  source: 'user_taught' | 'ai_generated'
+  content: string
+  verification_status: 'appropriate' | 'needs_revision' | 'unverifiable' | null
+  knowledge_entry_id: number | null
+  created_at: string
+}
+
+export interface CharacterExamAttemptRow {
+  id: number
+  user_id: number
+  character_id: number
+  kind: 'quiz' | 'exam'
+  profession: 'accountant' | 'singer'
+  question_id: string | null
+  score: number | null
+  passed: boolean
+  exp_awarded: number
   created_at: string
 }

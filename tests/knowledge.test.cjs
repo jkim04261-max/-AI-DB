@@ -114,6 +114,7 @@ async function run() {
   )
   t.assert(saveRes1.statusCode === 201, '사용자가 확인 후 저장하면 성공한다 (201)')
   t.assert(saveRes1.body.entry?.profession === 'accountant', '저장된 기록에 캐릭터의 직업(회계사)이 함께 기록된다')
+  t.assert(saveRes1.body.entry?.source === 'user_taught', "사용자가 직접 가르친 지식은 source가 'user_taught'로 기록된다")
 
   // --- 11: 중복 제출 방지 (같은 requestId로 다시 저장) ---
   {
@@ -439,6 +440,174 @@ async function run() {
   // verified structurally (separate table/column names throughout), not by
   // a shared-state assertion here.
   t.assert(geminiCallCount > 0, 'Gemini API가 실제로 (모의) 호출되었다')
+
+  // --- PR #45 checkpoint 3: "스스로 공부하기" (study-generate) ---
+  mock.reset()
+  mock.seedUser(5, { email: 'erin@test.com' })
+  const erinCookie = cookieHeaderFor(auth, 5, 0, 'erin@test.com')
+  const erinReq = (overrides = {}) => ({ headers: { cookie: erinCookie }, query: {}, ...overrides })
+  await characterHandler(erinReq({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
+  await characterHandler(erinReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'singer' } }), mockRes())
+
+  // --- auth / profession-required guards, same shape as verify-knowledge ---
+  {
+    const res = mockRes()
+    await characterHandler({ method: 'POST', headers: {}, query: { action: 'study-generate' }, body: { companionType: 'duri' } }, res)
+    t.assert(res.statusCode === 401, 'study-generate without a session is rejected (401)')
+  }
+  {
+    mock.seedUser(6, { email: 'frank@test.com' })
+    const frankCookie = cookieHeaderFor(auth, 6, 0, 'frank@test.com')
+    await characterHandler({ headers: { cookie: frankCookie }, query: {}, method: 'POST', body: { companionType: 'duri' } }, mockRes())
+    const res = mockRes()
+    await characterHandler(
+      { headers: { cookie: frankCookie }, query: { action: 'study-generate' }, method: 'POST', body: { companionType: 'duri' } },
+      res,
+    )
+    t.assert(res.statusCode === 400, '직업이 없는 캐릭터는 스스로 공부하기를 거부한다 (400)')
+  }
+
+  // --- 정상 흐름: 스스로 공부하기 → 생성+자체검증(1회 Gemini 호출) → 저장 ---
+  geminiBehavior = {
+    kind: 'json',
+    result: { title: '발성 호흡법', content: '복식호흡으로 소리를 낸다.', status: 'appropriate', explanation: '정확해요', relevance: '가수와 관련 있어요', issues: '', suggestion: '' },
+  }
+  const studyRes = mockRes()
+  await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), studyRes)
+  t.assert(studyRes.statusCode === 200, '스스로 공부하기 요청이 성공한다 (200)')
+  t.assert(studyRes.body.knowledge?.title === '발성 호흡법', '생성된 지식의 제목이 응답에 포함된다')
+  t.assert(studyRes.body.verification?.status === 'appropriate', '스스로 생성한 지식을 스스로 적합으로 평가한다')
+  t.assert(typeof studyRes.body.verificationToken === 'string' && studyRes.body.verificationToken.length > 0, '서명된 verificationToken이 포함된다')
+  t.assert(studyRes.body.dailyStudyLimit === 3, '스스로 공부하기의 일일 한도는 3회로 응답에 포함된다')
+
+  const studySave = mockRes()
+  await characterHandler(
+    erinReq({
+      method: 'POST',
+      query: { action: 'save-knowledge' },
+      body: {
+        companionType: 'duri',
+        title: studyRes.body.knowledge.title,
+        originalContent: studyRes.body.knowledge.content,
+        finalContent: studyRes.body.knowledge.content,
+        verificationToken: studyRes.body.verificationToken,
+        requestId: 'req-study-1',
+      },
+    }),
+    studySave,
+  )
+  t.assert(studySave.statusCode === 201, '스스로 공부한 지식도 기존 save-knowledge 액션으로 저장된다 (201)')
+  t.assert(studySave.body.entry?.source === 'ai_generated', "스스로 공부한 지식은 source가 'ai_generated'로 기록된다(서버가 토큰에서 판단, 클라이언트가 지정하지 않음)")
+
+  // --- 클라이언트가 body에 source를 직접 보내도 무시된다(토큰에서만 판단) ---
+  {
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' } }
+    const userVerify = mockRes()
+    await characterHandler(
+      erinReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'duri', title: '복식호흡 기초', content: '숨을 배로 쉰다' } }),
+      userVerify,
+    )
+    const res = mockRes()
+    await characterHandler(
+      erinReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'duri',
+          title: '복식호흡 기초',
+          originalContent: '숨을 배로 쉰다',
+          finalContent: '숨을 배로 쉰다',
+          verificationToken: userVerify.body.verificationToken,
+          source: 'ai_generated', // 위조 시도 — 서버는 이 필드를 아예 읽지 않는다
+          requestId: 'req-source-spoof',
+        },
+      }),
+      res,
+    )
+    t.assert(res.body.entry?.source === 'user_taught', "요청 본문에 source를 위조해 보내도 무시되고, 토큰이 실제로 가리키는 'user_taught'로 저장된다")
+  }
+
+  // --- 중복 제출 방지: 같은 requestId로 다시 저장해도 새 기록이 생기지 않는다 ---
+  {
+    const res = mockRes()
+    await characterHandler(
+      erinReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'duri',
+          title: studyRes.body.knowledge.title,
+          originalContent: studyRes.body.knowledge.content,
+          finalContent: studyRes.body.knowledge.content,
+          verificationToken: studyRes.body.verificationToken,
+          requestId: 'req-study-1',
+        },
+      }),
+      res,
+    )
+    t.assert(res.statusCode === 200, '같은 requestId로 다시 저장을 시도하면 200(기존 기록 반환)으로 응답한다')
+    t.assert(res.body.entry?.id === studySave.body.entry?.id, '스스로 공부하기도 중복 제출 방지가 동일하게 적용된다')
+  }
+
+  // --- Gemini가 해석 불가능한 응답을 주면(제목/내용 누락) 실패로 처리되고 한도가 환불된다 ---
+  {
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: '설명만 있고 title/content가 없음' } }
+    const res = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), res)
+    t.assert(res.statusCode >= 500, 'title/content가 없는 응답은 해석 실패로 처리된다')
+  }
+
+  // --- 일일 한도 3회, 지식 검증(10회) 한도와 완전히 분리 ---
+  {
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '제목', content: '내용', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+    }
+    // 위에서 이미 1회(req-study-1) + 1회(실패, 환불됨) 소비했으므로, 성공
+    // 기준으로는 지금까지 1회만 소비된 상태 — 2회 더 성공해야 한도(3)에 도달한다.
+    let lastStudy
+    for (let i = 0; i < 2; i++) {
+      lastStudy = mockRes()
+      await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), lastStudy)
+    }
+    t.assert(lastStudy.statusCode === 200, '하루 3번째 스스로 공부하기 요청까지는 성공한다(실패한 시도는 환불되어 소비되지 않음)')
+    const overStudy = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), overStudy)
+    t.assert(overStudy.statusCode === 429, '하루 4번째 스스로 공부하기 요청은 429로 차단된다(하루 3회 제한)')
+    t.assert(overStudy.body.remaining === 0, '한도 초과 응답의 remaining은 0이다')
+
+    // 스스로 공부하기 한도를 다 썼어도, 지식 검증(가르치기) 한도는 전혀
+    // 영향받지 않는다 — 완전히 분리된 테이블/카운터.
+    const teachStillWorks = mockRes()
+    await characterHandler(
+      erinReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'duri', title: '다른 지식', content: '다른 내용' } }),
+      teachStillWorks,
+    )
+    t.assert(teachStillWorks.statusCode === 200, '스스로 공부하기 한도 소진과 무관하게 지식 검증(가르치기)은 계속 가능하다')
+  }
+
+  // --- 다른 사용자 차단 ---
+  {
+    mock.seedUser(7, { email: 'grace@test.com' })
+    const graceCookie = cookieHeaderFor(auth, 7, 0, 'grace@test.com')
+    const res = mockRes()
+    await characterHandler(
+      { headers: { cookie: graceCookie }, query: { action: 'study-generate' }, method: 'POST', body: { companionType: 'duri' } },
+      res,
+    )
+    t.assert(res.statusCode === 404, 'grace가 erin의 두리를 대신 공부시키려 해도 404로 차단된다')
+  }
+
+  // --- 누리·두리 학습 기록에 source가 함께 내려온다 ---
+  {
+    const res = mockRes()
+    await characterHandler(erinReq({ method: 'GET', query: { action: 'knowledge', companionType: 'duri' } }), res)
+    const sources = (res.body.entries ?? []).map((e) => e.source).sort()
+    t.assert(
+      sources.includes('user_taught') && sources.includes('ai_generated'),
+      '학습 기록 목록에 user_taught/ai_generated 출처가 각각 구분되어 내려온다',
+    )
+  }
 
   return t.summary()
 }
