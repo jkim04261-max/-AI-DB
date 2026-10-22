@@ -6,7 +6,43 @@
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
 - **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험), 5(DB·보안·전체 기능 통합 검증)
-- **다음 체크포인트**: 6(Preview 배포·최종 검증·PR 생성) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+- **진행 중(블로킹됨)**: 6(GitHub PR 생성·Vercel Preview 배포·최종 검증) — PR·브랜치 푸시는 완료, **Vercel Preview 배포가 빌드 실패**로 막혀 있어 화면 검증을 진행하지 못함(아래 섹션 참고). **사용자 확인 필요**, 체크포인트 6은 아직 완료되지 않음.
+
+## 체크포인트 6 — GitHub PR 생성·Vercel Preview 배포·최종 검증 (진행 중 — 블로커 있음)
+
+### 완료한 것
+- `claude/pr45-2d-growth-game-mvp` 브랜치를 origin에 푸시(`git push -u origin claude/pr45-2d-growth-game-mvp`) — 이 브랜치가 origin에 존재한 적이 없어 신규 푸시였다.
+- `main`을 base로 PR 생성: **PR #45** — https://github.com/jkim04261-max/-AI-DB/pull/45 (요청하신 번호와 실제 번호가 정확히 일치)
+
+### 블로커: Vercel Preview 배포 실패
+- PR 생성 직후 Vercel 연동이 자동으로 Preview 배포를 시도했으나 **빌드 실패**(`state: "failure"`, "Deployment has failed")로 끝났다. Preview URL이 생성되지 않아(검사 결과 `previewUrl` 비어있음) 요청하신 6번(로그인·누리/두리·대화 저장·지식 검증·스스로 공부하기·XP/레벨·퀴즈·시험) 화면 검증과 9번(모바일 화면·캐릭터 표시)을 **수행할 수 없었다.**
+- Vercel 배포 검사 링크: https://vercel.com/nuri-ai/ai-db/5mmNoUWpqUuH4i6UB9ffapHSihka (Vercel이 제시한 CLI 명령: `npx vercel inspect dpl_5mmNoUWpqUuH4i6UB9ffapHSihka --logs`)
+- **이 세션(샌드박스)에서는 실제 빌드 로그를 확인할 수 없다**: Vercel CLI가 설치/인증되어 있지 않고, Vercel API 토큰도 없으며, 이 환경의 아웃바운드 네트워크 정책이 `vercel.com`을 허용 목록에 포함하지 않아 대시보드 접속 자체가 막힌다(`getaddrinfo ENOTFOUND vercel.com`). CLAUDE.md 6번 규칙("오류를 추측으로 수정하지 않는다")에 따라, 실제 로그를 보지 못한 채로 코드를 추측 수정하지 않았다.
+- **정황 증거로 확인한 것** (코드 변경 없이 점검만):
+  - 같은 프로젝트(`ai-db`)의 직전 PR #44는 동일한 Vercel 연동으로 정상 배포됨(`state: "success"`) — Vercel 프로젝트 설정 자체는 정상 동작한 이력이 있다.
+  - Vercel 서버리스 함수 개수는 PR #44 merge 시점과 지금 동일하게 **12개**(이번 체크포인트 2~5에서 새 최상위 `api/*.ts` 파일을 추가한 적이 없음) — 함수 개수 제한 초과가 원인은 아닌 것으로 보인다.
+  - 로컬에서 `npm run typecheck:api`(`tsc -b tsconfig.api.json`)와 `npm run build`가 모두 깨끗하게 통과한다 — 신규/수정 파일(`api/_lib/characterGrowth.ts`, `api/_lib/examQuestions.ts`, `api/character.ts` 등)에 타입 오류는 없다. 다만 Vercel의 Serverless Function 빌더(`@vercel/node`)는 이 로컬 `tsconfig.api.json`으로 타입 검사를 하지 않고 함수별로 독립 번들링하므로, 로컬에서 깨끗하다고 Vercel 번들링도 반드시 성공한다는 보장은 아니다.
+  - GitHub Actions CI(이 PR의 `checks`/`e2e` 워크플로우, 같은 `npm run build`/`npm test`/`npm run test:e2e`를 실행)는 생성된 지 상당 시간이 지나도록 **"queued"(러너 할당 대기)** 상태에서 진행되지 않아, 이 체크포인트를 완료하는 시점까지 결과를 확인하지 못했다. 코드 문제가 아니라 Actions 러너/과금 쪽 별개 이슈일 가능성도 있다.
+- **사용자 확인 요청**: 아래 중 하나를 알려주시면 원인을 특정해 최소 수정을 진행할 수 있습니다.
+  1. Vercel 대시보드(또는 `npx vercel inspect dpl_5mmNoUWpqUuH4i6UB9ffapHSihka --logs`)에서 실제 빌드 오류 로그를 확인해 붙여넣어 주시거나,
+  2. 이 Claude Code 세션에 Vercel 로그를 조회할 수 있는 방법(예: 이 저장소 연동 환경에서 접근 가능한 도구)이 있다면 알려주세요.
+
+### 확인하지 못한 항목 (배포 실패로 인해 보류)
+- Preview 화면 기능 검증(로그인/누리·두리 선택/대화 저장/지식 검증/스스로 공부하기/XP·레벨/퀴즈/직업별 시험) — Preview가 뜨지 않아 수행 불가.
+- 모바일 화면·캐릭터 표시 확인 — 동일한 이유로 수행 불가.
+- **Preview가 Production DB를 공유하는지 여부**: Vercel 프로젝트의 Storage/환경변수 설정(Settings → Environment Variables, Storage → Postgres)을 봐야 알 수 있는데, 이 세션에는 그 설정을 조회할 권한/접근 경로가 없다. `README.md`에는 `POSTGRES_URL`을 "Vercel 프로젝트에 Storage → Postgres를 연결하면 자동으로 채워진다"고만 되어 있어, Preview·Production이 같은 Neon 데이터베이스를 공유하는지 별도 브랜치를 쓰는지는 문서만으로 판단할 수 없다. **배포 자체가 실패해 어떤 코드도 실행되지 않았으므로, 이번 시도에서 실제 데이터를 건드린 적은 없다** — 다만 Preview가 재배포에 성공하더라도, 이 공유 여부가 확인되기 전까지는 데이터 변경을 동반하는 검증(지식 저장·퀴즈/시험 제출 등)을 보류하고 먼저 보고할 것이다(요청하신 조건 8 그대로 준수).
+- 실제 Neon DB 연결·마이그레이션 필요 여부: 코드상 모든 테이블이 `ensureXTable()`의 `CREATE TABLE IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`로 요청이 들어올 때 지연 생성되는 구조이므로 별도 수동 마이그레이션은 필요 없을 것으로 보이나, 실제로 Preview가 뜬 뒤 최초 요청에서 정상 작동하는지는 아직 확인하지 못했다.
+
+### 변경 없이 재확인된 것
+- 로컬 `npm test`(258/258), `npm run test:e2e`(40/40), `npm run typecheck:api`/`npm run build`/`npm run lint` — 체크포인트 5에서 마지막 확인한 결과와 동일, 이번에 코드를 바꾸지 않았으므로 재실행하지 않았다.
+
+### 다음 단계 (사용자 확인 후 재개)
+1. Vercel 빌드 로그 확보 → 원인 특정 → 최소 수정 → 재배포.
+2. GitHub Actions CI(`checks`/`e2e`) 결과 확인(현재 대기 중).
+3. Preview URL 확보 후 요청하신 6·7·8·9번 항목(기능 검증, DB 연결/마이그레이션, Preview-Production DB 공유 여부, 모바일 화면) 진행.
+4. 전부 확인되면 PR URL·Preview URL·테스트 결과·남은 위험·사용자 직접 테스트 항목을 정리해 최종 보고.
+
+main 병합·Production 배포는 하지 않았으며, 사용자의 명시적 최종 승인 전까지 하지 않는다.
 
 ## 체크포인트 5 — DB·보안·전체 기능 통합 검증 (완료)
 
