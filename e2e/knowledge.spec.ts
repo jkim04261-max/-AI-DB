@@ -130,6 +130,10 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
             created_at: new Date().toISOString(),
           },
           savedReply: '이 지식을 배웠어요! 다음엔 또 어떤 걸 가르쳐 주실 건가요?',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
         }),
       })
     },
@@ -324,6 +328,10 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
             created_at: new Date().toISOString(),
           },
           savedReply: '이 지식을 학습 기록에 저장했어요! 다음엔 또 무엇을 공부해볼까요?',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
         }),
       })
     },

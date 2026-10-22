@@ -3,6 +3,7 @@ import {
   ensureCharacterTables,
   ensureKnowledgeTable,
   ensureCharacterMessagesTable,
+  ensureGrowthTables,
   sql,
   type CharacterRow,
   type KnowledgeEntryRow,
@@ -19,7 +20,9 @@ import {
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach } from './_lib/knowledgeLimit'
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
-import { buildTeachReply, buildStudyReply, buildSavedReply } from './_lib/characterDialogue'
+import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
+import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOLD, levelForExp } from './_lib/characterGrowth'
+import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #43's first two supported professions. Extending this later (e.g. a
@@ -79,6 +82,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleListMessages(req, res, session.sub)
       return
     }
+    if (action === 'quiz') {
+      await handleGetQuiz(req, res, session.sub)
+      return
+    }
+    if (action === 'exam') {
+      await handleGetExam(req, res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -94,6 +105,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'study-generate') {
       await handleGenerateStudy(req, res, session.sub)
+      return
+    }
+    if (action === 'quiz-submit') {
+      await handleSubmitQuiz(req, res, session.sub)
+      return
+    }
+    if (action === 'exam-submit') {
+      await handleSubmitExam(req, res, session.sub)
       return
     }
     await handlePost(req, res, session.sub)
@@ -115,7 +134,7 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) return null
 
   const result = await sql<CharacterRow>`
-    SELECT id, user_id, companion_type, stage, profession, created_at
+    SELECT id, user_id, companion_type, stage, profession, level, exp, created_at
     FROM characters
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
@@ -127,7 +146,7 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, profession, created_at
+      SELECT id, user_id, companion_type, stage, profession, level, exp, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
@@ -159,7 +178,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, profession, created_at
+      RETURNING id, user_id, companion_type, stage, profession, level, exp, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -202,7 +221,7 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
       UPDATE characters
       SET profession = ${profession}
       WHERE user_id = ${userId} AND companion_type = ${companionType}
-      RETURNING id, user_id, companion_type, stage, profession, created_at
+      RETURNING id, user_id, companion_type, stage, profession, level, exp, created_at
     `
     const character = updated.rows[0]
     if (!character) {
@@ -232,6 +251,35 @@ function resolveGeminiFailureMessage(err: unknown): { status: number; message: s
   }
   console.error('[api/character] unexpected error calling gemini', err)
   return { status: 502, message: 'Gemini 응답을 받지 못했어요.' }
+}
+
+export interface ExpGainResult {
+  exp: number
+  oldLevel: number
+  newLevel: number
+  leveledUp: boolean
+}
+
+// PR #45 checkpoint 4: the single place that ever changes characters.exp —
+// every XP-granting action (knowledge save, quiz, exam) routes through
+// this. `oldLevel` is passed in by the caller (already has the character
+// row from findOwnCharacter, fetched *before* this gain) rather than
+// re-queried here, so the before/after comparison is exact. exp and level
+// are both scoped by `user_id = ${userId} AND id = ${characterId}` — same
+// ownership guarantee as every other write in this file.
+async function applyExpGain(userId: number, characterId: number, oldLevel: number, delta: number): Promise<ExpGainResult> {
+  const updated = await sql<{ exp: number }>`
+    UPDATE characters
+    SET exp = exp + ${delta}
+    WHERE id = ${characterId} AND user_id = ${userId}
+    RETURNING exp
+  `
+  const exp = updated.rows[0]?.exp ?? 0
+  const newLevel = levelForExp(exp)
+  if (newLevel !== oldLevel) {
+    await sql`UPDATE characters SET level = ${newLevel} WHERE id = ${characterId} AND user_id = ${userId}`
+  }
+  return { exp, oldLevel, newLevel, leveledUp: newLevel > oldLevel }
 }
 
 // Runs a Gemini check on a piece of knowledge the user wants to teach a
@@ -562,7 +610,19 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
         WHERE character_id = ${character.id} AND client_request_id = ${requestId}
       `
       if (existing.rows[0]) {
-        res.status(200).json({ entry: existing.rows[0] })
+        // A repeat of an already-processed save — XP was already granted
+        // the first time (that INSERT only ever happens once per
+        // requestId), so this response reports the character's *current*
+        // level/exp without granting anything again or re-announcing a
+        // level-up that already happened.
+        res.status(200).json({
+          entry: existing.rows[0],
+          savedReply: buildSavedReply(existing.rows[0].source, false, character.level),
+          expAwarded: 0,
+          exp: character.exp,
+          level: character.level,
+          leveledUp: false,
+        })
         return
       }
     }
@@ -584,6 +644,14 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     `
     const entry = inserted.rows[0]
 
+    // PR #45 checkpoint 4: XP for a verified knowledge save — granted
+    // exactly once per entry, because this line only runs on the genuine
+    // INSERT path above (the idempotent-replay branch for a repeated
+    // requestId already returned earlier, before ever reaching here). No
+    // separate dedup table needed: the existing client_request_id unique
+    // index is what makes the INSERT above itself happen at most once.
+    const expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+
     // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
     // knowledge entry above is the thing that matters and it has already
     // committed successfully — a client must never be told "저장 실패"
@@ -591,7 +659,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // on failure, log server-side and still return 201 with the real
     // entry, rather than failing (or refunding anything) for a save that
     // actually worked.
-    const savedReply = buildSavedReply(tokenPayload.source)
+    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel)
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -602,7 +670,14 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
       console.error('[api/character] failed to persist character_messages for save-knowledge (entry already saved)', err)
     }
 
-    res.status(201).json({ entry, savedReply })
+    res.status(201).json({
+      entry,
+      savedReply,
+      expAwarded: KNOWLEDGE_SAVE_EXP,
+      exp: expResult.exp,
+      level: expResult.newLevel,
+      leveledUp: expResult.leveledUp,
+    })
   } catch (err) {
     console.error('[api/character] unexpected error on save-knowledge', err)
     res.status(500).json({ error: '학습 기록을 저장하는 중 오류가 발생했어요.' })
@@ -696,5 +771,256 @@ async function handleListMessages(req: VercelRequest, res: VercelResponse, userI
   } catch (err) {
     console.error('[api/character] unexpected error on list messages', err)
     res.status(500).json({ error: '대화 기록을 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #45 checkpoint 4: returns one random quiz question for the
+// character's profession, with the answer stripped — grading always
+// happens in handleSubmitQuiz, never on the client (요청 조건 4).
+async function handleGetQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+
+  try {
+    await ensureCharacterTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const questions = getQuestionsForProfession(character.profession)
+    const question = questions[Math.floor(Math.random() * questions.length)]
+    res.status(200).json({ question: { id: question.id, text: question.text, choices: question.choices } })
+  } catch (err) {
+    console.error('[api/character] unexpected error on quiz', err)
+    res.status(500).json({ error: '퀴즈를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #45 checkpoint 4: grades a single quiz question server-side against
+// api/_lib/examQuestions.ts's answer key (the client only ever sends an
+// answerIndex, never a claimed "correct" flag). XP (+5) is granted only
+// the *first* time this character answers this specific question_id
+// correctly — character_quiz_firsts' PRIMARY KEY is the atomic guard
+// (INSERT ... ON CONFLICT DO NOTHING) that makes repeated submissions,
+// retries, or refreshes unable to grant XP more than once per question
+// (요청 조건 3). Every attempt (first or not, correct or not) is still
+// logged to character_exam_attempts for history.
+async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, questionId, answerIndex } = (req.body ?? {}) as {
+    companionType?: unknown
+    questionId?: unknown
+    answerIndex?: unknown
+  }
+
+  if (typeof questionId !== 'string' || !questionId) {
+    res.status(400).json({ error: '잘못된 문제예요.' })
+    return
+  }
+  if (typeof answerIndex !== 'number' || !Number.isInteger(answerIndex) || answerIndex < 0) {
+    res.status(400).json({ error: '답을 선택해주세요.' })
+    return
+  }
+
+  try {
+    await ensureCharacterTables()
+    await ensureGrowthTables()
+    await ensureCharacterMessagesTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const question = getQuestionById(questionId)
+    if (!question || question.profession !== character.profession) {
+      res.status(400).json({ error: '이 캐릭터의 직업과 맞지 않는 문제예요.' })
+      return
+    }
+
+    const correct = answerIndex === question.correctIndex
+
+    let expAwarded = 0
+    if (correct) {
+      const firstTime = await sql<{ character_id: number }>`
+        INSERT INTO character_quiz_firsts (character_id, question_id)
+        VALUES (${character.id}, ${questionId})
+        ON CONFLICT DO NOTHING
+        RETURNING character_id
+      `
+      if (firstTime.rows[0]) {
+        expAwarded = QUIZ_CORRECT_EXP
+      }
+    }
+
+    const expResult =
+      expAwarded > 0
+        ? await applyExpGain(userId, character.id, character.level, expAwarded)
+        : { exp: character.exp, oldLevel: character.level, newLevel: character.level, leveledUp: false }
+
+    await sql`
+      INSERT INTO character_exam_attempts (user_id, character_id, kind, profession, question_id, score, passed, exp_awarded)
+      VALUES (${userId}, ${character.id}, 'quiz', ${character.profession}, ${questionId}, ${null}, ${correct}, ${expAwarded})
+    `
+
+    const message = buildQuizResultMessage(correct, question.explanation, expAwarded, expResult.leveledUp, expResult.newLevel)
+
+    res.status(200).json({
+      correct,
+      explanation: question.explanation,
+      expAwarded,
+      exp: expResult.exp,
+      level: expResult.newLevel,
+      leveledUp: expResult.leveledUp,
+      message,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on quiz-submit', err)
+    res.status(500).json({ error: '퀴즈 채점 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #45 checkpoint 4: returns every question for the character's
+// profession (3~5문항, no answers) plus whether this character has
+// already passed this profession's exam before (so the UI can show that
+// without a separate history endpoint).
+async function handleGetExam(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+
+  try {
+    await ensureCharacterTables()
+    await ensureGrowthTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const questions = getQuestionsForProfession(character.profession)
+    const alreadyPassed = await sql<{ character_id: number }>`
+      SELECT character_id FROM character_exam_firsts
+      WHERE character_id = ${character.id} AND profession = ${character.profession}
+    `
+
+    res.status(200).json({
+      questions: questions.map((q) => ({ id: q.id, text: q.text, choices: q.choices })),
+      alreadyPassed: alreadyPassed.rows.length > 0,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on exam', err)
+    res.status(500).json({ error: '시험 문제를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #45 checkpoint 4: grades the full exam server-side. Requires an
+// answer for *every* question in the character's profession bank (no
+// partial submissions) — score = fraction correct, passed if it meets
+// EXAM_PASS_THRESHOLD. +50XP only on this character's *first* pass of
+// this profession's exam, guarded the same atomic way as quizzes
+// (character_exam_firsts' PRIMARY KEY + ON CONFLICT DO NOTHING) — retries,
+// refreshes, or repeated submissions after already passing can never grant
+// it again (요청 조건 3).
+async function handleSubmitExam(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, answers } = (req.body ?? {}) as {
+    companionType?: unknown
+    answers?: unknown
+  }
+
+  if (!Array.isArray(answers)) {
+    res.status(400).json({ error: '답안을 제출해주세요.' })
+    return
+  }
+
+  try {
+    await ensureCharacterTables()
+    await ensureGrowthTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const questions = getQuestionsForProfession(character.profession)
+    const answerMap = new Map<string, number>()
+    for (const a of answers) {
+      if (
+        a &&
+        typeof a === 'object' &&
+        typeof (a as { questionId?: unknown }).questionId === 'string' &&
+        typeof (a as { answerIndex?: unknown }).answerIndex === 'number'
+      ) {
+        answerMap.set((a as { questionId: string }).questionId, (a as { answerIndex: number }).answerIndex)
+      }
+    }
+    const allAnswered = questions.every((q) => answerMap.has(q.id))
+    if (!allAnswered || answerMap.size !== questions.length) {
+      res.status(400).json({ error: '모든 문항에 답해주세요.' })
+      return
+    }
+
+    const results = questions.map((q) => ({ questionId: q.id, correct: answerMap.get(q.id) === q.correctIndex }))
+    const score = results.filter((r) => r.correct).length
+    const total = questions.length
+    const passed = score / total >= EXAM_PASS_THRESHOLD
+
+    let expAwarded = 0
+    if (passed) {
+      const firstTime = await sql<{ character_id: number }>`
+        INSERT INTO character_exam_firsts (character_id, profession)
+        VALUES (${character.id}, ${character.profession})
+        ON CONFLICT DO NOTHING
+        RETURNING character_id
+      `
+      if (firstTime.rows[0]) {
+        expAwarded = EXAM_PASS_EXP
+      }
+    }
+
+    const expResult =
+      expAwarded > 0
+        ? await applyExpGain(userId, character.id, character.level, expAwarded)
+        : { exp: character.exp, oldLevel: character.level, newLevel: character.level, leveledUp: false }
+
+    await sql`
+      INSERT INTO character_exam_attempts (user_id, character_id, kind, profession, question_id, score, passed, exp_awarded)
+      VALUES (${userId}, ${character.id}, 'exam', ${character.profession}, ${null}, ${score}, ${passed}, ${expAwarded})
+    `
+
+    const message = buildExamResultMessage(passed, score, total, expAwarded, expResult.leveledUp, expResult.newLevel)
+
+    res.status(200).json({
+      passed,
+      score,
+      total,
+      results,
+      expAwarded,
+      exp: expResult.exp,
+      level: expResult.newLevel,
+      leveledUp: expResult.leveledUp,
+      message,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on exam-submit', err)
+    res.status(500).json({ error: '시험 채점 중 오류가 발생했어요.' })
   }
 }

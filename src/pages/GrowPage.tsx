@@ -1,11 +1,13 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Briefcase, BookOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import { Briefcase, BookOpen, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType, type Character } from '../context/GrowthContext'
 import { PROFESSIONS, PROFESSION_LABEL, type ProfessionId } from '../data/characterProfessions'
+import { levelProgress, KNOWLEDGE_VS_MODEL_DISCLAIMER } from '../data/characterGrowth'
 import CharacterSprite, { type CharacterPose } from '../components/grow/CharacterSprite'
 import InteractionPanel from '../components/grow/InteractionPanel'
+import ExamPanel from '../components/grow/ExamPanel'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const STAGE_LABEL: Record<'child' | 'adult', string> = { child: '어린이', adult: '성인' }
@@ -25,6 +27,7 @@ export default function GrowPage() {
   const [pendingChange, setPendingChange] = useState<{ companionType: CompanionType; profession: ProfessionId } | null>(null)
   const [savingProfession, setSavingProfession] = useState<CompanionType | null>(null)
   const [teachingFor, setTeachingFor] = useState<CompanionType | null>(null)
+  const [examFor, setExamFor] = useState<CompanionType | null>(null)
 
   const handleCreate = async (companionType: CompanionType) => {
     setCreating(companionType)
@@ -90,10 +93,14 @@ export default function GrowPage() {
               changing={changingFor === character.companionType}
               saving={savingProfession === character.companionType}
               teaching={teachingFor === character.companionType}
+              examining={examFor === character.companionType}
               onStartChange={() => setChangingFor(character.companionType)}
               onCancelChange={() => setChangingFor(null)}
               onToggleTeach={() =>
                 setTeachingFor((prev) => (prev === character.companionType ? null : character.companionType))
+              }
+              onToggleExam={() =>
+                setExamFor((prev) => (prev === character.companionType ? null : character.companionType))
               }
               onPickProfession={(profession) => {
                 if (character.profession === null) {
@@ -173,27 +180,32 @@ function CharacterCard({
   changing,
   saving,
   teaching,
+  examining,
   onStartChange,
   onCancelChange,
   onToggleTeach,
+  onToggleExam,
   onPickProfession,
 }: {
   character: Character
   changing: boolean
   saving: boolean
   teaching: boolean
+  examining: boolean
   onStartChange: () => void
   onCancelChange: () => void
   onToggleTeach: () => void
+  onToggleExam: () => void
   onPickProfession: (profession: ProfessionId) => void
 }) {
   const otherProfessions = PROFESSIONS.filter((p) => p.id !== character.profession)
-  // 캐릭터의 "표정/동작" — 지금은 아래 InteractionPanel(가르치기·스스로
-  // 공부하기 통합 상호작용)이 onPoseChange로 이 상태를 잠깐
-  // studying/happy/sad로 바꿨다가 다시 idle로 되돌리는 것 말고는 어떤
-  // 백엔드 값에도 연결돼 있지 않다. XP·레벨 연동은 체크포인트 4 이후 과제.
+  // 캐릭터의 "표정/동작" — InteractionPanel(가르치기·스스로 공부하기)과
+  // ExamPanel(퀴즈·시험)이 onPoseChange로 이 상태를 잠깐
+  // studying/happy/sad로 바꿨다가 다시 idle로 되돌린다.
   const [pose, setPose] = useState<CharacterPose>('idle')
   const isNuri = character.companionType === 'nuri'
+  const { level, expIntoLevel, expForNextLevel } = levelProgress(character.exp)
+  const progressPct = expForNextLevel > 0 ? Math.min(100, Math.round((expIntoLevel / expForNextLevel) * 100)) : 0
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5">
@@ -209,9 +221,14 @@ function CharacterCard({
           <p className="text-base font-semibold text-slate-900">{COMPANION_LABEL[character.companionType]}</p>
           <p className="text-xs text-slate-400">{STAGE_LABEL[character.stage]}</p>
           <div className="mt-1.5 flex items-center gap-2">
-            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-500">Lv.1</span>
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-500">
+              Lv.{level}
+            </span>
             <span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
-              <span className="block h-full w-0 rounded-full bg-indigo-400" />
+              <span className="block h-full rounded-full bg-indigo-400" style={{ width: `${progressPct}%` }} />
+            </span>
+            <span className="text-[11px] text-slate-400">
+              {expIntoLevel}/{expForNextLevel} XP
             </span>
           </div>
         </div>
@@ -221,8 +238,10 @@ function CharacterCard({
         </div>
       </div>
 
+      <p className="text-[11px] text-slate-400">{KNOWLEDGE_VS_MODEL_DISCLAIMER}</p>
+
       {!changing && (
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={onStartChange}
             disabled={saving}
@@ -231,14 +250,24 @@ function CharacterCard({
             {character.profession ? '직업 변경' : '직업 선택'}
           </button>
           {character.profession ? (
-            <button
-              onClick={onToggleTeach}
-              className="flex items-center gap-1 self-start text-xs font-semibold text-indigo-500 hover:text-indigo-600"
-            >
-              <BookOpen size={12} />
-              지식 가르치기
-              {teaching ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
+            <>
+              <button
+                onClick={onToggleTeach}
+                className="flex items-center gap-1 self-start text-xs font-semibold text-indigo-500 hover:text-indigo-600"
+              >
+                <BookOpen size={12} />
+                지식 가르치기
+                {teaching ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              <button
+                onClick={onToggleExam}
+                className="flex items-center gap-1 self-start text-xs font-semibold text-indigo-500 hover:text-indigo-600"
+              >
+                <GraduationCap size={12} />
+                시험 보기
+                {examining ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            </>
           ) : (
             <p className="text-xs text-slate-400">먼저 직업을 선택해주세요.</p>
           )}
@@ -271,6 +300,10 @@ function CharacterCard({
 
       {teaching && character.profession && (
         <InteractionPanel character={character} profession={character.profession} onPoseChange={setPose} />
+      )}
+
+      {examining && character.profession && (
+        <ExamPanel character={character} profession={character.profession} onPoseChange={setPose} />
       )}
     </div>
   )

@@ -23,6 +23,10 @@ const state = {
   knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source }
   characterMessages: [], // { id, user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id }
   nextCharacterMessageId: 1,
+  examAttempts: [], // { id, user_id, character_id, kind, profession, question_id, score, passed, exp_awarded }
+  nextExamAttemptId: 1,
+  quizFirsts: new Set(), // `${characterId}|${questionId}`
+  examFirsts: new Set(), // `${characterId}|${profession}`
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -59,6 +63,10 @@ function reset() {
   state.knowledgeEntries = []
   state.characterMessages = []
   state.nextCharacterMessageId = 1
+  state.examAttempts = []
+  state.nextExamAttemptId = 1
+  state.quizFirsts.clear()
+  state.examFirsts.clear()
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -416,6 +424,25 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- api/character.ts: applyExpGain's exp update (checked before the
+  // generic 'UPDATE characters' profession matcher below, since both start
+  // with "UPDATE characters" but have completely different bound params) ---
+  if (has(text, 'UPDATE characters', 'SET exp = exp +')) {
+    const [delta, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.exp = (row.exp ?? 0) + delta
+    return Promise.resolve({ rows: [{ exp: row.exp }] })
+  }
+
+  // --- api/character.ts: applyExpGain's level update ---
+  if (has(text, 'UPDATE characters', 'SET level =')) {
+    const [newLevel, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row) row.level = newLevel
+    return Promise.resolve({ rows: [] })
+  }
+
   // --- api/character.ts: change/set profession (checked before the
   // generic 'FROM characters' list matcher below, since this statement has
   // no FROM clause at all) ---
@@ -426,7 +453,18 @@ function sql(strings, ...values) {
     row.profession = profession
     const now = new Date().toISOString()
     return Promise.resolve({
-      rows: [{ id: row.id, user_id: row.user_id, companion_type: row.companion_type, stage: row.stage, profession: row.profession, created_at: now }],
+      rows: [
+        {
+          id: row.id,
+          user_id: row.user_id,
+          companion_type: row.companion_type,
+          stage: row.stage,
+          profession: row.profession,
+          level: row.level ?? 1,
+          exp: row.exp ?? 0,
+          created_at: now,
+        },
+      ],
     })
   }
 
@@ -440,7 +478,18 @@ function sql(strings, ...values) {
     const now = new Date().toISOString()
     return Promise.resolve({
       rows: row
-        ? [{ id: row.id, user_id: row.user_id, companion_type: row.companion_type, stage: row.stage, profession: row.profession, created_at: now }]
+        ? [
+            {
+              id: row.id,
+              user_id: row.user_id,
+              companion_type: row.companion_type,
+              stage: row.stage,
+              profession: row.profession,
+              level: row.level ?? 1,
+              exp: row.exp ?? 0,
+              created_at: now,
+            },
+          ]
         : [],
     })
   }
@@ -451,7 +500,16 @@ function sql(strings, ...values) {
     const now = new Date().toISOString()
     const rows = state.characters
       .filter((c) => c.user_id === userId)
-      .map((c) => ({ id: c.id, user_id: c.user_id, companion_type: c.companion_type, stage: c.stage, profession: c.profession, created_at: now }))
+      .map((c) => ({
+        id: c.id,
+        user_id: c.user_id,
+        companion_type: c.companion_type,
+        stage: c.stage,
+        profession: c.profession,
+        level: c.level ?? 1,
+        exp: c.exp ?? 0,
+        created_at: now,
+      }))
     return Promise.resolve({ rows })
   }
 
@@ -465,9 +523,9 @@ function sql(strings, ...values) {
     if (exists) return Promise.resolve({ rows: [] })
     const id = state.nextCharacterId++
     const now = new Date().toISOString()
-    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null })
+    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0 })
     return Promise.resolve({
-      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, created_at: now }],
+      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, created_at: now }],
     })
   }
 
@@ -688,6 +746,56 @@ function sql(strings, ...values) {
       .slice(offset, offset + limit)
       .map((m) => ({ ...m }))
     return Promise.resolve({ rows })
+  }
+
+  // --- api/character.ts: handleSubmitQuiz's atomic "first correct answer"
+  // guard — INSERT ... ON CONFLICT DO NOTHING RETURNING, simulated with a
+  // Set keyed by (character_id, question_id). ---
+  if (has(text, 'INSERT INTO character_quiz_firsts')) {
+    const [characterId, questionId] = values
+    const key = `${characterId}|${questionId}`
+    if (state.quizFirsts.has(key)) return Promise.resolve({ rows: [] })
+    state.quizFirsts.add(key)
+    return Promise.resolve({ rows: [{ character_id: characterId }] })
+  }
+
+  // --- api/character.ts: handleSubmitExam's atomic "first pass" guard —
+  // same ON CONFLICT DO NOTHING shape as quiz firsts above. ---
+  if (has(text, 'INSERT INTO character_exam_firsts')) {
+    const [characterId, profession] = values
+    const key = `${characterId}|${profession}`
+    if (state.examFirsts.has(key)) return Promise.resolve({ rows: [] })
+    state.examFirsts.add(key)
+    return Promise.resolve({ rows: [{ character_id: characterId }] })
+  }
+
+  // --- api/character.ts: handleGetExam's "already passed before?" check
+  // (checked before the generic INSERT matcher above has no overlap here —
+  // this is a SELECT, so no ambiguity) ---
+  if (has(text, 'SELECT character_id FROM character_exam_firsts')) {
+    const [characterId, profession] = values
+    const key = `${characterId}|${profession}`
+    return Promise.resolve({ rows: state.examFirsts.has(key) ? [{ character_id: characterId }] : [] })
+  }
+
+  // --- api/character.ts: handleSubmitQuiz/handleSubmitExam's attempt log ---
+  if (has(text, 'INSERT INTO character_exam_attempts')) {
+    const [userId, characterId, kind, profession, questionId, score, passed, expAwarded] = values
+    const id = state.nextExamAttemptId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      kind,
+      profession,
+      question_id: questionId,
+      score,
+      passed,
+      exp_awarded: expAwarded,
+      created_at: new Date().toISOString(),
+    }
+    state.examAttempts.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)

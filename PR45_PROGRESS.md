@@ -5,8 +5,51 @@
 ## 현재 상태
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
-- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장)
-- **다음 체크포인트**: 4(XP·레벨·퀴즈) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험)
+- **다음 체크포인트**: 5(DB 저장 통합 테스트 보강) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+
+## 체크포인트 4 — XP·레벨·퀴즈·직업별 시험 (완료)
+
+승인 조건 10개(사용자별·캐릭터별 영구 저장 / 지식저장+10·퀴즈+5·시험합격+50 XP / 서버 검증으로 무한 획득 방지 / 회계사·가수 3~5문항 시험, 서버 채점 / XP·레벨·성장 반응 화면 표시 / 기존 기능 보호 / 게임 성장과 실제 모델 능력 구분 / 장기 기억은 후속 과제로 명시 / Vercel 12-함수 유지 / 테스트+커밋)을 모두 반영.
+
+### 구현 내용
+
+**백엔드 (신규 action 4개, 함수 개수는 그대로 12 — 전부 기존 `api/character.ts` 안에 추가)**
+- `api/_lib/characterGrowth.ts`(신규): XP 상수(`KNOWLEDGE_SAVE_EXP=10`/`QUIZ_CORRECT_EXP=5`/`EXAM_PASS_EXP=50`)와 레벨 공식(`levelForExp`/`levelProgress`, 레벨 N→N+1에 `N*100` XP 필요, 누적형).
+- `api/_lib/examQuestions.ts`(신규, 서버 전용): 회계사 4문항·가수 4문항(각 체크포인트 조건의 3~5문항 범위 안), 정답 인덱스·해설 포함. **정답은 이 파일을 벗어나지 않는다** — 클라이언트로 보내는 모든 응답은 `correctIndex`/`explanation`을 제거한 안전한 모양으로 다시 투영한다.
+- `api/_lib/db.ts`: `characters`에 `level`/`exp` 컬럼 추가(`ADD COLUMN IF NOT EXISTS ... DEFAULT`, 기존 캐릭터는 자동으로 Lv.1/0XP로 채워짐 — 데이터 손실 없음). `character_exam_attempts`(퀴즈·시험 응시 로그), `character_quiz_firsts`/`character_exam_firsts`(문항별/직업별 "최초 1회" XP 지급을 보장하는 원자적 멱등 테이블 — `INSERT ... ON CONFLICT DO NOTHING RETURNING`으로 동시 중복 요청·새로고침 재제출에도 XP가 두 번 지급되지 않음, 조건 3).
+- `api/_lib/characterDialogue.ts`: `buildSavedReply`가 레벨업 여부를 받아 대사 끝에 "🎉 레벨업! 이제 Lv.N이에요!"를 덧붙이도록 확장. `buildQuizResultMessage`/`buildExamResultMessage` 추가. `KNOWLEDGE_VS_MODEL_DISCLAIMER` 상수 추가(조건 7 — "레벨·XP는 게임 속 성장 지표예요. 실제 Gemini AI 모델의 성능이 바뀌는 것은 아니에요.").
+- `api/character.ts`:
+  - `applyExpGain(userId, characterId, oldLevel, delta)`: XP를 서버에서만 더하고(`UPDATE characters SET exp = exp + $delta ... RETURNING exp`), 새 레벨을 재계산해 레벨이 바뀌었을 때만 `level` 컬럼을 다시 쓴다. 클라이언트는 얼마를 더할지 전혀 지정할 수 없다.
+  - `?action=quiz`(GET): 직업에 맞는 문항 하나를 무작위로 골라 정답 없이 반환.
+  - `?action=quiz-submit`(POST): 소유권 확인 → 문항 조회(직업 불일치면 400) → 서버에서만 채점 → 정답이고 **그 문항 최초 정답일 때만** `character_quiz_firsts`에 원자적으로 기록해 +5XP, 이미 맞혔던 문항이면 0XP(그래도 "정답" 자체는 매번 알려줌) → 응시 로그 저장 → 레벨업 대사까지 포함한 메시지 반환.
+  - `?action=exam`(GET): 해당 직업의 전 문항(정답 없이) + 이미 합격했는지(`alreadyPassed`) 반환.
+  - `?action=exam-submit`(POST): 제출한 답이 그 직업의 전 문항을 정확히 다 덮는지 검증(아니면 400) → 서버에서만 채점(`passed = score/total >= 0.6`) → **그 직업 최초 합격일 때만** `character_exam_firsts`에 원자적으로 기록해 +50XP, 이미 합격했으면 다시 봐도 0XP → 응시 로그 저장 → 레벨업 대사 포함 메시지 반환.
+  - 지식 저장(`save-knowledge`): 저장이 실제로 새로 일어났을 때만(기존 `client_request_id` 멱등 체크 재사용 — 새 테이블 불필요) `applyExpGain`으로 +10XP, 중복 재요청(동일 `requestId` 재전송)은 0XP. 캐릭터 목록/생성/직업변경 응답에 `level`/`exp` 포함.
+
+**프런트엔드**
+- `src/data/characterGrowth.ts`(신규): `api/_lib/characterGrowth.ts`의 레벨 계산(순수 함수)과 `KNOWLEDGE_VS_MODEL_DISCLAIMER`를 프런트엔드용으로 그대로 옮김 — `api/_lib`는 서버 전용 빌드 경계라 프런트에서 import할 수 없어 작은 순수 함수만 복제(XP 지급 로직 자체는 서버에만 존재, 여기서는 서버가 돌려준 exp를 화면 표시용으로 환산만 함).
+- `src/context/GrowthContext.tsx`: `Character`에 `level`/`exp` 추가, `getQuiz`/`submitQuiz`/`getExam`/`submitExam` 메서드 추가(기존 `verifyKnowledge`/`studyGenerate`와 동일한 fetch 패턴). `submitQuiz`/`submitExam`/`saveKnowledge`는 응답의 `level`/`exp`로 로컬 캐릭터 상태를 즉시 갱신.
+- `src/components/grow/ExamPanel.tsx`(신규): "퀴즈 풀기"/"자격 시험 보기" 진입점 하나의 패널에서 제공. 정답을 클라이언트가 미리 알지 못하므로 선택 즉시 정오가 드러나지 않고, 제출 후 서버가 돌려준 결과(정오·해설·획득 XP·합격 여부)만 표시. 정답/오답에 따라 캐릭터 포즈를 `happy`/`sad`로 전환(기존 `onPoseChange` 재사용).
+- `src/pages/GrowPage.tsx`: `CharacterCard`의 자리표시자였던 `Lv.1`/0%바를 실제 `character.exp`로 계산한 레벨·진행률·다음 레벨까지 남은 XP로 교체. "지식 가르치기" 버튼 옆에 "시험 보기" 토글 버튼 추가(`InteractionPanel`과 동일한 열고 닫기 패턴). `KNOWLEDGE_VS_MODEL_DISCLAIMER`를 카드마다 표시(조건 7).
+
+### 보호 확인
+- 로그인/회원가입, 일반 Gemini 대화, 이미지 첨부, 지식 가르치기·스스로 공부하기·대화 영구 저장(체크포인트 3/3.6) — 해당 로직 전혀 수정하지 않음. `save-knowledge`의 기존 성공 응답 모양은 그대로 유지하고 `expAwarded`/`exp`/`level`/`leveledUp` 필드만 추가(이미 있던 e2e 모킹 2곳이 새 필드를 기대하지 않아 실패했던 것을 발견해 그 모킹에 새 필드만 추가 — 로직은 바꾸지 않음).
+- 실제 지식 수준(Gemini 검증 결과)과 캐릭터 레벨·XP(게임 성장 지표)를 명확히 분리 — 레벨/XP는 전적으로 `applyExpGain`이 쓰는 게임 전용 컬럼이며 Gemini 호출·검증 로직에는 전혀 영향을 주지 않는다. 화면에도 디스클레이머를 상시 표시(조건 7).
+- 장기 기억(저장된 지식을 다음 대화에서 검색·재활용)은 **이번에도 구현하지 않음** — 체크포인트 3.5에서 이미 기록한 항목을 아래 "체크포인트 4 이후 별도 구현 항목"에 재확인·보강(조건 8).
+- Vercel 함수 개수 12 유지(새 action 4개 전부 `api/character.ts` 내부, 새 파일 없음).
+- DB: 기존 테이블·행을 삭제·초기화하지 않음, 전부 `ADD COLUMN IF NOT EXISTS`/`CREATE TABLE IF NOT EXISTS`.
+
+### 변경 파일
+- 신규: `api/_lib/characterGrowth.ts`, `api/_lib/examQuestions.ts`, `src/data/characterGrowth.ts`, `src/components/grow/ExamPanel.tsx`, `tests/growth.test.cjs`, `e2e/growth.spec.ts`
+- 수정: `api/_lib/db.ts`, `api/_lib/characterDialogue.ts`, `api/character.ts`, `src/context/GrowthContext.tsx`, `src/pages/GrowPage.tsx`, `tests/mock-postgres-impl.cjs`, `e2e/knowledge.spec.ts`(+신규 `level`/`exp` 필드를 기대하는 기존 저장 응답 모킹 2곳에 필드 추가)
+
+### 테스트 결과
+- `npm run typecheck:api` / `npm run build` / `npm run lint`: 통과(신규 경고 없음, 기존 경고와 동일 종류)
+- `npm test`: **251/251 통과** (`tests/growth.test.cjs` 신규 47건 — 신규 캐릭터 Lv1/0XP 시작, 퀴즈 정답 최초 1회만 +5XP(재시도 0XP), 오답 0XP, 직업 불일치 400, 시험 전 문항 정답 시 +50XP·재응시 0XP, 전 문항 미제출 400, 다른 사용자 차단 404, 지식 저장 +10XP·중복 requestId 0XP, 10회 반복 저장으로 레벨업 경계(정확히 exp=100에서 레벨업) 검증 등)
+- `npm run test:e2e`: **39/39 통과** (`e2e/growth.spec.ts` 신규 3건 — 카드에 실제 레벨/XP·디스클레이머 표시, 퀴즈 정답 시 XP 반영, 시험 합격 시 +50XP 반영; 기존 지식 저장 테스트 2건은 새로 요구되는 `exp`/`level` 필드가 빠져 있어 실패했던 것을 모킹 응답에 필드만 추가해 수정)
+- Vercel 함수 개수: **12 (변경 없음)**
+- Gemini 호출 비용: 퀴즈·시험은 Gemini를 전혀 호출하지 않음(순수 서버 채점) — 이번 체크포인트로 늘어난 Gemini 비용은 0
 
 ## 체크포인트 3.6 — character_messages 대화 영구 저장 (완료)
 
@@ -45,9 +88,9 @@
 - 변경 파일: `src/pages/PrivacyPage.tsx`, `src/pages/AiNoticePage.tsx`
 - 테스트: `npm run build`/`lint` 통과, `npm test` 172/172, E2E 35/35(모두 기존 그대로 — 내용 수정만, 동작 변경 없음)
 
-### 체크포인트 4 이후 별도 구현 항목으로 명시 (사용자 요청)
+### 장기 기억 기능 — 체크포인트 4에서도 미구현 (후속 개발 항목, 사용자 조건 8 재확인)
 
-저장된 지식을 다음 대화에서 실제로 "검색·재활용"하는 장기 기억 기능(예: verify-knowledge가 과거에 가르친 관련 지식을 함께 참고해 더 똑똑하게 검증하거나, 향후 시험 문제가 캐릭터가 실제로 배운 내용을 반영하는 것)은 **체크포인트 3.6의 범위가 아니다** — 체크포인트 3.6은 대화를 "저장"하는 것까지만 하고, AI가 그 저장된 내용을 실제로 "기억해서 활용"하는 것은 아직 구현하지 않았다. 현재 self-study(`study-generate`)가 중복 생성을 피하려고 과거 지식 제목 목록을 참고하는 것이 유일한 "활용" 사례이며, 이는 검색이 아니라 단순 중복 방지 목적이다. 이 구분을 혼동하지 않기 위해 명시적으로 기록한다.
+저장된 지식을 다음 대화에서 실제로 "검색·재활용"하는 장기 기억 기능(예: verify-knowledge나 퀴즈·시험 문제 생성이 과거에 가르친/학습한 관련 지식을 함께 참고해 더 똑똑하게 검증·출제하는 것)은 **체크포인트 3.5·3.6·4 어디에도 구현되어 있지 않다.** 체크포인트 4가 추가한 XP·레벨·퀴즈·시험은 전부 캐릭터_knowledge_entries/character_messages의 저장 여부·정오답 여부만 보고 판단하며, 저장된 지식 "내용"을 읽어 들여 활용하지 않는다(퀴즈·시험 문제은행은 `api/_lib/examQuestions.ts`에 미리 작성된 정적 문항이며 사용자가 가르친 내용과 무관). self-study(`study-generate`)가 중복 생성을 피하려고 과거 지식 제목 목록을 참고하는 것이 유일한 "활용" 사례이고, 이는 검색이 아니라 단순 중복 방지 목적이다. XP·레벨이 올라가는 것은 게임 성장 지표일 뿐 Gemini 모델이 실제로 더 많이 "기억"하거나 똑똑해졌다는 뜻이 아니다(화면에도 `KNOWLEDGE_VS_MODEL_DISCLAIMER`로 상시 고지). 이 구분을 혼동하지 않기 위해 체크포인트마다 명시적으로 재기록한다.
 
 ## 체크포인트 1 — 분석·설계
 
@@ -120,12 +163,11 @@
 
 ## 재개 방법 (세션이 중단된 경우)
 
-1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 3" 커밋인지 확인
+1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 4" 커밋인지 확인
 2. `npm ci`(node_modules 없으면) → `npm test` / `npm run build` / `npm run lint` / `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npx playwright test` 로 현재 상태가 전부 통과하는지 재확인
-3. 체크포인트 4(XP·레벨·퀴즈) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙)
+3. 체크포인트 5(DB 저장 통합 테스트 보강) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙)
 
 ## 다음 체크포인트 미리보기 (아직 미구현)
 
-- 체크포인트 4: XP·레벨(`characters.level`/`exp` 컬럼, `character_activities` 원장), 퀴즈·시험(`character_exam_attempts`, 정적 문제은행, 회계사/가수 각 3~5문항), XP 지급(지식저장 +10/퀴즈정답 +5/시험합격 +50), 중복 지급 방지
 - 체크포인트 5: DB 저장 통합 테스트 보강
 - 체크포인트 6: Preview 배포·최종 검증·PR 생성
