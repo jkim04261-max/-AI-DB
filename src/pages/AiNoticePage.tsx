@@ -1,6 +1,6 @@
 import LegalPageLayout, { LegalSection } from '../components/LegalPageLayout'
 
-const EFFECTIVE_DATE = '2026-10-04'
+const EFFECTIVE_DATE = '2026-10-22'
 
 export default function AiNoticePage() {
   return (
@@ -32,8 +32,11 @@ export default function AiNoticePage() {
 
       <LegalSection title="4. 입력한 내용은 외부 AI 서비스로 전달될 수 있어요">
         <p>
-          대화창에 입력한 텍스트와 첨부한 이미지는 답변을 생성하기 위해 외부 AI 서비스로 전송됩니다. 민감한
-          개인정보나 공개되면 안 되는 정보는 입력하지 않는 것을 권장합니다.
+          대화창에 입력한 텍스트와 첨부한 이미지는 답변을 생성하기 위해 외부 AI 서비스로 전송됩니다. AI
+          키우기(누리·두리)에서 직접 가르치거나 캐릭터가 스스로 공부하는 지식도 검증을 위해 같은 방식으로
+          전송됩니다. 민감한 개인정보나 공개되면 안 되는 정보는 입력하지 않는 것을 권장합니다. 이 과정은
+          매 요청마다 참고 자료를 함께 보내 답변을 생성하는 것이며, Google Gemini 모델 자체를 다시
+          학습시키는 것이 아닙니다.
         </p>
       </LegalSection>
 
