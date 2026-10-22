@@ -27,6 +27,11 @@
   1. Vercel 대시보드(또는 `npx vercel inspect dpl_5mmNoUWpqUuH4i6UB9ffapHSihka --logs`)에서 실제 빌드 오류 로그를 확인해 붙여넣어 주시거나,
   2. 이 Claude Code 세션에 Vercel 로그를 조회할 수 있는 방법(예: 이 저장소 연동 환경에서 접근 가능한 도구)이 있다면 알려주세요.
 
+### 추가 증거 — 두 번째 배포도 실패 (문서 전용 커밋인데도)
+- 위 블로커를 기록한 커밋(`f70d480`, `PR45_PROGRESS.md` 한 파일만 수정)을 푸시하자 Vercel이 다시 자동 배포를 시도했고, **역시 빌드 실패**했다(`dpl_7pBpXespxxomgDDBfZ3t8dZ42gZj`, inspect 링크: https://vercel.com/nuri-ai/ai-db/7pBpXespxxomgDDBfZ3t8dZ42gZj). 이번엔 "Building" 상태를 거쳐 Preview URL 슬롯(`ai-db-git-claude-pr45-2d-growth-game-mvp-nuri-ai.vercel.app`)까지 할당됐다가 최종적으로 Error로 끝났다.
+- **이 커밋은 코드를 전혀 건드리지 않았는데도 동일하게 실패**했다는 것은, 원인이 이 커밋 자체가 아니라 체크포인트 2~5에서 누적된 코드 변경 어딘가(브랜치 전체 diff) 또는 코드와 무관한 Vercel 프로젝트/환경 설정에 있을 가능성을 가리킨다 — 둘 중 어느 쪽인지는 역시 빌드 로그 없이는 특정할 수 없다.
+- 이 두 번째 실패까지 PR #45에 코멘트로 기록해 두었다: https://github.com/jkim04261-max/-AI-DB/pull/45#issuecomment-6342936274
+
 ### 확인하지 못한 항목 (배포 실패로 인해 보류)
 - Preview 화면 기능 검증(로그인/누리·두리 선택/대화 저장/지식 검증/스스로 공부하기/XP·레벨/퀴즈/직업별 시험) — Preview가 뜨지 않아 수행 불가.
 - 모바일 화면·캐릭터 표시 확인 — 동일한 이유로 수행 불가.
