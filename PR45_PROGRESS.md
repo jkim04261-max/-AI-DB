@@ -6,9 +6,20 @@
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
 - **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장), 4(XP·레벨·퀴즈·직업별 시험), 5(DB·보안·전체 기능 통합 검증)
-- **진행 중(블로킹됨)**: 6(GitHub PR 생성·Vercel Preview 배포·최종 검증) — PR·브랜치 푸시는 완료, **Vercel Preview 배포가 빌드 실패**로 막혀 있어 화면 검증을 진행하지 못함(아래 섹션 참고). **사용자 확인 필요**, 체크포인트 6은 아직 완료되지 않음.
+- **진행 중**: 6(GitHub PR 생성·Vercel Preview 배포·최종 검증) — PR 생성·푸시 완료, **Vercel Preview 배포 성공**(Neon 브랜치 상한 문제 해결됨). 다만 이 세션의 네트워크 정책이 `*.vercel.app`을 막고 있어 이 세션 자체는 Preview 화면을 직접 열어 검증할 수 없음 — **사용자 직접 테스트 필요**(아래 섹션 참고). 체크포인트 6은 아직 완료되지 않음.
 
-## 체크포인트 6 — GitHub PR 생성·Vercel Preview 배포·최종 검증 (진행 중 — 블로커 있음)
+## 체크포인트 6 — GitHub PR 생성·Vercel Preview 배포·최종 검증 (진행 중 — Preview는 떴으나 이 세션은 직접 열람 불가)
+
+### Vercel Preview 배포 성공
+- Neon 브랜치 설정을 조정해주신 뒤 재시도된 배포가 **성공**했다. GitHub 커밋 상태 API로 독립적으로 재확인: `state: "success"`, `"Deployment has completed"`.
+- **Preview URL**: https://ai-db-git-claude-pr45-2d-growth-game-mvp-nuri-ai.vercel.app
+- Vercel 검사 링크: https://vercel.com/nuri-ai/ai-db/7QEgMqRZcnzQjcpiKPzRNQf2QbvD
+
+### 이 세션은 Preview를 직접 열어 검증할 수 없음 (네트워크 정책)
+- `curl`로 Preview URL에 접속을 시도하자 `CONNECT tunnel failed, response 403`으로 거부됐다 — 이 샌드박스의 아웃바운드 네트워크 정책이 `vercel.com`뿐 아니라 **`*.vercel.app` 전체**를 막고 있다(이전에 겪은 Vercel 대시보드 접근 불가와 같은 종류의 제약). 브라우저 도구도 이 세션에는 연결되어 있지 않다.
+- 따라서 요청하신 6번(로그인·누리/두리·대화 저장·지식 검증·스스로 공부하기·XP/레벨·퀴즈·시험 검증)과 9번(모바일 화면·캐릭터 표시)을 **이 세션이 직접 수행할 방법이 없다.**
+- 8번(Preview-Production DB 공유 여부·데이터 격리) 역시 이 세션에서 직접 확인할 수 없다 — Preview가 어느 Neon 브랜치에 연결됐는지는 Vercel 대시보드(Settings → Environment Variables, Preview 환경의 `POSTGRES_URL`)에서만 확인 가능하다.
+- **사용자 직접 테스트 요청**: Preview URL(위)을 직접 열어 로그인·캐릭터 생성/직업 선택·대화 저장·지식 검증·스스로 공부하기·XP·레벨 표시·퀴즈·직업별 시험·모바일 화면을 확인해 주시고, 가능하면 Preview에서 만든 테스트 데이터가 Production에는 나타나지 않는지(DB 격리)도 함께 확인해 주시면 감사하겠습니다. 문제가 있으면 알려주시면 코드를 수정하겠습니다.
 
 ### 완료한 것
 - `claude/pr45-2d-growth-game-mvp` 브랜치를 origin에 푸시(`git push -u origin claude/pr45-2d-growth-game-mvp`) — 이 브랜치가 origin에 존재한 적이 없어 신규 푸시였다.
