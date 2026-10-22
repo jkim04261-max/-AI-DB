@@ -46,13 +46,41 @@
 ### 변경 없이 재확인된 것
 - 로컬 `npm test`(258/258), `npm run test:e2e`(40/40), `npm run typecheck:api`/`npm run build`/`npm run lint` — 체크포인트 5에서 마지막 확인한 결과와 동일, 이번에 코드를 바꾸지 않았으므로 재실행하지 않았다.
 
-### 다음 단계 (사용자 확인 후 재개)
-1. Vercel 빌드 로그 확보 → 원인 특정 → 최소 수정 → 재배포.
-2. GitHub Actions CI(`checks`/`e2e`) 결과 확인(현재 대기 중).
-3. Preview URL 확보 후 요청하신 6·7·8·9번 항목(기능 검증, DB 연결/마이그레이션, Preview-Production DB 공유 여부, 모바일 화면) 진행.
-4. 전부 확인되면 PR URL·Preview URL·테스트 결과·남은 위험·사용자 직접 테스트 항목을 정리해 최종 보고.
+### 근본 원인 — Neon DB 브랜치 상한 (사용자 확인, 옵션 A 채택)
 
-main 병합·Production 배포는 하지 않았으며, 사용자의 명시적 최종 승인 전까지 하지 않는다.
+사용자가 실제 Vercel 빌드 로그에서 "Neon DB 브랜치 제한 오류"를 확인해 알려주었다. 이 세션은 Vercel/Neon 대시보드에 접근할 수 없어 아래는 **직접 확인한 사실**과 **일반적인 Vercel-Neon 통합 동작 방식에 근거한 추정**을 구분해 기록한다. 코드·설정은 전혀 변경하지 않았다(옵션 A 채택, 조건 1·2·4·5 준수).
+
+**직접 확인한 사실**
+- 이 프로젝트는 Vercel의 네이티브 Neon 통합(Storage → Postgres)을 쓴다 — `@vercel/postgres`(공식적으로 "Neon 네이티브 통합으로 전환됨" deprecated 안내 있음) + `@neondatabase/serverless`(`package-lock.json`)가 의존성에 있고, `POSTGRES_URL` 하나의 키 이름을 Production/Preview/Development가 각각 다른 값으로 자동 주입받는 구조(`README.md`, `.env.example`).
+- PR #44(10/20)는 같은 통합으로 정상 배포됐고, PR #45(10/22)는 코드 내용과 무관하게(문서만 바꾼 커밋 포함) 매번 동일하게 빌드 실패했다.
+- GitHub Actions CI(`checks`/`e2e`)는 실제 Neon에 접속하지 않고 모의(mock) Postgres만 쓰므로(`tests/README.md`) 이 문제와 무관하게 전부 통과했다 — Neon 브랜치 문제가 애플리케이션 코드 문제가 아니라는 것과 들어맞는다.
+- 사용자가 "매번 Neon 브랜치를 수동 삭제하는 임시방편"을 써왔다고 확인해주었다 — 브랜치 누적이 반복적으로 발생해온 기존 증상과 일치한다.
+
+**추정 (실제 Vercel/Neon 설정 화면을 보지 못해 확정 불가)**
+- Vercel-Neon 통합의 "Preview Branching"이 PR/Git 브랜치당 새 Neon 브랜치를 자동 생성하는 기본 동작으로 켜져 있을 것.
+- "PR이 닫히거나 Git 브랜치가 삭제되면 Neon 브랜치도 자동 삭제"하는 정리(cleanup) 옵션이 꺼져 있거나, 켜져 있어도 로컬에서만 브랜치를 지우고 GitHub에서 PR을 정식으로 merge/close하지 않은 과거 작업 흐름 때문에 반영되지 않아 브랜치가 누적됐을 것.
+- 현재 Neon 프로젝트의 실제 브랜치 개수·플랜별 상한 수치는 알 수 없다.
+
+### 옵션 A — Preview DB 브랜치 자동 정리 활성화 안내 (사용자가 직접 대시보드에서 확인·적용, 이 세션은 실행하지 않음)
+
+아래는 안내이며, **이 세션은 아래 어떤 설정도 대신 변경하지 않았다.** Vercel/Neon의 실제 UI 문구는 버전에 따라 다를 수 있으니, 아래 이름과 정확히 다르면 비슷한 의미의 항목을 찾아 확인해달라고 사용자에게 요청한다.
+
+1. **Neon 콘솔 → 해당 프로젝트 → Branches 탭**: 현재 브랜치 개수와 각 브랜치가 어느 Git 브랜치/PR에 연결된 것인지 확인. **Settings → Billing**에서 플랜과 브랜치 상한 확인.
+2. **Neon 콘솔 → Integrations → Vercel**(또는 Vercel 프로젝트 → Storage → 연결된 Neon 통합 → Manage/Settings): "Branching" 섹션에서
+   - PR/Preview마다 새 브랜치를 만드는 옵션이 켜져 있는지(= PR별 Preview DB 분리 구조 유지, 조건 2에 부합하므로 그대로 둠),
+   - "Delete branch when the PR is closed/merged" 또는 "Delete branch when the preview deployment is removed" 같은 **자동 삭제 옵션**이 켜져 있는지 확인. **꺼져 있다면 사용자가 직접 켜는 것이 이번 옵션 A의 핵심 조치다.**
+3. 이미 쌓인 과거 브랜치(병합/종료된 옛 PR들의 것)는 자동 정리를 켜도 소급 삭제되지 않을 수 있다 — 그 경우 어떤 브랜치가 안전하게 지워도 되는지는 **사용자가 직접 판단해 대시보드에서 수동으로 삭제**해야 한다(이 세션은 어떤 브랜치도 대신 삭제하지 않는다, 조건 5).
+4. 비용이 발생하는 플랜 업그레이드는 제안하지 않았고 진행하지도 않는다(사용자 지시 준수) — 상한을 늘리는 대신 "자동 정리로 브랜치 개수를 상한 아래로 유지"하는 방향으로만 안내한다.
+
+### PR #45 Preview 재배포 재시도 절차 (최소)
+
+1. 위 1~3번을 확인·적용해 Neon 프로젝트의 여유 브랜치 슬롯을 확보한다(사용자 직접 수행).
+2. Vercel 대시보드 → 해당 프로젝트 → Deployments → PR #45의 가장 최근 실패한 배포에서 **Redeploy**를 누른다(불필요한 빈 커밋을 새로 만들 필요 없음 — 기존 실패 배포를 재시도하는 쪽이 더 깔끔하다). 또는 이 세션에 알려주면 트리거용 커밋을 하나 푸시할 수도 있다.
+3. 배포 상태가 Building → Ready로 바뀌고 Preview URL이 생기는지 확인한다.
+4. Preview URL이 뜨면, 이 세션이 이어서 조건 6~9(로그인·누리/두리·대화 저장·지식 검증·스스로 공부하기·XP/레벨·퀴즈·시험·모바일 화면)를 검증하고, **그와 함께 Preview에서 만든 데이터가 Production(실제 서비스)에는 나타나지 않는지도 함께 확인**한다 — 이 DB 격리 검증이 끝나기 전에는 main 병합·Production 배포를 하지 않는다(조건 7).
+5. 전부 확인되면 결과를 정리해 보고한다.
+
+main 병합·Production 배포는 하지 않았으며, Preview 정상 배포와 DB 격리 검증이 끝나기 전까지 하지 않는다.
 
 ## 체크포인트 5 — DB·보안·전체 기능 통합 검증 (완료)
 
