@@ -1,5 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { ensureCharacterTables, ensureKnowledgeTable, sql, type CharacterRow, type KnowledgeEntryRow } from './_lib/db'
+import {
+  ensureCharacterTables,
+  ensureKnowledgeTable,
+  ensureCharacterMessagesTable,
+  sql,
+  type CharacterRow,
+  type KnowledgeEntryRow,
+  type CharacterMessageRow,
+} from './_lib/db'
 import { getSessionUser } from './_lib/auth'
 import {
   GeminiApiError,
@@ -11,6 +19,7 @@ import {
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach } from './_lib/knowledgeLimit'
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
+import { buildTeachReply, buildStudyReply, buildSavedReply } from './_lib/characterDialogue'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #43's first two supported professions. Extending this later (e.g. a
@@ -23,6 +32,10 @@ const MAX_TITLE_LENGTH = 100
 const MAX_CONTENT_LENGTH = 2000
 const DEFAULT_LIST_LIMIT = 20
 const MAX_LIST_LIMIT = 50
+// 대화 기록(character_messages)은 학습 기록보다 훨씬 자주 쌓이는
+// 데이터라 기본/최대 조회 개수를 더 넉넉하게 둔다.
+const DEFAULT_MESSAGES_LIMIT = 50
+const MAX_MESSAGES_LIMIT = 200
 
 const DAILY_TEACH_LIMIT_REACHED_MESSAGE = `오늘의 지식 검증 요청 ${DAILY_TEACH_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
 const DAILY_STUDY_LIMIT_REACHED_MESSAGE = `오늘의 스스로 공부하기 요청 ${DAILY_STUDY_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
@@ -60,6 +73,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
     if (action === 'knowledge') {
       await handleListKnowledge(req, res, session.sub)
+      return
+    }
+    if (action === 'messages') {
+      await handleListMessages(req, res, session.sub)
       return
     }
     await handleGet(res, session.sub)
@@ -297,7 +314,44 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       source: 'user_taught',
     })
 
-    res.status(200).json({ verification, verificationToken, remaining: reserved.remaining, dailyTeachLimit: DAILY_TEACH_LIMIT })
+    // PR #45 checkpoint 3.6: this exchange is persisted to character_messages
+    // *regardless* of verification.status — a needs_revision/unverifiable
+    // attempt never becomes a character_knowledge_entries row (see
+    // handleSaveKnowledge), but it still happened in the conversation and
+    // must survive a refresh. The character's reply text is built here
+    // (server-side), not trusted from the client, so what's persisted is
+    // exactly what the server actually decided to say.
+    const characterReply = buildTeachReply(verification)
+    try {
+      await ensureCharacterMessagesTable()
+      await sql`
+        INSERT INTO character_messages (user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id)
+        VALUES (${userId}, ${character.id}, 'user', 'user_taught', ${`${title.trim()}\n${content.trim()}`}, ${null}, ${null})
+      `
+      await sql`
+        INSERT INTO character_messages (user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id)
+        VALUES (${userId}, ${character.id}, 'character', 'user_taught', ${characterReply}, ${verification.status}, ${null})
+      `
+    } catch (err) {
+      // The verification result itself is real and already cost a Gemini
+      // call, but if we can't persist the exchange we must not claim it
+      // succeeded (요청 조건 8) — refund the reservation (same accounting
+      // as a failed Gemini call above) and fail cleanly instead of
+      // returning a result the client would show but that won't survive a
+      // refresh.
+      console.error('[api/character] failed to persist character_messages for verify-knowledge', err)
+      await refundTeach(userId)
+      res.status(500).json({ error: '대화를 저장하는 중 오류가 발생했어요.' })
+      return
+    }
+
+    res.status(200).json({
+      verification,
+      verificationToken,
+      characterReply,
+      remaining: reserved.remaining,
+      dailyTeachLimit: DAILY_TEACH_LIMIT,
+    })
   } catch (err) {
     console.error('[api/character] unexpected error on verify-knowledge', err)
     res.status(500).json({ error: '지식을 검증하는 중 오류가 발생했어요.' })
@@ -377,6 +431,25 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       source: 'ai_generated',
     })
 
+    // PR #45 checkpoint 3.6: only one line here (no "user" line — the user
+    // didn't type anything, the character generated this on its own), but
+    // the same rule applies: persisted regardless of status, refunded on
+    // log failure so a result the client can't later reload is never
+    // presented as if it happened.
+    const characterReply = buildStudyReply(study.title, study)
+    try {
+      await ensureCharacterMessagesTable()
+      await sql`
+        INSERT INTO character_messages (user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id)
+        VALUES (${userId}, ${character.id}, 'character', 'ai_generated', ${characterReply}, ${study.status}, ${null})
+      `
+    } catch (err) {
+      console.error('[api/character] failed to persist character_messages for study-generate', err)
+      await refundStudy(userId)
+      res.status(500).json({ error: '대화를 저장하는 중 오류가 발생했어요.' })
+      return
+    }
+
     res.status(200).json({
       knowledge: { title: study.title, content: study.content },
       verification: {
@@ -387,6 +460,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
         suggestion: study.suggestion,
       },
       verificationToken,
+      characterReply,
       remaining: reserved.remaining,
       dailyStudyLimit: DAILY_STUDY_LIMIT,
     })
@@ -508,8 +582,27 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
         (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source})
       RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
     `
+    const entry = inserted.rows[0]
 
-    res.status(201).json({ entry: inserted.rows[0] })
+    // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
+    // knowledge entry above is the thing that matters and it has already
+    // committed successfully — a client must never be told "저장 실패"
+    // for something that genuinely saved. So this log line is best-effort:
+    // on failure, log server-side and still return 201 with the real
+    // entry, rather than failing (or refunding anything) for a save that
+    // actually worked.
+    const savedReply = buildSavedReply(tokenPayload.source)
+    try {
+      await ensureCharacterMessagesTable()
+      await sql`
+        INSERT INTO character_messages (user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id)
+        VALUES (${userId}, ${character.id}, 'character', ${tokenPayload.source}, ${savedReply}, 'appropriate', ${entry.id})
+      `
+    } catch (err) {
+      console.error('[api/character] failed to persist character_messages for save-knowledge (entry already saved)', err)
+    }
+
+    res.status(201).json({ entry, savedReply })
   } catch (err) {
     console.error('[api/character] unexpected error on save-knowledge', err)
     res.status(500).json({ error: '학습 기록을 저장하는 중 오류가 발생했어요.' })
@@ -556,5 +649,52 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
   } catch (err) {
     console.error('[api/character] unexpected error on list knowledge', err)
     res.status(500).json({ error: '학습 기록을 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #45 checkpoint 3.6: returns one character's full conversation log
+// (가르치기/스스로 공부하기 교환 전부, needs_revision/unverifiable 포함),
+// oldest first so the client can render it top-to-bottom like a chat —
+// unlike handleListKnowledge, this is *not* restricted to 'appropriate'
+// results, because it's a conversation record, not the knowledge base.
+// Scoped identically to handleListKnowledge: character_id AND user_id,
+// via findOwnCharacter, so a companionType naming another user's
+// character matches nothing (404).
+async function handleListMessages(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+  const rawLimit = Number(req.query.limit)
+  const rawOffset = Number(req.query.offset)
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(1, Math.floor(rawLimit)), MAX_MESSAGES_LIMIT) : DEFAULT_MESSAGES_LIMIT
+  const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.floor(rawOffset)) : 0
+
+  try {
+    await ensureCharacterTables()
+    await ensureCharacterMessagesTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    const [messages, countResult] = await Promise.all([
+      sql<CharacterMessageRow>`
+        SELECT id, user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id, created_at
+        FROM character_messages
+        WHERE character_id = ${character.id} AND user_id = ${userId}
+        ORDER BY created_at ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql<{ count: number }>`
+        SELECT COUNT(*)::int AS count
+        FROM character_messages
+        WHERE character_id = ${character.id} AND user_id = ${userId}
+      `,
+    ])
+
+    res.status(200).json({ messages: messages.rows, total: countResult.rows[0].count })
+  } catch (err) {
+    console.error('[api/character] unexpected error on list messages', err)
+    res.status(500).json({ error: '대화 기록을 불러오는 중 오류가 발생했어요.' })
   }
 }

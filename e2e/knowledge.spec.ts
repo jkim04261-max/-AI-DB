@@ -26,6 +26,7 @@ async function mockCharacterApi(
     onSave?: (route: Route) => Promise<void>
     onListKnowledge?: (route: Route) => Promise<void>
     onStudyGenerate?: (route: Route) => Promise<void>
+    onListMessages?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -35,6 +36,18 @@ async function mockCharacterApi(
 
     if (method === 'GET' && action === 'knowledge' && options.onListKnowledge) {
       await options.onListKnowledge(route)
+      return
+    }
+    // PR #45 checkpoint 3.6: InteractionPanel fetches the persisted
+    // conversation log on mount — every test needs this mocked even if it
+    // doesn't care about history, same reason mockEmptyConversations
+    // exists for ChatContext.
+    if (method === 'GET' && action === 'messages') {
+      if (options.onListMessages) {
+        await options.onListMessages(route)
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messages: [], total: 0 }) })
       return
     }
     if (method === 'GET' && !action) {
@@ -91,6 +104,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
         body: JSON.stringify({
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
           verificationToken: 'mock-token-appropriate',
+          characterReply: '정확해요! 알려주셔서 고마워요!',
           remaining: 9,
           dailyTeachLimit: 10,
         }),
@@ -115,6 +129,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
             source: 'user_taught',
             created_at: new Date().toISOString(),
           },
+          savedReply: '이 지식을 배웠어요! 다음엔 또 어떤 걸 가르쳐 주실 건가요?',
         }),
       })
     },
@@ -169,6 +184,7 @@ test('needs_revision disables 저장 and shows guidance to revise and re-verify'
         body: JSON.stringify({
           verification: { status: 'needs_revision', explanation: '일부 틀렸어요', relevance: '관련 있음', issues: '연도 오류', suggestion: '연도를 고치세요' },
           verificationToken: 'mock-token-needs-revision',
+          characterReply: '일부 틀렸어요 혹시 "연도를 고치세요"는 어때요?',
           remaining: 8,
           dailyTeachLimit: 10,
         }),
@@ -203,6 +219,7 @@ test('editing content after a result makes it stale and requires re-verifying be
         body: JSON.stringify({
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
           verificationToken: 'mock-token-stale-check',
+          characterReply: '정확해요! 알려주셔서 고마워요!',
           remaining: 9,
           dailyTeachLimit: 10,
         }),
@@ -280,6 +297,7 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
           knowledge: { title: '복식부기', content: '거래를 차변과 대변에 동시에 기록한다.' },
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
           verificationToken: 'mock-token-study',
+          characterReply: "오늘은 '복식부기'에 대해 혼자 공부해봤어요! 정확해요",
           remaining: 2,
           dailyStudyLimit: 3,
         }),
@@ -305,6 +323,7 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
             source: 'ai_generated',
             created_at: new Date().toISOString(),
           },
+          savedReply: '이 지식을 학습 기록에 저장했어요! 다음엔 또 무엇을 공부해볼까요?',
         }),
       })
     },
@@ -344,6 +363,7 @@ test('teaching and self-study both happen in the same panel, building one shared
         body: JSON.stringify({
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
           verificationToken: 'mock-token-teach',
+          characterReply: '정확해요! 알려주셔서 고마워요!',
           remaining: 9,
           dailyTeachLimit: 10,
         }),
@@ -357,6 +377,7 @@ test('teaching and self-study both happen in the same panel, building one shared
           knowledge: { title: '발생주의', content: '수익과 비용은 발생한 시점에 인식한다.' },
           verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
           verificationToken: 'mock-token-study-2',
+          characterReply: "오늘은 '발생주의'에 대해 혼자 공부해봤어요! 정확해요",
           remaining: 2,
           dailyStudyLimit: 3,
         }),
@@ -381,4 +402,38 @@ test('teaching and self-study both happen in the same panel, building one shared
   // Both exchanges remain visible together in the same dialogue feed.
   await expect(page.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
   await expect(page.getByText('알려주셔서 고마워요!', { exact: false })).toBeVisible()
+})
+
+test('reopening the panel (e.g. after a refresh) reloads the persisted conversation from the server', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let messagesRequested = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onListMessages: async (route) => {
+      messagesRequested += 1
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          total: 2,
+          messages: [
+            { id: 1, character_id: 1, speaker: 'user', source: 'user_taught', content: '복식부기\n거래를 두 번 기록한다', verification_status: null, knowledge_entry_id: null, created_at: new Date().toISOString() },
+            { id: 2, character_id: 1, speaker: 'character', source: 'user_taught', content: '정확해요! 알려주셔서 고마워요!', verification_status: 'appropriate', knowledge_entry_id: 10, created_at: new Date().toISOString() },
+          ],
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  // Never clicked "Gemini 검증하기" in this test — the conversation shown
+  // below comes entirely from the server, not from any action taken in
+  // this session, proving it was reloaded rather than re-derived locally.
+  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+
+  await expect(page.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
+  await expect(page.getByText('정확해요! 알려주셔서 고마워요!', { exact: false })).toBeVisible()
+  expect(messagesRequested).toBeGreaterThan(0)
 })

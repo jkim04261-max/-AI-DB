@@ -5,6 +5,7 @@ import {
   type Character,
   type KnowledgeVerification,
   type KnowledgeEntry,
+  type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
 import type { CharacterPose } from './CharacterSprite'
@@ -31,32 +32,8 @@ interface DialogueLine {
   text: string
 }
 
-// 검증 결과(explanation/relevance/issues/suggestion)를 그대로 라벨링해
-// 보여주던 기존 방식 대신, 캐릭터가 "자신의 말로" 반응하는 한 줄 대사를
-// 만든다 — Gemini가 실제로 만들어낸 문장(explanation/suggestion)을
-// 그대로 재료로 쓰되, 새로운 Gemini 호출은 전혀 추가하지 않는다(비용
-// 통제 조건 8번).
-function buildTeachReply(v: KnowledgeVerification): string {
-  if (v.status === 'appropriate') {
-    return `${v.explanation || '정확해요!'} 알려주셔서 고마워요!`
-  }
-  if (v.status === 'needs_revision') {
-    return `${v.explanation || '음, 조금 다른 것 같아요.'}${v.suggestion ? ` 혹시 "${v.suggestion}"는 어때요?` : ' 다시 한 번 알려주실래요?'}`
-  }
-  return `${v.explanation || '이 내용은 아직 잘 모르겠어요.'} 다른 이야기도 들려주실래요?`
-}
-
-function buildStudyReply(title: string, v: KnowledgeVerification): string {
-  if (v.status === 'appropriate') {
-    return `오늘은 '${title}'에 대해 혼자 공부해봤어요! ${v.explanation || ''}`.trim()
-  }
-  return `'${title}'를 스스로 공부해봤는데, 아직 확신이 안 서요. ${v.explanation || ''}`.trim()
-}
-
-function buildSavedReply(source: 'teach' | 'study'): string {
-  return source === 'teach'
-    ? '이 지식을 배웠어요! 다음엔 또 어떤 걸 가르쳐 주실 건가요?'
-    : '이 지식을 학습 기록에 저장했어요! 다음엔 또 무엇을 공부해볼까요?'
+function fromCharacterMessage(msg: CharacterMessage): DialogueLine {
+  return { id: String(msg.id), speaker: msg.speaker, text: msg.content }
 }
 
 // PR #45 checkpoint 3: 가르치기(사용자 주도)와 스스로 공부하기(캐릭터
@@ -74,7 +51,7 @@ export default function InteractionPanel({
   profession: ProfessionId
   onPoseChange?: (pose: CharacterPose) => void
 }) {
-  const { verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge } = useGrowth()
+  const { verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -97,15 +74,38 @@ export default function InteractionPanel({
     setDialogue((prev) => [...prev, { id: crypto.randomUUID(), speaker, text }])
   }
 
+  // PR #45 checkpoint 3.6: the conversation is persisted server-side
+  // (character_messages) — load it once when the panel opens, instead of
+  // always starting from an empty feed, so a refresh/re-login/reopening
+  // the panel shows past exchanges again.
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setHistoryLoading(true)
+    setHistoryError(null)
+    listMessages(character.companionType, { limit: 100 })
+      .then((result) => {
+        if (cancelled) return
+        setDialogue(result.messages.map(fromCharacterMessage))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setHistoryError(err instanceof Error ? err.message : '대화 기록을 불러오는 중 오류가 발생했어요.')
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [character.companionType, listMessages])
+
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   // 가르치기와 스스로 공부하기 중 어느 쪽이 지금 진행 중인지 — 두 액션은
   // 동시에 실행되지 않도록 서로를 막는다(버튼 disabled 공유).
   const [busyAction, setBusyAction] = useState<'teach' | 'study' | null>(null)
-  // 결과(verification)가 가르치기에서 왔는지 스스로 공부하기에서 왔는지 —
-  // 저장 자체는 서버가 토큰으로 판단하므로 영향 없지만, 저장 후 대사를
-  // 고르는 데 쓴다.
-  const [lastAction, setLastAction] = useState<'teach' | 'study' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [verification, setVerification] = useState<KnowledgeVerification | null>(null)
   // The exact title/content that `verification` above was computed from —
@@ -143,8 +143,10 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title, content })
       setVerificationToken(result.verificationToken)
       setTeachRemaining({ remaining: result.remaining, limit: result.dailyTeachLimit })
-      setLastAction('teach')
-      pushLine('character', buildTeachReply(result.verification))
+      // characterReply is server-generated and already persisted
+      // server-side (character_messages) — display exactly that text, not
+      // a locally invented one.
+      pushLine('character', result.characterReply)
       flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
     } catch (err) {
       setVerification(null)
@@ -169,8 +171,7 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title: result.knowledge.title, content: result.knowledge.content })
       setVerificationToken(result.verificationToken)
       setStudyRemaining({ remaining: result.remaining, limit: result.dailyStudyLimit })
-      setLastAction('study')
-      pushLine('character', buildStudyReply(result.knowledge.title, result.verification))
+      pushLine('character', result.characterReply)
       flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '스스로 공부하는 중 오류가 발생했어요.')
@@ -192,8 +193,8 @@ export default function InteractionPanel({
     setSaving(true)
     setSaveError(null)
     try {
-      await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken)
-      pushLine('character', buildSavedReply(lastAction ?? 'teach'))
+      const result = await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken)
+      pushLine('character', result.savedReply)
       setTitle('')
       setContent('')
       setVerification(null)
@@ -238,6 +239,9 @@ export default function InteractionPanel({
       <p className="text-xs font-semibold text-slate-500">
         {name} · {PROFESSION_LABEL[profession]}와 상호작용하기
       </p>
+
+      {historyLoading && <p className="text-xs text-slate-400">대화 기록을 불러오는 중...</p>}
+      {historyError && <p className="text-xs text-red-500">{historyError}</p>}
 
       {dialogue.length > 0 && (
         <div className="flex max-h-56 flex-col gap-2 overflow-y-auto rounded-xl bg-slate-50 p-3">

@@ -264,6 +264,53 @@ export function ensureKnowledgeTable() {
   return knowledgeTableReady
 }
 
+let characterMessagesTableReady: Promise<unknown> | null = null
+
+// PR #45 checkpoint 3.6: one row per line shown in a character's
+// InteractionPanel dialogue feed (가르치기/스스로 공부하기) — unlike
+// character_knowledge_entries, this logs *every* exchange, including a
+// 'needs_revision'/'unverifiable' attempt that never becomes a saved
+// knowledge entry, so nothing the user sees in the conversation
+// disappears on refresh. It is a *conversation log*, not a knowledge
+// base: `character_knowledge_entries` alone remains the only source of
+// "검증된 지식" a future exam/chat feature may treat as fact (see
+// resolveTeachReply/handleSaveKnowledge in api/character.ts — a
+// needs_revision/unverifiable row here never gets a knowledge_entry_id).
+// user_id is denormalized alongside character_id for the same reason as
+// character_knowledge_entries (db.ts:208-213) — every query filters on
+// both directly.
+export function ensureCharacterMessagesTable() {
+  if (!characterMessagesTableReady) {
+    characterMessagesTableReady = (async () => {
+      // character_messages.knowledge_entry_id references
+      // character_knowledge_entries(id), so that table must exist first.
+      await ensureKnowledgeTable()
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_messages (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          speaker TEXT NOT NULL CHECK (speaker IN ('user', 'character')),
+          source TEXT NOT NULL CHECK (source IN ('user_taught', 'ai_generated')),
+          content TEXT NOT NULL,
+          verification_status TEXT CHECK (verification_status IN ('appropriate', 'needs_revision', 'unverifiable')),
+          knowledge_entry_id INTEGER REFERENCES character_knowledge_entries(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_messages_character_created_idx
+          ON character_messages (character_id, created_at ASC)
+      `
+    })().catch((err) => {
+      characterMessagesTableReady = null
+      throw err
+    })
+  }
+  return characterMessagesTableReady
+}
+
 export { sql }
 
 export interface UserRow {
@@ -335,5 +382,17 @@ export interface KnowledgeEntryRow {
   verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
   verification_explanation: string
   source: 'user_taught' | 'ai_generated'
+  created_at: string
+}
+
+export interface CharacterMessageRow {
+  id: number
+  user_id: number
+  character_id: number
+  speaker: 'user' | 'character'
+  source: 'user_taught' | 'ai_generated'
+  content: string
+  verification_status: 'appropriate' | 'needs_revision' | 'unverifiable' | null
+  knowledge_entry_id: number | null
   created_at: string
 }

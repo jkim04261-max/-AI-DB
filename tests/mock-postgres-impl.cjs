@@ -21,6 +21,8 @@ const state = {
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
   characters: [], // { id, user_id, companion_type, stage }
   knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source }
+  characterMessages: [], // { id, user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id }
+  nextCharacterMessageId: 1,
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -55,6 +57,8 @@ function reset() {
   state.passwordResetTokens = []
   state.characters = []
   state.knowledgeEntries = []
+  state.characterMessages = []
+  state.nextCharacterMessageId = 1
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -586,6 +590,104 @@ function sql(strings, ...values) {
     }
     state.knowledgeEntries.push(entry)
     return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // --- api/character.ts: character_messages inserts (PR #45 checkpoint
+  // 3.6) — four distinct call sites, each with a different literal
+  // substring to disambiguate since the bound-param shape differs
+  // slightly per site. Checked most-specific-first. ---
+
+  // handleSaveKnowledge's "saved" log line — the only call site with a
+  // literal 'appropriate' verification_status.
+  if (has(text, 'INSERT INTO character_messages', "'appropriate'")) {
+    const [userId, characterId, source, content, knowledgeEntryId] = values
+    const id = state.nextCharacterMessageId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      speaker: 'character',
+      source,
+      content,
+      verification_status: 'appropriate',
+      knowledge_entry_id: knowledgeEntryId,
+      created_at: new Date().toISOString(),
+    }
+    state.characterMessages.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // handleVerifyKnowledge's user-submitted line.
+  if (has(text, 'INSERT INTO character_messages', "'user', 'user_taught'")) {
+    const [userId, characterId, content, verificationStatus, knowledgeEntryId] = values
+    const id = state.nextCharacterMessageId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      speaker: 'user',
+      source: 'user_taught',
+      content,
+      verification_status: verificationStatus,
+      knowledge_entry_id: knowledgeEntryId,
+      created_at: new Date().toISOString(),
+    }
+    state.characterMessages.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // handleVerifyKnowledge's character reply line, and handleGenerateStudy's
+  // character line — same shape, distinguished only by the literal source,
+  // which the mock doesn't need to branch on separately.
+  if (has(text, 'INSERT INTO character_messages', "'character', 'user_taught'")) {
+    const [userId, characterId, content, verificationStatus, knowledgeEntryId] = values
+    const id = state.nextCharacterMessageId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      speaker: 'character',
+      source: 'user_taught',
+      content,
+      verification_status: verificationStatus,
+      knowledge_entry_id: knowledgeEntryId,
+      created_at: new Date().toISOString(),
+    }
+    state.characterMessages.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
+  }
+  if (has(text, 'INSERT INTO character_messages', "'character', 'ai_generated'")) {
+    const [userId, characterId, content, verificationStatus, knowledgeEntryId] = values
+    const id = state.nextCharacterMessageId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      speaker: 'character',
+      source: 'ai_generated',
+      content,
+      verification_status: verificationStatus,
+      knowledge_entry_id: knowledgeEntryId,
+      created_at: new Date().toISOString(),
+    }
+    state.characterMessages.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // --- api/character.ts: handleListMessages ---
+  if (has(text, 'COUNT(*)', 'character_messages')) {
+    const [characterId, userId] = values
+    const count = state.characterMessages.filter((m) => m.character_id === characterId && m.user_id === userId).length
+    return Promise.resolve({ rows: [{ count }] })
+  }
+  if (has(text, 'FROM character_messages')) {
+    const [characterId, userId, limit, offset] = values
+    const rows = state.characterMessages
+      .filter((m) => m.character_id === characterId && m.user_id === userId)
+      .slice() // already in insertion (= chronological) order, matching ORDER BY created_at ASC
+      .slice(offset, offset + limit)
+      .map((m) => ({ ...m }))
+    return Promise.resolve({ rows })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)

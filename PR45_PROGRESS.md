@@ -5,8 +5,35 @@
 ## 현재 상태
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
-- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검 — 사용자 요청으로 체크포인트 4 전에 삽입)
+- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동), 3.5(DB 저장 구조 점검), 3.6(character_messages 대화 영구 저장)
 - **다음 체크포인트**: 4(XP·레벨·퀴즈) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+
+## 체크포인트 3.6 — character_messages 대화 영구 저장 (완료)
+
+체크포인트 3.5에서 발견한 가장 큰 공백("대화 피드가 DB에 저장되지 않음")을 해소. 제안했던 `character_messages` 스키마를 사용자가 승인, 조건 12개를 모두 반영해 구현.
+
+### 구현 내용
+- `api/_lib/db.ts`: `character_messages` 테이블 추가(`ensureCharacterMessagesTable`) — `user_id`/`character_id`/`speaker`(user|character)/`source`(user_taught|ai_generated)/`content`/`verification_status`(nullable, 적합·수정 필요·검증 불가 보존)/`knowledge_entry_id`(저장된 지식과 연결, 저장 전까지는 NULL). `character_knowledge_entries(id)`를 참조하므로 그 테이블이 먼저 준비되도록 순서를 맞췄다. 기존 테이블은 전혀 건드리지 않음(삭제·초기화 없음).
+- `api/_lib/characterDialogue.ts`(신규): 체크포인트 3에서 프런트엔드에 있던 "캐릭터가 자신의 말로 반응하는 대사" 생성 로직을 서버로 옮김 — **서버가 직접 검증하여 저장**하도록(조건 2), 클라이언트는 더 이상 대사를 지어내지 않고 서버가 돌려준 문자열을 그대로 표시한다.
+- `api/character.ts`:
+  - `verify-knowledge`: 검증 직후 사용자 발화(`speaker='user'`) + 캐릭터 응답(`speaker='character'`, `verification_status` 포함) 2줄을 저장. **적합/수정 필요/검증 불가 전부 저장**(조건 7) — 적합일 때만 저장되는 `character_knowledge_entries`와 분리된 별도 로그이므로, 수정 필요·검증 불가 시도도 "검증된 지식"으로 섞이지 않는다. 로그 저장 자체가 실패하면 방금 소모한 일일 한도를 환불하고 500을 반환 — Gemini 검증은 성공했지만 대화가 저장되지 않은 상태를 "성공"으로 보여주지 않는다(조건 8).
+  - `study-generate`: 캐릭터 발화 1줄만 저장(사용자가 입력한 게 없으므로). 같은 환불 원칙 적용.
+  - `save-knowledge`: 저장된 지식 행의 `id`와 연결된 "저장했어요" 캐릭터 발화를 추가로 기록. 단, 이 로그는 best-effort로 처리— 지식 저장 자체(`character_knowledge_entries` INSERT)가 이미 성공했으므로, 그 뒤의 로그 기록이 실패하더라도 이미 성공한 저장을 "실패"로 보여주지 않는다(조건 8의 반대 방향도 지킴: 성공한 것을 실패로 보이게도 하지 않음).
+  - `?action=messages`(신규 GET): 캐릭터의 전체 대화 기록을 시간순(오래된 것부터)으로 반환, `findOwnCharacter`로 소유권 검증(조건 5) — 다른 사용자의 캐릭터를 가리키면 404.
+- `src/context/GrowthContext.tsx`: `listMessages()` 추가, `verifyKnowledge`/`studyGenerate`/`saveKnowledge`가 서버 생성 `characterReply`/`savedReply`를 반환하도록 확장.
+- `src/components/grow/InteractionPanel.tsx`: 패널이 열릴 때 `listMessages`로 과거 대화를 불러와 대화 피드를 채운다(조건 3, 4) — 로컬 `buildTeachReply`/`buildStudyReply`/`buildSavedReply` 함수는 삭제하고 서버가 돌려준 문자열만 표시.
+- `src/pages/PrivacyPage.tsx`: "AI 키우기 대화 기록" 수집 사실과 계정 삭제 시 함께 삭제됨을 명시(조건 11).
+
+### 보호 확인
+- 기존 Gemini 검증 서명 토큰(PR #44), 학습 기록(`character_knowledge_entries`), 로그인, 일반 채팅, 기존 DB 데이터 — 전부 무변경(조건 9, 10).
+- Vercel 함수 개수 12 유지(새 action만 추가, 새 파일 없음).
+
+### 테스트 결과
+- `npm run typecheck:api` / `npm run build` / `npm run lint`: 통과(신규 경고 1건은 기존 3개 파일과 같은 종류)
+- `npm test`: **204/204 통과** — `tests/characterMessages.test.cjs`(신규, 32건: 인증/소유권 검증/시간순 저장·조회/새로고침·재로그인 후 유지/캐릭터별 분리/수정 필요·검증 불가도 대화에는 남지만 학습 기록에는 안 남음/Gemini 호출 실패 시 대화 기록도 전혀 남지 않음 등)
+- `npm run test:e2e`: **36/36 통과** — 기존 지식 검증/스스로 공부하기 테스트는 characterReply/savedReply 필드만 추가해 그대로 통과, 신규로 "패널을 다시 열면 서버에 저장된 대화를 그대로 불러온다" 테스트 추가(조건 3을 화면 레벨에서도 검증)
+- Vercel 함수 개수: **12 (변경 없음)**
+- 수동 스크린샷 확인: 이전에 나눈 대화(적합 1건 + 수정 필요 1건)가 패널을 열자마자 서버에서 그대로 복원되는 것을 확인
 
 ## 체크포인트 3.5 — DB 저장 구조 점검 (완료, 체크포인트 4 전 사용자 요청으로 삽입)
 
@@ -14,9 +41,13 @@
 
 - 코드베이스 전체(일반 채팅 저장, 게임 지식 저장, 계정 삭제 cascade, 관리자 엔드포인트, 개인정보 관련 페이지)를 읽기 전용으로 감사.
 - 발견한 사실 오류를 즉시 수정(코드 아님, 법적 고지 문서): `PrivacyPage.tsx`·`AiNoticePage.tsx`가 "회원탈퇴 준비 중", "AI 키우기 미구현"이라고 잘못 명시하고 있었음(둘 다 이미 배포됨) — 실제 수집 항목(캐릭터/지식/출처/검증 결과), 비공유·비공용학습 방침, DB 기반 "기억"과 실제 모델 재학습의 구분을 명시하도록 현행화.
-- 대화 피드(가르치기/스스로 공부하기 중 캐릭터의 대사) 영속화, 수정 필요/검증 불가 결과 보존, 개별 지식 삭제 기능 등은 DB 스키마에 영향을 주는 별도 설계 사안으로 식별 — CLAUDE.md 8번 규칙에 따라 코드 변경 없이 설계안만 사용자에게 제시하고 승인 대기 중(채팅 보고 참고).
+- 대화 피드(가르치기/스스로 공부하기 중 캐릭터의 대사) 영속화, 수정 필요/검증 불가 결과 보존, 개별 지식 삭제 기능 등은 DB 스키마에 영향을 주는 별도 설계 사안으로 식별 — CLAUDE.md 8번 규칙에 따라 코드 변경 없이 설계안만 사용자에게 제시하고 승인 대기 중(체크포인트 3.6에서 구현 완료).
 - 변경 파일: `src/pages/PrivacyPage.tsx`, `src/pages/AiNoticePage.tsx`
 - 테스트: `npm run build`/`lint` 통과, `npm test` 172/172, E2E 35/35(모두 기존 그대로 — 내용 수정만, 동작 변경 없음)
+
+### 체크포인트 4 이후 별도 구현 항목으로 명시 (사용자 요청)
+
+저장된 지식을 다음 대화에서 실제로 "검색·재활용"하는 장기 기억 기능(예: verify-knowledge가 과거에 가르친 관련 지식을 함께 참고해 더 똑똑하게 검증하거나, 향후 시험 문제가 캐릭터가 실제로 배운 내용을 반영하는 것)은 **체크포인트 3.6의 범위가 아니다** — 체크포인트 3.6은 대화를 "저장"하는 것까지만 하고, AI가 그 저장된 내용을 실제로 "기억해서 활용"하는 것은 아직 구현하지 않았다. 현재 self-study(`study-generate`)가 중복 생성을 피하려고 과거 지식 제목 목록을 참고하는 것이 유일한 "활용" 사례이며, 이는 검색이 아니라 단순 중복 방지 목적이다. 이 구분을 혼동하지 않기 위해 명시적으로 기록한다.
 
 ## 체크포인트 1 — 분석·설계
 

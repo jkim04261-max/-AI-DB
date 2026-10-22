@@ -53,6 +53,35 @@ export interface Character {
   createdAt: string
 }
 
+// PR #45 checkpoint 3.6: one line of the persistent conversation log for a
+// character (character_messages) — every exchange shown in
+// InteractionPanel's dialogue feed, including needs_revision/unverifiable
+// attempts that never become a KnowledgeEntry. `content` for a 'character'
+// line is always server-generated text (see api/_lib/characterDialogue.ts)
+// returned verbatim from verify-knowledge/study-generate/save-knowledge —
+// the client never invents or edits it.
+export interface CharacterMessage {
+  id: number
+  companionType: CompanionType
+  speaker: 'user' | 'character'
+  source: KnowledgeSource
+  content: string
+  verificationStatus: VerificationStatus | null
+  knowledgeEntryId: number | null
+  createdAt: string
+}
+
+interface CharacterMessageApiRow {
+  id: number
+  character_id: number
+  speaker: 'user' | 'character'
+  source: KnowledgeSource
+  content: string
+  verification_status: VerificationStatus | null
+  knowledge_entry_id: number | null
+  created_at: string
+}
+
 interface GrowthContextValue {
   characters: Character[]
   loading: boolean
@@ -62,11 +91,18 @@ interface GrowthContextValue {
     companionType: CompanionType,
     title: string,
     content: string,
-  ) => Promise<{ verification: KnowledgeVerification; verificationToken: string; remaining: number; dailyTeachLimit: number }>
+  ) => Promise<{
+    verification: KnowledgeVerification
+    verificationToken: string
+    characterReply: string
+    remaining: number
+    dailyTeachLimit: number
+  }>
   studyGenerate: (companionType: CompanionType) => Promise<{
     knowledge: { title: string; content: string }
     verification: KnowledgeVerification
     verificationToken: string
+    characterReply: string
     remaining: number
     dailyStudyLimit: number
   }>
@@ -76,11 +112,15 @@ interface GrowthContextValue {
     originalContent: string,
     finalContent: string,
     verificationToken: string,
-  ) => Promise<KnowledgeEntry>
+  ) => Promise<{ entry: KnowledgeEntry; savedReply: string }>
   listKnowledge: (
     companionType: CompanionType,
     options?: { limit?: number; offset?: number },
   ) => Promise<{ entries: KnowledgeEntry[]; total: number }>
+  listMessages: (
+    companionType: CompanionType,
+    options?: { limit?: number; offset?: number },
+  ) => Promise<{ messages: CharacterMessage[]; total: number }>
 }
 
 interface CharacterApiRow {
@@ -112,6 +152,19 @@ function fromKnowledgeApiRow(companionType: CompanionType, row: KnowledgeEntryAp
     verificationStatus: row.verification_status,
     verificationExplanation: row.verification_explanation,
     source: row.source,
+    createdAt: row.created_at,
+  }
+}
+
+function fromMessageApiRow(companionType: CompanionType, row: CharacterMessageApiRow): CharacterMessage {
+  return {
+    id: row.id,
+    companionType,
+    speaker: row.speaker,
+    source: row.source,
+    content: row.content,
+    verificationStatus: row.verification_status,
+    knowledgeEntryId: row.knowledge_entry_id,
     createdAt: row.created_at,
   }
 }
@@ -192,16 +245,18 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     const data = (await res.json().catch(() => ({}))) as {
       verification?: KnowledgeVerification
       verificationToken?: string
+      characterReply?: string
       remaining?: number
       dailyTeachLimit?: number
       error?: string
     }
-    if (!res.ok || !data.verification || !data.verificationToken) {
+    if (!res.ok || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '지식을 검증하는 중 오류가 발생했어요.')
     }
     return {
       verification: data.verification,
       verificationToken: data.verificationToken,
+      characterReply: data.characterReply,
       remaining: data.remaining ?? 0,
       dailyTeachLimit: data.dailyTeachLimit ?? 0,
     }
@@ -221,17 +276,19 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       knowledge?: { title: string; content: string }
       verification?: KnowledgeVerification
       verificationToken?: string
+      characterReply?: string
       remaining?: number
       dailyStudyLimit?: number
       error?: string
     }
-    if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken) {
+    if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '스스로 공부하는 중 오류가 발생했어요.')
     }
     return {
       knowledge: data.knowledge,
       verification: data.verification,
       verificationToken: data.verificationToken,
+      characterReply: data.characterReply,
       remaining: data.remaining ?? 0,
       dailyStudyLimit: data.dailyStudyLimit ?? 0,
     }
@@ -257,11 +314,15 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId }),
       })
-      const data = (await res.json().catch(() => ({}))) as { entry?: KnowledgeEntryApiRow; error?: string }
-      if (!res.ok || !data.entry) {
+      const data = (await res.json().catch(() => ({}))) as {
+        entry?: KnowledgeEntryApiRow
+        savedReply?: string
+        error?: string
+      }
+      if (!res.ok || !data.entry || !data.savedReply) {
         throw new Error(data.error || '학습 기록을 저장하는 중 오류가 발생했어요.')
       }
-      return fromKnowledgeApiRow(companionType, data.entry)
+      return { entry: fromKnowledgeApiRow(companionType, data.entry), savedReply: data.savedReply }
     },
     [],
   )
@@ -288,9 +349,44 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  // PR #45 checkpoint 3.6: the persistent conversation log — every line of
+  // InteractionPanel's dialogue feed comes from here on mount, instead of
+  // starting empty, so a refresh/re-login no longer loses the conversation.
+  const listMessages = useCallback(
+    async (companionType: CompanionType, options?: { limit?: number; offset?: number }) => {
+      const params = new URLSearchParams({ action: 'messages', companionType })
+      if (options?.limit) params.set('limit', String(options.limit))
+      if (options?.offset) params.set('offset', String(options.offset))
+      const res = await fetch(`/api/character?${params.toString()}`)
+      const data = (await res.json().catch(() => ({}))) as {
+        messages?: CharacterMessageApiRow[]
+        total?: number
+        error?: string
+      }
+      if (!res.ok) {
+        throw new Error(data.error || '대화 기록을 불러오는 중 오류가 발생했어요.')
+      }
+      return {
+        messages: (data.messages ?? []).map((row) => fromMessageApiRow(companionType, row)),
+        total: data.total ?? 0,
+      }
+    },
+    [],
+  )
+
   return (
     <GrowthContext.Provider
-      value={{ characters, loading, createCharacter, setProfession, verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge }}
+      value={{
+        characters,
+        loading,
+        createCharacter,
+        setProfession,
+        verifyKnowledge,
+        studyGenerate,
+        saveKnowledge,
+        listKnowledge,
+        listMessages,
+      }}
     >
       {children}
     </GrowthContext.Provider>
