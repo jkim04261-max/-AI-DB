@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { Sprout, Briefcase, BookOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Briefcase, BookOpen, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   useGrowth,
@@ -10,6 +10,7 @@ import {
   type KnowledgeEntry,
 } from '../context/GrowthContext'
 import { PROFESSIONS, PROFESSION_LABEL, type ProfessionId } from '../data/characterProfessions'
+import CharacterSprite, { type CharacterPose } from '../components/grow/CharacterSprite'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const STAGE_LABEL: Record<'child' | 'adult', string> = { child: '어린이', adult: '성인' }
@@ -202,16 +203,32 @@ function CharacterCard({
   onPickProfession: (profession: ProfessionId) => void
 }) {
   const otherProfessions = PROFESSIONS.filter((p) => p.id !== character.profession)
+  // 캐릭터의 "표정/동작" — 지금은 지식 검증 흐름(아래 KnowledgeTeachPanel)이
+  // onPoseChange로 이 상태를 잠깐 studying/happy/sad로 바꿨다가 다시
+  // idle로 되돌리는 것 말고는 어떤 백엔드 값에도 연결돼 있지 않다. XP·레벨
+  // 연동은 체크포인트 4 이후 과제.
+  const [pose, setPose] = useState<CharacterPose>('idle')
+  const isNuri = character.companionType === 'nuri'
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5">
       <div className="flex items-center gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white">
-          <Sprout size={26} />
+        <span
+          className={`flex h-24 w-24 shrink-0 items-end justify-center overflow-hidden rounded-2xl ${
+            isNuri ? 'bg-gradient-to-b from-indigo-100 to-blue-50' : 'bg-gradient-to-b from-rose-100 to-pink-50'
+          }`}
+        >
+          <CharacterSprite companionType={character.companionType} pose={pose} size={76} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-base font-semibold text-slate-900">{COMPANION_LABEL[character.companionType]}</p>
           <p className="text-xs text-slate-400">{STAGE_LABEL[character.stage]}</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-500">Lv.1</span>
+            <span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+              <span className="block h-full w-0 rounded-full bg-indigo-400" />
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
           <Briefcase size={12} />
@@ -267,13 +284,43 @@ function CharacterCard({
         </div>
       )}
 
-      {teaching && character.profession && <KnowledgeTeachPanel character={character} profession={character.profession} />}
+      {teaching && character.profession && (
+        <KnowledgeTeachPanel character={character} profession={character.profession} onPoseChange={setPose} />
+      )}
     </div>
   )
 }
 
-function KnowledgeTeachPanel({ character, profession }: { character: Character; profession: ProfessionId }) {
+function KnowledgeTeachPanel({
+  character,
+  profession,
+  onPoseChange,
+}: {
+  character: Character
+  profession: ProfessionId
+  // 지식 검증 중/결과에 따라 카드 상단 캐릭터의 표정을 studying/happy/sad로
+  // 잠깐 바꿔주기 위한 콜백 — 순수 시각 효과이며 서버에는 아무 영향 없음.
+  onPoseChange?: (pose: CharacterPose) => void
+}) {
   const { verifyKnowledge, saveKnowledge, listKnowledge } = useGrowth()
+  // 표정을 studying/happy/sad로 바꾼 뒤 일정 시간 후 idle로 되돌리는
+  // 타이머 — 언마운트 후 setState를 막기 위해 ref로 보관하고 정리한다.
+  const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (poseTimeoutRef.current) clearTimeout(poseTimeoutRef.current)
+      // 패널이 닫힐 때(= 언마운트) 표정이 studying/happy/sad에 멈춰있지
+      // 않도록 되돌린다 — 타이머가 아직 안 끝났어도 즉시 idle로.
+      onPoseChange?.('idle')
+    }
+  }, [onPoseChange])
+  const flashPose = (pose: CharacterPose, revertAfterMs?: number) => {
+    onPoseChange?.(pose)
+    if (poseTimeoutRef.current) clearTimeout(poseTimeoutRef.current)
+    if (revertAfterMs) {
+      poseTimeoutRef.current = setTimeout(() => onPoseChange?.('idle'), revertAfterMs)
+    }
+  }
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -314,17 +361,20 @@ function KnowledgeTeachPanel({ character, profession }: { character: Character; 
     setVerifying(true)
     setVerifyError(null)
     setSaveSuccess(false)
+    flashPose('studying')
     try {
       const result = await verifyKnowledge(character.companionType, title, content)
       setVerification(result.verification)
       setVerifiedSnapshot({ title, content })
       setVerificationToken(result.verificationToken)
       setRemaining({ remaining: result.remaining, limit: result.dailyTeachLimit })
+      flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
     } catch (err) {
       setVerification(null)
       setVerifiedSnapshot(null)
       setVerificationToken(null)
       setVerifyError(err instanceof Error ? err.message : '지식을 검증하는 중 오류가 발생했어요.')
+      flashPose('sad', 2500)
     } finally {
       setVerifying(false)
     }

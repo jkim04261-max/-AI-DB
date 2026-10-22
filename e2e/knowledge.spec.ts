@@ -123,6 +123,10 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   await expect(page.getByText('적합', { exact: true })).toBeVisible()
   await expect(page.getByText('설명: 정확해요')).toBeVisible()
   await expect(page.getByText('오늘 남은 지식 검증 횟수: 9/10')).toBeVisible()
+  // PR #45 checkpoint 2: an appropriate verification briefly switches the
+  // character sprite's pose to "happy" (CharacterSprite.tsx, wired from
+  // KnowledgeTeachPanel's onPoseChange).
+  await expect(page.getByRole('img', { name: /누리 캐릭터, 기뻐하는 중/ })).toBeVisible()
 
   const saveButton = page.getByRole('button', { name: '저장' })
   await expect(saveButton).toBeEnabled()
@@ -136,6 +140,12 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   // the client side of PR #44's follow-up security fix.
   expect(saveRequestBody?.verificationToken).toBe('mock-token-appropriate')
   expect(saveRequestBody?.verification).toBeUndefined()
+
+  // Closing the teach panel must reset the pose immediately (not wait out
+  // the 2.5s auto-revert timer) — this is the unmount-cleanup behavior in
+  // KnowledgeTeachPanel's pose-timeout effect.
+  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await expect(page.getByRole('img', { name: /누리 캐릭터, 대기 중/ })).toBeVisible()
 })
 
 test('needs_revision disables 저장 and shows guidance to revise and re-verify', async ({ page }) => {
@@ -167,6 +177,9 @@ test('needs_revision disables 저장 and shows guidance to revise and re-verify'
   await expect(page.getByText('수정 필요', { exact: true })).toBeVisible()
   await expect(page.getByText('내용을 수정한 후 다시 검증해주세요.')).toBeVisible()
   await expect(page.getByRole('button', { name: '저장' })).toBeDisabled()
+  // PR #45 checkpoint 2: a needs_revision result briefly switches the
+  // character sprite's pose to "sad".
+  await expect(page.getByRole('img', { name: /누리 캐릭터, 아쉬워하는 중/ })).toBeVisible()
 })
 
 test('editing content after a result makes it stale and requires re-verifying before saving', async ({ page }) => {
