@@ -17,9 +17,10 @@ const state = {
   attachments: [], // { message_id, position, url, mime_type, name }
   dailyUsage: new Map(), // `${userId}|${date}` -> { used_count }
   teachUsage: new Map(), // `${userId}|${date}` -> { used_count }
+  studyUsage: new Map(), // `${userId}|${date}` -> { used_count }
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
   characters: [], // { id, user_id, companion_type, stage }
-  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id }
+  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source }
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -50,6 +51,7 @@ function reset() {
   state.attachments = []
   state.dailyUsage.clear()
   state.teachUsage.clear()
+  state.studyUsage.clear()
   state.passwordResetTokens = []
   state.characters = []
   state.knowledgeEntries = []
@@ -491,6 +493,33 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- api/_lib/studyLimit.ts: reserveStudy (PR #45 checkpoint 3 — same
+  // atomic conditional upsert shape as daily_teach_usage, fully separate
+  // table/counter) ---
+  if (has(text, 'INSERT INTO daily_study_usage')) {
+    const [userId, limit] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.studyUsage.get(key)
+    if (!row) {
+      state.studyUsage.set(key, { used_count: 1 })
+      return Promise.resolve({ rows: [{ used_count: 1 }] })
+    }
+    if (row.used_count < limit) {
+      row.used_count += 1
+      return Promise.resolve({ rows: [{ used_count: row.used_count }] })
+    }
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- api/_lib/studyLimit.ts: refundStudy ---
+  if (has(text, 'UPDATE daily_study_usage')) {
+    const [userId] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.studyUsage.get(key)
+    if (row && row.used_count > 0) row.used_count -= 1
+    return Promise.resolve({ rows: [] })
+  }
+
   // --- api/character.ts: handleSaveKnowledge's idempotency lookup (checked
   // before the general list/count matchers below, since this one also
   // selects FROM character_knowledge_entries) ---
@@ -505,6 +534,20 @@ function sql(strings, ...values) {
     const [characterId, userId] = values
     const count = state.knowledgeEntries.filter((e) => e.character_id === characterId && e.user_id === userId).length
     return Promise.resolve({ rows: [{ count }] })
+  }
+
+  // --- api/character.ts: handleGenerateStudy's "already known titles" list
+  // (checked before the generic list matcher below, which returns full
+  // entry rows rather than just { title }) ---
+  if (has(text, 'SELECT title FROM character_knowledge_entries')) {
+    const [characterId, userId, limit] = values
+    const rows = state.knowledgeEntries
+      .filter((e) => e.character_id === characterId && e.user_id === userId)
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map((e) => ({ title: e.title }))
+    return Promise.resolve({ rows })
   }
 
   // --- api/character.ts: handleListKnowledge's page of entries ---
@@ -523,7 +566,8 @@ function sql(strings, ...values) {
   // literal in the real query (only ever-'appropriate' rows get inserted),
   // not a bound parameter, so it's not in `values`. ---
   if (has(text, 'INSERT INTO character_knowledge_entries')) {
-    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId] = values
+    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId, source] =
+      values
     const id = state.nextKnowledgeEntryId++
     const now = new Date().toISOString()
     const entry = {
@@ -537,6 +581,7 @@ function sql(strings, ...values) {
       verification_status: 'appropriate',
       verification_explanation: verificationExplanation,
       client_request_id: requestId,
+      source,
       created_at: now,
     }
     state.knowledgeEntries.push(entry)

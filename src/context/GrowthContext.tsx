@@ -5,6 +5,11 @@ import type { ProfessionId } from '../data/characterProfessions'
 export type CompanionType = 'nuri' | 'duri'
 
 export type VerificationStatus = 'appropriate' | 'needs_revision' | 'unverifiable'
+// PR #45 checkpoint 3: who/what produced a knowledge entry — the user typed
+// it in ('user_taught') or the character generated+self-graded it via
+// "스스로 공부하기" ('ai_generated'). Server-trusted only (see
+// api/_lib/knowledgeToken.ts); the client never sets this.
+export type KnowledgeSource = 'user_taught' | 'ai_generated'
 
 export interface KnowledgeVerification {
   status: VerificationStatus
@@ -23,6 +28,7 @@ export interface KnowledgeEntry {
   finalContent: string
   verificationStatus: VerificationStatus
   verificationExplanation: string
+  source: KnowledgeSource
   createdAt: string
 }
 
@@ -35,6 +41,7 @@ interface KnowledgeEntryApiRow {
   final_content: string
   verification_status: VerificationStatus
   verification_explanation: string
+  source: KnowledgeSource
   created_at: string
 }
 
@@ -56,6 +63,13 @@ interface GrowthContextValue {
     title: string,
     content: string,
   ) => Promise<{ verification: KnowledgeVerification; verificationToken: string; remaining: number; dailyTeachLimit: number }>
+  studyGenerate: (companionType: CompanionType) => Promise<{
+    knowledge: { title: string; content: string }
+    verification: KnowledgeVerification
+    verificationToken: string
+    remaining: number
+    dailyStudyLimit: number
+  }>
   saveKnowledge: (
     companionType: CompanionType,
     title: string,
@@ -97,6 +111,7 @@ function fromKnowledgeApiRow(companionType: CompanionType, row: KnowledgeEntryAp
     finalContent: row.final_content,
     verificationStatus: row.verification_status,
     verificationExplanation: row.verification_explanation,
+    source: row.source,
     createdAt: row.created_at,
   }
 }
@@ -192,6 +207,36 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // "스스로 공부하기" — Gemini 호출 1회로 캐릭터가 새 지식을 생성하고
+  // 스스로 평가한다. verifyKnowledge와 마찬가지로 이 호출 자체는 아무것도
+  // 저장하지 않는다 — 돌아온 verificationToken을 그대로 saveKnowledge에
+  // 넘겨야 실제로 저장된다(사용자가 결과를 보고 확인한 뒤).
+  const studyGenerate = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch('/api/character?action=study-generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companionType }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      knowledge?: { title: string; content: string }
+      verification?: KnowledgeVerification
+      verificationToken?: string
+      remaining?: number
+      dailyStudyLimit?: number
+      error?: string
+    }
+    if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken) {
+      throw new Error(data.error || '스스로 공부하는 중 오류가 발생했어요.')
+    }
+    return {
+      knowledge: data.knowledge,
+      verification: data.verification,
+      verificationToken: data.verificationToken,
+      remaining: data.remaining ?? 0,
+      dailyStudyLimit: data.dailyStudyLimit ?? 0,
+    }
+  }, [])
+
   const saveKnowledge = useCallback(
     async (
       companionType: CompanionType,
@@ -245,7 +290,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
 
   return (
     <GrowthContext.Provider
-      value={{ characters, loading, createCharacter, setProfession, verifyKnowledge, saveKnowledge, listKnowledge }}
+      value={{ characters, loading, createCharacter, setProfession, verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge }}
     >
       {children}
     </GrowthContext.Provider>

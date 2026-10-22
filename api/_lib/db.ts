@@ -245,6 +245,17 @@ export function ensureKnowledgeTable() {
           ON character_knowledge_entries (character_id, client_request_id)
           WHERE client_request_id IS NOT NULL
       `
+
+      // PR #45 checkpoint 3: distinguishes a user-taught entry from one the
+      // character generated and verified itself ("스스로 공부하기").
+      // Nullable-safe additive column — DEFAULT 'user_taught' means every
+      // existing row (all of which were in fact user-taught, from PR #44)
+      // is correctly backfilled with no data loss, and no write path needs
+      // updating just because this column now exists.
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS source TEXT
+          NOT NULL DEFAULT 'user_taught' CHECK (source IN ('user_taught', 'ai_generated'))
+      `
     })().catch((err) => {
       knowledgeTableReady = null
       throw err
@@ -323,5 +334,6 @@ export interface KnowledgeEntryRow {
   final_content: string
   verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
   verification_explanation: string
+  source: 'user_taught' | 'ai_generated'
   created_at: string
 }

@@ -1,8 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ensureCharacterTables, ensureKnowledgeTable, sql, type CharacterRow, type KnowledgeEntryRow } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
-import { GeminiApiError, GeminiConfigError, verifyKnowledge, type KnowledgeVerificationResult } from './_lib/gemini'
+import {
+  GeminiApiError,
+  GeminiConfigError,
+  verifyKnowledge,
+  generateSelfStudy,
+  type KnowledgeVerificationResult,
+} from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach } from './_lib/knowledgeLimit'
+import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
@@ -18,6 +25,11 @@ const DEFAULT_LIST_LIMIT = 20
 const MAX_LIST_LIMIT = 50
 
 const DAILY_TEACH_LIMIT_REACHED_MESSAGE = `오늘의 지식 검증 요청 ${DAILY_TEACH_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
+const DAILY_STUDY_LIMIT_REACHED_MESSAGE = `오늘의 스스로 공부하기 요청 ${DAILY_STUDY_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
+// study-generate가 중복 생성을 피하려고 Gemini에 보내는 "이미 아는 제목"
+// 목록의 최대 길이 — 프롬프트 크기(=비용)를 제한하면서도 최근에 배운
+// 것 위주로 충분히 참고할 수 있는 수.
+const SELF_STUDY_KNOWN_TITLES_LIMIT = 20
 
 // Worst case for the verify-knowledge action: 2 Gemini attempts at
 // KNOWLEDGE_VERIFICATION_TIMEOUT_MS each plus a short backoff (see
@@ -61,6 +73,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'save-knowledge') {
       await handleSaveKnowledge(req, res, session.sub)
+      return
+    }
+    if (action === 'study-generate') {
+      await handleGenerateStudy(req, res, session.sub)
       return
     }
     await handlePost(req, res, session.sub)
@@ -278,12 +294,105 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       relevance: verification.relevance,
       issues: verification.issues,
       suggestion: verification.suggestion,
+      source: 'user_taught',
     })
 
     res.status(200).json({ verification, verificationToken, remaining: reserved.remaining, dailyTeachLimit: DAILY_TEACH_LIMIT })
   } catch (err) {
     console.error('[api/character] unexpected error on verify-knowledge', err)
     res.status(500).json({ error: '지식을 검증하는 중 오류가 발생했어요.' })
+  }
+}
+
+// "스스로 공부하기" — 사용자가 아무것도 입력하지 않아도, 캐릭터가 자기
+// 직업과 관련된 새 지식 1개를 스스로 만들고 스스로 평가한다(Gemini 호출
+// 1회, generateSelfStudy). 결과는 handleVerifyKnowledge와 완전히 동일한
+// 모양의 verification + 서명 토큰으로 내려가므로, 저장은 기존
+// save-knowledge 액션을 그대로 재사용한다 — 새 저장 경로를 만들지 않는다.
+async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType } = (req.body ?? {}) as { companionType?: unknown }
+
+  try {
+    await ensureCharacterTables()
+    await ensureKnowledgeTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    // 지식 검증(하루 10회)과 완전히 별도인 한도 — 이 호출이 Gemini에
+    // 닿기 전에 먼저 예약하므로, 한도 초과 요청은 비용이 전혀 들지
+    // 않는다.
+    const reserved = await reserveStudy(userId)
+    if (!reserved.ok) {
+      res.status(429).json({
+        error: DAILY_STUDY_LIMIT_REACHED_MESSAGE,
+        remaining: 0,
+        dailyStudyLimit: DAILY_STUDY_LIMIT,
+      })
+      return
+    }
+
+    const knownTitlesResult = await sql<{ title: string }>`
+      SELECT title FROM character_knowledge_entries
+      WHERE character_id = ${character.id} AND user_id = ${userId}
+      ORDER BY created_at DESC
+      LIMIT ${SELF_STUDY_KNOWN_TITLES_LIMIT}
+    `
+
+    let study
+    try {
+      study = await generateSelfStudy(
+        PROFESSION_LABEL[character.profession],
+        knownTitlesResult.rows.map((r) => r.title),
+      )
+    } catch (err) {
+      // 생성 자체가 실패했거나(설정/타임아웃/네트워크/비2xx) 응답을 해석할
+      // 수 없었던 경우(SelfStudyParseError) — 둘 다 쓸 수 있는 결과가
+      // 없으므로 오늘 한도에서 제외한다. handleVerifyKnowledge와 같은
+      // 회계 원칙.
+      await refundStudy(userId)
+      const { status, message } = resolveGeminiFailureMessage(err)
+      res.status(status).json({ error: message })
+      return
+    }
+
+    const verificationToken = signKnowledgeVerification({
+      userId,
+      characterId: character.id,
+      companionType: companionType as string,
+      title: study.title,
+      content: study.content,
+      status: study.status,
+      explanation: study.explanation,
+      relevance: study.relevance,
+      issues: study.issues,
+      suggestion: study.suggestion,
+      source: 'ai_generated',
+    })
+
+    res.status(200).json({
+      knowledge: { title: study.title, content: study.content },
+      verification: {
+        status: study.status,
+        explanation: study.explanation,
+        relevance: study.relevance,
+        issues: study.issues,
+        suggestion: study.suggestion,
+      },
+      verificationToken,
+      remaining: reserved.remaining,
+      dailyStudyLimit: DAILY_STUDY_LIMIT,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on study-generate', err)
+    res.status(500).json({ error: '스스로 공부하기 중 오류가 발생했어요.' })
   }
 }
 
@@ -374,7 +483,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // shape as findReplay in api/conversations/[id].ts.
     if (requestId) {
       const existing = await sql<KnowledgeEntryRow>`
-        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, created_at
+        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND client_request_id = ${requestId}
       `
@@ -394,10 +503,10 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
 
     const inserted = await sql<KnowledgeEntryRow>`
       INSERT INTO character_knowledge_entries
-        (user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id)
+        (user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source)
       VALUES
-        (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId})
-      RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, created_at
+        (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source})
+      RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
     `
 
     res.status(201).json({ entry: inserted.rows[0] })
@@ -430,7 +539,7 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
 
     const [entries, countResult] = await Promise.all([
       sql<KnowledgeEntryRow>`
-        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, created_at
+        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND user_id = ${userId}
         ORDER BY created_at DESC

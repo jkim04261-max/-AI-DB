@@ -5,8 +5,8 @@
 ## 현재 상태
 
 - **브랜치**: `claude/pr45-2d-growth-game-mvp` (base: `origin/main` @ `9302071`, PR #44 포함)
-- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터)
-- **다음 체크포인트**: 3(캐릭터 대화·학습 연동) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
+- **완료된 체크포인트**: 1(분석·설계), 2(2D 게임 화면·캐릭터), 3(캐릭터 대화·학습 연동)
+- **다음 체크포인트**: 4(XP·레벨·퀴즈) — **사용자 추가 승인 대기 중**, 아직 시작하지 않음
 
 ## 체크포인트 1 — 분석·설계
 
@@ -38,15 +38,53 @@
 - Vercel 서버리스 함수 개수: `find api -name "*.ts" -not -path "*/_lib/*" | wc -l` → **12** (변경 없음)
 - 수동 스크린샷 확인(데스크톱 1280px, 모바일 390px): 대기/공부/기쁨 포즈 모두 의도대로 렌더링, 모바일 가로 스크롤 없음
 
+## 체크포인트 3 — 캐릭터 대화·학습 연동 (완료)
+
+### 구현 내용
+
+**백엔드 (신규 action 1개, 기존 action 3개 확장, DB 컬럼 1개 추가 — 함수 개수 그대로 12)**
+- `api/_lib/db.ts`: `character_knowledge_entries`에 `source TEXT NOT NULL DEFAULT 'user_taught' CHECK (source IN ('user_taught','ai_generated'))` 컬럼 추가(`ADD COLUMN IF NOT EXISTS` — 기존 행은 전부 자동으로 `user_taught`로 채워짐, 데이터 손실 없음).
+- `api/_lib/studyLimit.ts`(신규): "스스로 공부하기" 전용 하루 호출 한도. 승인하신 대로 **하루 3회**, `daily_teach_usage`(지식 검증 10회)·`daily_question_usage`(채팅 10회)와 완전히 분리된 테이블/카운터. `reserveTeach`/`refundTeach`와 동일한 원자적 "검사 후 증가" 패턴.
+- `api/_lib/gemini.ts`: `generateSelfStudy(professionLabel, knownTitles)` 추가 — **Gemini 호출 1회**로 캐릭터가 새 지식을 생성하고 스스로 평가까지 끝낸다(생성+검증을 분리된 2회 호출로 하지 않음 — 조건 8의 비용 통제). 응답을 해석할 수 없으면(JSON 깨짐, title/content 누락·초과) `SelfStudyParseError`를 던져 호출로 처리하고 한도를 환불한다.
+- `api/_lib/knowledgeToken.ts`: 서명 토큰에 `source` 필드 추가 — **이 지식이 user_taught인지 ai_generated인지도 서버 서명으로 보증**한다. `save-knowledge`는 이제 요청 본문의 어떤 필드도 아닌, 오직 토큰에 서명된 `source`만 신뢰해 DB에 쓴다(클라이언트가 `source`를 같이 보내도 서버는 아예 읽지 않음 — 테스트로 확인).
+- `api/character.ts`: `?action=study-generate`(신규, POST) — 소유권·직업 확인 → 하루 3회 한도 예약(한도 초과면 Gemini 호출 전에 즉시 429, 비용 0) → 최근 가르친/배운 지식 제목 최대 20개를 Gemini에 참고자료로 전달(중복 생성 방지, 프롬프트 크기 제한) → 생성+자체검증 → PR #44와 동일한 서명 토큰 발급. **저장은 새 경로를 만들지 않고 기존 `save-knowledge`를 그대로 재사용** — `verify-knowledge`든 `study-generate`든 돌아온 토큰을 그대로 넘기면 끝.
+- `handleSaveKnowledge`/`handleListKnowledge`의 SELECT/INSERT에 `source` 컬럼 추가.
+
+**프런트엔드 (통합 상호작용 패널)**
+- `src/components/grow/InteractionPanel.tsx`(신규, `GrowPage.tsx`에서 분리): 기존 "지식 가르치기" 패널을 대체하는 **하나의 패널**에 가르치기 작성창 + "OO 스스로 공부하기" 버튼 + 대화 피드(dialogue feed)를 전부 담았다 — 별도 화면·탭·모드 전환이 없다(조건 2). 두 액션 모두 같은 검증 결과 카드·저장 버튼·위조 방지 로직(토큰 불일치 시 저장 거부)을 공유한다(조건 3).
+  - 가르치기: 사용자가 입력 → "Gemini 검증하기" → 결과를 받으면 캐릭터가 설명을 자신의 말로 풀어 대화 피드에 한 줄 남긴다(예: "정확해요! 복식부기는 회계의 기본 원리예요. 알려주셔서 고마워요!").
+  - 스스로 공부하기: 버튼 하나로 캐릭터가 새 지식을 생성 → 입력창에 그 내용이 채워져 사용자가 저장 전에 검토할 수 있다(자동 저장 아님, PR #44 원칙 유지) → 대화 피드에 "오늘은 'OO'에 대해 혼자 공부해봤어요! ..." 식으로 스스로 설명(조건 4).
+  - 저장하면 캐릭터가 "이 지식을 배웠어요! 다음엔 또 어떤 걸 가르쳐 주실 건가요?"(가르치기) / "...다음엔 또 무엇을 공부해볼까요?"(스스로 공부하기) 같은 후속 질문을 대화 피드에 남긴다 — 전부 Gemini가 실제로 만든 문장(explanation/suggestion)을 재료로 한 클라이언트 템플릿이라 **추가 Gemini 호출이 전혀 없다**.
+  - 표정·동작·대사 연결(조건 5): 검증/생성 중엔 `studying` 포즈, 결과가 적합이면 `happy`, 아니면 `sad`로 바뀌면서 동시에 대화 피드에 해당 대사가 나타난다 — 이미 체크포인트 2에서 만든 `onPoseChange` 콜백을 그대로 재사용.
+  - 학습 기록 목록에 "직접 가르침"/"스스로 학습" 출처 표시 추가.
+- `src/context/GrowthContext.tsx`: `studyGenerate()` 메서드 추가, `KnowledgeEntry`/`KnowledgeVerification` 타입에 `source` 필드 추가.
+- `CharacterSprite.tsx`는 **전혀 수정하지 않음** — 조건 7(임시 에셋, 교체 가능 구조 유지)이 자연스럽게 지켜짐.
+
+### 기존 기능 보호 확인
+- 로그인/회원가입, Gemini 대화, 이미지 첨부, 캐릭터 생성, 직업 선택·변경 — 해당 파일 전혀 수정하지 않음.
+- 기존 지식 검증(verify-knowledge)·저장(save-knowledge)·목록(knowledge) action은 동작 100% 동일(요청/응답 모양 변경 없음, `source` 필드가 응답에 추가된 것뿐).
+- PR #44의 서명 토큰 위조 방지 로직은 그대로 — 오히려 `source`까지 토큰에 포함시켜 보호 범위를 넓혔다.
+
+### 변경 파일
+- 신규: `api/_lib/studyLimit.ts`, `src/components/grow/InteractionPanel.tsx`
+- 수정: `api/_lib/db.ts`, `api/_lib/gemini.ts`, `api/_lib/knowledgeToken.ts`, `api/character.ts`, `src/context/GrowthContext.tsx`, `src/pages/GrowPage.tsx`(패널 분리로 축소), `tests/knowledge.test.cjs`, `tests/mock-postgres-impl.cjs`, `e2e/knowledge.spec.ts`
+
+### 테스트 결과
+- `npm run typecheck:api` / `npm run build` / `npm run lint`: 통과(신규 경고 없음, 기존 6건과 동일 종류)
+- `npm test`: **172/172 통과** (`knowledge.test.cjs`가 43 → 63건으로 확장 — study-generate 인증/직업 확인/정상 흐름/소스 위조 무시/중복 제출 방지/해석 실패 시 환불/하루 3회 한도 분리/다른 사용자 차단/목록에 source 표시까지 커버)
+- `npm run test:e2e`: **35/35 통과** (기존 지식 검증 테스트 전부 셀렉터 그대로 통과 — 저장 확인 배너만 대화 피드 메시지로 바뀐 1곳 업데이트, 스스로 공부하기 2건·통합 상호작용 1건 신규)
+- Vercel 함수 개수: **12 (변경 없음)** — `study-generate`는 새 파일이 아니라 `api/character.ts`의 action 하나 추가
+- Gemini 호출 비용: 가르치기 1회=호출 1회(기존과 동일), 스스로 공부하기 1회=호출 1회(생성+검증 통합), 하루 상한 각각 10회/3회로 분리 적용
+- 수동 스크린샷 확인: 가르치기 메시지 + 스스로 공부하기 메시지가 같은 대화 피드에 함께 쌓이는 것, 결과 카드·저장 버튼·두 가지 남은 횟수 표시가 한 화면에 자연스럽게 공존하는 것을 확인
+
 ## 재개 방법 (세션이 중단된 경우)
 
-1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 2" 커밋인지 확인
+1. `git log --oneline -3` 로 마지막 커밋이 "PR #45 checkpoint 3" 커밋인지 확인
 2. `npm ci`(node_modules 없으면) → `npm test` / `npm run build` / `npm run lint` / `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npx playwright test` 로 현재 상태가 전부 통과하는지 재확인
-3. 체크포인트 3(캐릭터 대화·학습 연동 통합) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙)
+3. 체크포인트 4(XP·레벨·퀴즈) 시작 — **사용자의 추가 승인 없이는 시작하지 않음**(요청하신 체크포인트별 승인 원칙)
 
 ## 다음 체크포인트 미리보기 (아직 미구현)
 
-- 체크포인트 3: 가르치기/스스로 공부하기 통합 대화형 UI, `api/character.ts`에 `study-generate` action 추가(스스로 공부하기, 하루 3회 별도 제한), `character_knowledge_entries.source` 컬럼(`user_taught`/`ai_generated`) 추가
-- 체크포인트 4: XP·레벨(`characters.level`/`exp` 컬럼, `character_activities` 원장), 퀴즈·시험(`character_exam_attempts`, 정적 문제은행), 중복 지급 방지
+- 체크포인트 4: XP·레벨(`characters.level`/`exp` 컬럼, `character_activities` 원장), 퀴즈·시험(`character_exam_attempts`, 정적 문제은행, 회계사/가수 각 3~5문항), XP 지급(지식저장 +10/퀴즈정답 +5/시험합격 +50), 중복 지급 방지
 - 체크포인트 5: DB 저장 통합 테스트 보강
 - 체크포인트 6: Preview 배포·최종 검증·PR 생성

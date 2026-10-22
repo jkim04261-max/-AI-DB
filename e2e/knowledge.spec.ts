@@ -25,6 +25,7 @@ async function mockCharacterApi(
     onVerify?: (route: Route) => Promise<void>
     onSave?: (route: Route) => Promise<void>
     onListKnowledge?: (route: Route) => Promise<void>
+    onStudyGenerate?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -50,6 +51,10 @@ async function mockCharacterApi(
     }
     if (method === 'POST' && action === 'save-knowledge' && options.onSave) {
       await options.onSave(route)
+      return
+    }
+    if (method === 'POST' && action === 'study-generate' && options.onStudyGenerate) {
+      await options.onStudyGenerate(route)
       return
     }
     await route.fallback()
@@ -107,6 +112,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
             final_content: '거래를 두 번 기록한다',
             verification_status: 'appropriate',
             verification_explanation: '정확해요',
+            source: 'user_taught',
             created_at: new Date().toISOString(),
           },
         }),
@@ -133,7 +139,9 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   expect(saveCalled).toBe(false) // verifying never auto-saves
 
   await saveButton.click()
-  await expect(page.getByText('학습 기록으로 저장했어요.')).toBeVisible()
+  // PR #45 checkpoint 3: a static "saved" banner was replaced by a
+  // character dialogue line in the unified interaction panel's feed.
+  await expect(page.getByText('이 지식을 배웠어요!', { exact: false })).toBeVisible()
   expect(saveCalled).toBe(true)
   // The frontend must send the server-issued verificationToken, not a raw
   // verification object the server would have to trust as-is — this is
@@ -238,6 +246,7 @@ test('the learning-record list shows saved entries with their verification statu
               final_content: '거래를 두 번 기록한다',
               verification_status: 'appropriate',
               verification_explanation: '정확해요',
+              source: 'user_taught',
               created_at: new Date().toISOString(),
             },
           ],
@@ -252,4 +261,124 @@ test('the learning-record list shows saved entries with their verification statu
 
   await expect(page.getByText('복식부기')).toBeVisible()
   await expect(page.getByText('(1개)')).toBeVisible()
+})
+
+// --- PR #45 checkpoint 3: 통합 상호작용(가르치기 + 스스로 공부하기) ---
+
+test('clicking 스스로 공부하기 fills in the generated knowledge, shows a character dialogue line, and can be saved', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCalled = false
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 동시에 기록한다.' },
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-study',
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCalled = true
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      expect(body.verificationToken).toBe('mock-token-study')
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: {
+            id: 1,
+            character_id: 1,
+            profession: 'accountant',
+            title: '복식부기',
+            original_content: '거래를 차변과 대변에 동시에 기록한다.',
+            final_content: '거래를 차변과 대변에 동시에 기록한다.',
+            verification_status: 'appropriate',
+            verification_explanation: '정확해요',
+            source: 'ai_generated',
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
+
+  // The composer is filled with what the character generated, so the user
+  // can review it before saving — self-study never auto-saves either.
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('복식부기')
+  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).toHaveValue('거래를 차변과 대변에 동시에 기록한다.')
+  // The character "explains in its own words" what it studied.
+  await expect(page.getByText(/오늘은 '복식부기'에 대해 혼자 공부해봤어요/)).toBeVisible()
+  await expect(page.getByText('오늘 남은 스스로 공부하기 횟수: 2/3')).toBeVisible()
+
+  const saveButton = page.getByRole('button', { name: '저장' })
+  await expect(saveButton).toBeEnabled()
+  expect(saveCalled).toBe(false)
+
+  await saveButton.click()
+  await expect(page.getByText('이 지식을 학습 기록에 저장했어요!', { exact: false })).toBeVisible()
+  expect(saveCalled).toBe(true)
+})
+
+test('teaching and self-study both happen in the same panel, building one shared dialogue feed (not separate modes)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-teach',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '발생주의', content: '수익과 비용은 발생한 시점에 인식한다.' },
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-study-2',
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+
+  // Teach first.
+  await page.getByPlaceholder('지식 제목').fill('복식부기')
+  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('거래를 두 번 기록한다')
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+  await expect(page.getByText('알려주셔서 고마워요!', { exact: false })).toBeVisible()
+
+  // Then self-study, in the exact same panel — no navigation, no mode
+  // switch, no separate screen.
+  await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
+  await expect(page.getByText(/오늘은 '발생주의'에 대해 혼자 공부해봤어요/)).toBeVisible()
+
+  // Both exchanges remain visible together in the same dialogue feed.
+  await expect(page.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
+  await expect(page.getByText('알려주셔서 고마워요!', { exact: false })).toBeVisible()
 })
