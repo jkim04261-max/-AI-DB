@@ -145,3 +145,55 @@ body {
     animation: none;
   }
 }
+
+/* PR #46 — 게임 화면(스테이지/시트/말풍선/XP 연출) 전용 키프레임.
+   전부 transform/opacity만 바꿔 저사양 모바일에서도 가볍고, 트리거하는
+   쪽(GameStage/BottomSheet/SpeechBubble)은 전부 Tailwind의
+   motion-safe: 접두사를 써서 "동작 줄이기" 설정을 자동으로 존중한다. */
+@keyframes grow-prop-sway {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(2deg);
+  }
+}
+@keyframes grow-bubble-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes grow-sheet-up {
+  0% {
+    transform: translateY(16px);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes grow-xp-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.9);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -6px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -18px) scale(1);
+  }
+}

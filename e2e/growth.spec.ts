@@ -32,6 +32,14 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messages: [], total: 0 }) })
       return
     }
+    // PR #46: GrowPage now eagerly fetches exam status (for the "오늘의
+    // 목표" hint) whenever a character has a profession, even on tests
+    // that don't care about the exam flow — default to "not passed yet"
+    // unless a test supplies its own onExam.
+    if (method === 'GET' && action === 'exam' && !options.onExam) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
+      return
+    }
     if (method === 'GET' && !action) {
       await route.fulfill({
         status: 200,
@@ -119,7 +127,7 @@ test('answering a quiz correctly shows the explanation, the XP gained, and updat
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '시험 보기' }).click()
+  await page.getByRole('button', { name: '문제 풀기' }).click()
   await page.getByRole('button', { name: /퀴즈 풀기/ }).click()
 
   await expect(page.getByText('회계의 기본 등식은?')).toBeVisible()
@@ -176,7 +184,7 @@ test('passing the profession exam shows the pass message, awarded XP, and a leve
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '시험 보기' }).click()
+  await page.getByRole('button', { name: '문제 풀기' }).click()
   await page.getByRole('button', { name: /자격 시험 보기/ }).click()
 
   await expect(page.getByText('회계의 기본 등식은?')).toBeVisible()
