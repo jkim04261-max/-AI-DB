@@ -50,6 +50,13 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messages: [], total: 0 }) })
       return
     }
+    // PR #46: GrowPage now eagerly fetches exam status (for the "오늘의
+    // 목표" hint) whenever a character has a profession — default to
+    // "not passed yet" since these tests aren't about the exam flow.
+    if (method === 'GET' && action === 'exam') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
+      return
+    }
     if (method === 'GET' && !action) {
       await route.fulfill({
         status: 200,
@@ -85,8 +92,8 @@ test('a character with no profession shows guidance instead of a teach form', as
 
   await page.goto('/grow')
 
-  await expect(page.getByText('먼저 직업을 선택해주세요.')).toBeVisible()
-  await expect(page.getByRole('button', { name: /지식 가르치기/ })).toHaveCount(0)
+  await expect(page.getByText('직업을 선택하면 게임 메뉴를 쓸 수 있어요.')).toBeVisible()
+  await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
 })
 
 test('verifying appropriate knowledge shows the result and enables 저장, which is not sent until clicked', async ({ page }) => {
@@ -140,7 +147,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('복식부기')
   await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('거래를 두 번 기록한다')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
@@ -168,10 +175,11 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   expect(saveRequestBody?.verificationToken).toBe('mock-token-appropriate')
   expect(saveRequestBody?.verification).toBeUndefined()
 
-  // Closing the teach panel must reset the pose immediately (not wait out
-  // the 2.5s auto-revert timer) — this is the unmount-cleanup behavior in
-  // KnowledgeTeachPanel's pose-timeout effect.
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  // Closing the teach panel (the bottom sheet) must reset the pose
+  // immediately (not wait out the 2.5s auto-revert timer) — this is the
+  // unmount-cleanup behavior in InteractionPanel's pose-timeout effect,
+  // triggered now by closing the sheet rather than re-toggling a button.
+  await page.getByRole('button', { name: '닫기' }).click()
   await expect(page.getByRole('img', { name: /누리 캐릭터, 대기 중/ })).toBeVisible()
 })
 
@@ -197,7 +205,7 @@ test('needs_revision disables 저장 and shows guidance to revise and re-verify'
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('틀린지식')
   await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('잘못된 내용')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
@@ -232,7 +240,7 @@ test('editing content after a result makes it stale and requires re-verifying be
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('복식부기')
   const contentBox = page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')
   await contentBox.fill('거래를 두 번 기록한다')
@@ -277,7 +285,7 @@ test('the learning-record list shows saved entries with their verification statu
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByRole('button', { name: /학습 기록/ }).click()
 
   await expect(page.getByText('복식부기')).toBeVisible()
@@ -338,7 +346,7 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
 
   // The composer is filled with what the character generated, so the user
@@ -394,7 +402,7 @@ test('teaching and self-study both happen in the same panel, building one shared
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
 
   // Teach first.
   await page.getByPlaceholder('지식 제목').fill('복식부기')
@@ -439,9 +447,13 @@ test('reopening the panel (e.g. after a refresh) reloads the persisted conversat
   // Never clicked "Gemini 검증하기" in this test — the conversation shown
   // below comes entirely from the server, not from any action taken in
   // this session, proving it was reloaded rather than re-derived locally.
-  await page.getByRole('button', { name: /지식 가르치기/ }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
 
-  await expect(page.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
-  await expect(page.getByText('정확해요! 알려주셔서 고마워요!', { exact: false })).toBeVisible()
+  // PR #46: GrowthHUD also shows a "최근: ..." preview built from the same
+  // listMessages data, so the dialogue text now appears twice on the page —
+  // scope these assertions to the sheet's dialogue feed specifically.
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
+  await expect(dialog.getByText('정확해요! 알려주셔서 고마워요!', { exact: false })).toBeVisible()
   expect(messagesRequested).toBeGreaterThan(0)
 })
