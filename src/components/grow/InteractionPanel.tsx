@@ -276,7 +276,7 @@ export default function InteractionPanel({
           rows={4}
           className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
         />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-start gap-1">
           <button
             onClick={() => void handleTeach()}
             disabled={busy || !title.trim() || !content.trim()}
@@ -284,6 +284,11 @@ export default function InteractionPanel({
           >
             {busyAction === 'teach' ? 'Gemini 검증 중...' : 'Gemini 검증하기'}
           </button>
+          <p className="text-[11px] text-slate-400">
+            입력한 지식을 Gemini가 검토해요. 검증 성공 후 저장해야 경험치가 지급되고, Gemini API 호출에 따른 비용이 발생할 수 있어요.
+          </p>
+        </div>
+        <div className="flex flex-col items-start gap-1">
           <button
             onClick={() => void handleSelfStudy()}
             disabled={busy}
@@ -291,6 +296,9 @@ export default function InteractionPanel({
           >
             {busyAction === 'study' ? `${name}가 스스로 공부하는 중...` : `${name} 스스로 공부하기`}
           </button>
+          <p className="text-[11px] text-slate-400">
+            기존 학습 기록을 참고해 AI가 새로운 학습 내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
+          </p>
         </div>
         {studyRemaining && (
           <p className="text-[11px] text-slate-400">
