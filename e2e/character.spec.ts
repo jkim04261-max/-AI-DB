@@ -36,6 +36,14 @@ function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
       return
     }
+    // PR #47 체크포인트 1: GrowPage는 이제 메인 화면 스탯 게이지용으로
+    // GET ?action=knowledge도 캐릭터 선택 시마다 미리 불러온다 — 이
+    // 파일의 테스트들은 그 값 자체를 검증하지 않으므로 빈 목록 기본값만
+    // 둔다.
+    if (method === 'GET' && action === 'knowledge') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) })
+      return
+    }
     const handled = await handle(route, action, method)
     if (!handled) await route.fallback()
   })

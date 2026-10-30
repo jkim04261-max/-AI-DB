@@ -12,6 +12,9 @@ import InteractionPanel from '../components/grow/InteractionPanel'
 import ExamPanel from '../components/grow/ExamPanel'
 import ChatLogPanel from '../components/grow/ChatLogPanel'
 import RecordsPanel from '../components/grow/RecordsPanel'
+import StatGaugesPanel from '../components/grow/StatGauges'
+import { computeStatGauges } from '../data/characterStats'
+import { appearanceTierForLevel } from '../data/characterAppearance'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const SHEET_TITLE: Record<GameMenuAction, string> = {
@@ -30,7 +33,7 @@ const SHEET_TITLE: Record<GameMenuAction, string> = {
 export default function GrowPage() {
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { characters, loading, createCharacter, setProfession, listMessages, getExam } = useGrowth()
+  const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge } = useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
   const [creating, setCreating] = useState<CompanionType | null>(null)
@@ -44,10 +47,15 @@ export default function GrowPage() {
   const [recentLine, setRecentLine] = useState<string | null>(null)
   const [examPassed, setExamPassed] = useState<boolean | null>(null)
   const [xpPopup, setXpPopup] = useState<number | null>(null)
+  const [knowledgeStats, setKnowledgeStats] = useState({ total: 0, aiGenerated: 0 })
+  const [messageTotal, setMessageTotal] = useState(0)
+  const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null)
 
   const character = characters.find((c) => c.companionType === selected) ?? null
   const prevExpRef = useRef<number | null>(null)
+  const prevLevelRef = useRef<number | null>(null)
   const bubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const levelUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 로그인한 계정이 두리만 갖고 있는 경우처럼, 기본값('nuri')과 실제
   // 보유 캐릭터가 어긋날 수 있어 보정한다 — 둘 다 있으면 아무것도 하지
@@ -58,13 +66,18 @@ export default function GrowPage() {
     setSelected(characters[0].companionType)
   }, [characters, selected])
 
-  // 캐릭터를 전환할 때마다 "오늘의 목표"/"최근 기록"에 쓸 가벼운 데이터를
-  // 조용히 미리 불러온다 — 둘 다 이미 있는 읽기 전용 GET이라(Gemini 호출
-  // 없음, 비용 없음) 추가 과금이나 새 API 없이 재사용만 한다.
+  // 캐릭터를 전환할 때마다 "오늘의 목표"/"최근 기록"/4개 스탯 게이지에
+  // 쓸 가벼운 데이터를 조용히 미리 불러온다 — 셋 다 이미 있는 읽기
+  // 전용 GET이라(Gemini 호출 없음, 비용 없음) 추가 과금이나 새 API
+  // 없이 재사용만 한다. 스탯 게이지 자체는 characterStats.ts가 이
+  // 데이터를 0~100으로 환산한 "표시용" 값일 뿐, 새로 저장되는 값은
+  // 아니다(PR #47 체크포인트 1).
   useEffect(() => {
     if (!character) return
     setExamPassed(null)
     setRecentLine(null)
+    setKnowledgeStats({ total: 0, aiGenerated: 0 })
+    setMessageTotal(0)
     let cancelled = false
     if (character.profession) {
       getExam(character.companionType)
@@ -75,13 +88,24 @@ export default function GrowPage() {
     }
     listMessages(character.companionType, { limit: 5 })
       .then((r) => {
-        if (!cancelled && r.messages.length > 0) setRecentLine(r.messages[r.messages.length - 1].content)
+        if (!cancelled) {
+          setMessageTotal(r.total)
+          if (r.messages.length > 0) setRecentLine(r.messages[r.messages.length - 1].content)
+        }
+      })
+      .catch(() => {})
+    listKnowledge(character.companionType, { limit: 100 })
+      .then((r) => {
+        if (!cancelled) {
+          const aiGenerated = r.entries.filter((e) => e.source === 'ai_generated').length
+          setKnowledgeStats({ total: r.total, aiGenerated })
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [character?.companionType, character?.profession, getExam, listMessages])
+  }, [character?.companionType, character?.profession, getExam, listMessages, listKnowledge])
 
   // XP가 늘어나면(패널이 뭘 했든 상관없이) 잠깐 "+N XP" 팝업만 띄운다 —
   // InteractionPanel/ExamPanel 내부를 전혀 건드리지 않고, 결과로 바뀐
@@ -101,9 +125,28 @@ export default function GrowPage() {
     prevExpRef.current = character?.exp ?? null
   }, [character?.companionType])
 
+  // 레벨이 실제로 올랐을 때만(지식 저장/퀴즈/시험 하나로는 보통 레벨까지
+  // 안 오름) +N XP 팝업과 별개로 더 눈에 띄는 "레벨업" 연출을 띄운다 —
+  // 이 효과도 InteractionPanel/ExamPanel을 전혀 건드리지 않고 결과로
+  // 바뀐 character.level만 지켜보는 방식이다.
+  useEffect(() => {
+    if (!character) return
+    const prev = prevLevelRef.current
+    if (prev !== null && character.level > prev) {
+      setLeveledUpTo(character.level)
+      if (levelUpTimeoutRef.current) clearTimeout(levelUpTimeoutRef.current)
+      levelUpTimeoutRef.current = setTimeout(() => setLeveledUpTo(null), 2200)
+    }
+    prevLevelRef.current = character.level
+  }, [character?.level])
+  useEffect(() => {
+    prevLevelRef.current = character?.level ?? null
+  }, [character?.companionType])
+
   useEffect(() => {
     return () => {
       if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
+      if (levelUpTimeoutRef.current) clearTimeout(levelUpTimeoutRef.current)
     }
   }, [])
 
@@ -190,6 +233,17 @@ export default function GrowPage() {
     setOpenSheet(action)
   }
 
+  const statGauges = character
+    ? computeStatGauges({
+        level: character.level,
+        knowledgeTotal: knowledgeStats.total,
+        aiGeneratedTotal: knowledgeStats.aiGenerated,
+        messageTotal,
+        examPassed,
+      })
+    : null
+  const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
+
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-3 px-3 py-4 sm:px-4">
       <div className="flex items-center justify-between">
@@ -222,10 +276,19 @@ export default function GrowPage() {
               pose={pose}
               bubbleText={bubbleText}
               onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
+              tier={tier}
             />
             {xpPopup !== null && (
               <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-500 drop-shadow">
                 +{xpPopup} XP
+              </span>
+            )}
+            {leveledUpTo !== null && (
+              <span
+                data-testid="level-up-banner"
+                className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-2xl font-extrabold text-amber-500 drop-shadow-lg"
+              >
+                🎉 Lv.{leveledUpTo} 레벨업!
               </span>
             )}
           </div>
@@ -238,6 +301,8 @@ export default function GrowPage() {
             goalText={goalText}
             recentLine={recentLine}
           />
+
+          {statGauges && <StatGaugesPanel values={statGauges} />}
 
           <div className="flex items-center justify-between">
             <button

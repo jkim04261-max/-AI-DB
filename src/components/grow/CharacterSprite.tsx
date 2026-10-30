@@ -1,4 +1,5 @@
 import type { CompanionType } from '../../context/GrowthContext'
+import type { AppearanceTier } from '../../data/characterAppearance'
 
 // Independent from GrowthContext's CharacterPose-less status types — this
 // is purely a *visual* state, driven today only by the existing
@@ -75,10 +76,15 @@ export default function CharacterSprite({
   companionType,
   pose = 'idle',
   size = 96,
+  tier = 'rookie',
 }: {
   companionType: CompanionType
   pose?: CharacterPose
   size?: number
+  // PR #47 체크포인트 1: 레벨 기반 외형 분기 구조 — 지금은 작은 장식
+  // 요소(안경/배지)만 추가하는 최소 구현이고, 기본값('rookie')은 기존
+  // PR #45/#46의 모습과 100% 동일해 과거 테스트·스냅샷을 깨지 않는다.
+  tier?: AppearanceTier
 }) {
   const palette = PALETTE[companionType]
   const isNuri = companionType === 'nuri'
@@ -226,6 +232,23 @@ export default function CharacterSprite({
         <g className="grow-sprite-mouth-group">
           <path d={MOUTH_PATH[pose]} stroke={palette.accent} strokeWidth={3.5} strokeLinecap="round" fill="none" />
         </g>
+
+        {/* tier='student' 전용: 작은 안경 — 레벨 3 이상부터 보임 */}
+        {tier === 'student' && (
+          <g data-testid="appearance-accessory-student" stroke={palette.hairDark} strokeWidth={2.5} fill="none">
+            <circle cx={60} cy={73} r={11} />
+            <circle cx={100} cy={73} r={11} />
+            <line x1={71} y1={73} x2={89} y2={73} />
+          </g>
+        )}
+
+        {/* tier='expert' 전용: 작은 전문가 배지 — 레벨 6 이상부터 보임 */}
+        {tier === 'expert' && (
+          <g data-testid="appearance-accessory-expert">
+            <circle cx={104} cy={136} r={7} fill="#ffd54a" stroke={palette.outfitDark} strokeWidth={1.5} />
+            <path d="M 104 132 l 2 4 l 4 0.5 l -3 3 l 0.7 4 l -3.7 -2 l -3.7 2 l 0.7 -4 l -3 -3 l 4 -0.5 Z" fill={palette.accent} />
+          </g>
+        )}
       </g>
     </svg>
   )
