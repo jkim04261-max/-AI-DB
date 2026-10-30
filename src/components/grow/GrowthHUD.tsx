@@ -1,27 +1,27 @@
-import { Briefcase, Target } from 'lucide-react'
+import { Briefcase } from 'lucide-react'
 import { levelProgress, KNOWLEDGE_VS_MODEL_DISCLAIMER } from '../../data/characterGrowth'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
 
 const STAGE_LABEL: Record<'child' | 'adult', string> = { child: '어린이', adult: '성인' }
 
-// PR #46: compact status strip under the stage — level/XP, today's goal,
-// and a one-line "recent activity" preview. All values are passed in by
-// GrowPage, computed from data GrowthContext already fetches (characters
-// list, listMessages, getExam's alreadyPassed) — this component adds no
-// new API calls of its own.
+// PR #46: compact status strip under the stage — level/XP and a one-line
+// "recent activity" preview. All values are passed in by GrowPage, computed
+// from data GrowthContext already fetches (characters list, listMessages,
+// getExam's alreadyPassed) — this component adds no new API calls of its
+// own. PR #48: the "오늘의 목표" line moved out to QuestBanner (now with a
+// bigger, action-button-carrying "퀘스트 제안" role) so the same
+// recommendation isn't shown twice on the same screen.
 export default function GrowthHUD({
   name,
   stage,
   profession,
   exp,
-  goalText,
   recentLine,
 }: {
   name: string
   stage: 'child' | 'adult'
   profession: ProfessionId | null
   exp: number
-  goalText: string
   recentLine: string | null
 }) {
   const { level, expIntoLevel, expForNextLevel } = levelProgress(exp)
@@ -51,11 +51,6 @@ export default function GrowthHUD({
         <span className="shrink-0 text-[11px] text-slate-400">
           {expIntoLevel}/{expForNextLevel} XP
         </span>
-      </div>
-
-      <div className="flex items-start gap-1.5 text-xs text-slate-600">
-        <Target size={13} className="mt-0.5 shrink-0 text-amber-500" />
-        <span>{goalText}</span>
       </div>
 
       {recentLine && <p className="truncate text-[11px] text-slate-400">최근: {recentLine}</p>}
