@@ -197,3 +197,25 @@ body {
     transform: translate(-50%, -18px) scale(1);
   }
 }
+/* PR #47 체크포인트 1: XP가 올라서 레벨 자체가 바뀌었을 때만(퀴즈 정답
+   1회 정도로는 보통 안 뜸) 잠깐 더 크게 띄우는 전용 축하 연출 —
+   grow-xp-pop과 같은 자리에서 동시에 뜨는 걸 피하려고 스케일/지속시간을
+   더 크게 분리해 겹쳐도 서로 가려지지 않게 했다. */
+@keyframes grow-levelup-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}

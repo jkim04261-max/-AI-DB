@@ -4,6 +4,7 @@ import SpeechBubble from './SpeechBubble'
 import { sceneForProfession } from '../../data/growthScenes'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { ProfessionId } from '../../data/characterProfessions'
+import type { AppearanceTier } from '../../data/characterAppearance'
 
 // PR #46: the "room" the character stands in. Pure CSS layering (no
 // Three.js/WebGL) — a few absolutely-positioned gradient layers + emoji
@@ -18,12 +19,14 @@ export default function GameStage({
   pose,
   bubbleText,
   onTapCharacter,
+  tier = 'rookie',
 }: {
   companionType: CompanionType
   profession: ProfessionId | null
   pose: CharacterPose
   bubbleText: string | null
   onTapCharacter?: () => void
+  tier?: AppearanceTier
 }) {
   const scene = sceneForProfession(profession)
   const [tapped, setTapped] = useState(false)
@@ -94,7 +97,7 @@ export default function GameStage({
             className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             <span className="mx-auto block w-[150px] [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]">
-              <CharacterSprite companionType={companionType} pose={pose} size={220} />
+              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} />
             </span>
           </div>
         </div>

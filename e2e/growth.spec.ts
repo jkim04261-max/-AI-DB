@@ -40,6 +40,13 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
       return
     }
+    // PR #47 체크포인트 1: 메인 화면 스탯 게이지용 GET ?action=knowledge
+    // 기본값 — 이 파일의 테스트는 XP/레벨/퀴즈/시험을 다루므로 빈
+    // 목록이면 충분하다.
+    if (method === 'GET' && action === 'knowledge') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) })
+      return
+    }
     if (method === 'GET' && !action) {
       await route.fulfill({
         status: 200,

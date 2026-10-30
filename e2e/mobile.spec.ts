@@ -63,6 +63,11 @@ test('the /grow game screen fits a phone width with no horizontal scroll, and sh
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
       return
     }
+    // PR #47 체크포인트 1: 메인 화면 스탯 게이지용 GET ?action=knowledge 기본값.
+    if (method === 'GET' && action === 'knowledge') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) })
+      return
+    }
     if (method === 'GET' && !action) {
       await route.fulfill({
         status: 200,

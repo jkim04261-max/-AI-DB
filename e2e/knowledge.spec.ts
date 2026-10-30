@@ -34,8 +34,16 @@ async function mockCharacterApi(
     const action = url.searchParams.get('action')
     const method = route.request().method()
 
-    if (method === 'GET' && action === 'knowledge' && options.onListKnowledge) {
-      await options.onListKnowledge(route)
+    if (method === 'GET' && action === 'knowledge') {
+      if (options.onListKnowledge) {
+        await options.onListKnowledge(route)
+        return
+      }
+      // PR #47 체크포인트 1: 메인 화면 스탯 게이지용으로 GrowPage가 이제
+      // 캐릭터 선택 시마다 미리 불러오는 호출 — onListKnowledge를 지정하지
+      // 않은 테스트(지식 목록 자체를 검증하지 않는 테스트)에는 빈 목록
+      // 기본값을 둔다.
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) })
       return
     }
     // PR #45 checkpoint 3.6: InteractionPanel fetches the persisted
