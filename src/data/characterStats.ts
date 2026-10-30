@@ -1,3 +1,5 @@
+import type { ProfessionId } from './characterProfessions'
+
 // PR #47 체크포인트 1: 지식/업무/소통/창의 4개 스탯 게이지.
 //
 // 중요: 이 게이지는 새로 저장되는 값이 아니다 — DB 스키마는 전혀 바뀌지
@@ -12,6 +14,10 @@ export interface StatGaugeInputs {
   aiGeneratedTotal: number
   messageTotal: number
   examPassed: boolean | null
+  // PR #48: 직업별로 성장 스탯이 조금씩 다르게 느껴지도록 하는 가중치
+  // 입력 — 직업을 아직 안 고른 캐릭터는 null을 넘기면 가중치 없이
+  // 계산된다(DEFAULT_STAT_WEIGHT).
+  profession: ProfessionId | null
 }
 
 export interface StatGauges {
@@ -29,17 +35,31 @@ function clampPct(value: number): number {
 // 무관하고, 오직 "최근에 얼마나 활동했는지"를 눈에 보이는 게이지로
 // 바꾸기 위한 것이다(characterGrowth.ts의 KNOWLEDGE_VS_MODEL_DISCLAIMER와
 // 같은 취지).
+const DEFAULT_STAT_WEIGHT: StatGauges = { knowledge: 1, work: 1, communication: 1, creativity: 1 }
+
+// PR #48: 직업별 성장 스탯 가중치 — DB에는 전혀 저장되지 않는, 표시용
+// 게이지의 계산 비중일 뿐이다. 회계사는 꼼꼼한 업무 처리를, 가수는
+// 사람들과의 소통·무대 위 창의성을 더 강조해 같은 활동을 해도 직업에
+// 따라 성장 그래프가 조금 다르게 보이도록 한다. 직업을 새로 추가할 때
+// (PR #49 범위) 이 표에 한 줄만 추가하면 된다.
+const PROFESSION_STAT_WEIGHT: Record<ProfessionId, StatGauges> = {
+  accountant: { knowledge: 1.1, work: 1.3, communication: 0.8, creativity: 0.8 },
+  singer: { knowledge: 0.9, work: 0.8, communication: 1.2, creativity: 1.3 },
+}
+
 export function computeStatGauges({
   level,
   knowledgeTotal,
   aiGeneratedTotal,
   messageTotal,
   examPassed,
+  profession,
 }: StatGaugeInputs): StatGauges {
-  const knowledge = clampPct(knowledgeTotal * 10)
-  const communication = clampPct(messageTotal * 4)
-  const creativity = clampPct(aiGeneratedTotal * 20)
-  const work = examPassed ? 100 : clampPct(level * 15)
+  const weight = profession ? PROFESSION_STAT_WEIGHT[profession] : DEFAULT_STAT_WEIGHT
+  const knowledge = clampPct(knowledgeTotal * 10 * weight.knowledge)
+  const communication = clampPct(messageTotal * 4 * weight.communication)
+  const creativity = clampPct(aiGeneratedTotal * 20 * weight.creativity)
+  const work = clampPct((examPassed ? 100 : level * 15) * weight.work)
   return { knowledge, work, communication, creativity }
 }
 
