@@ -105,6 +105,11 @@ export default function GrowPage() {
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
   // 오작동한다).
   const questBubbleShownRef = useRef<Set<CompanionType>>(new Set())
+  // 진입 시 한 번 예약되는 "캐릭터가 먼저 말을 거는" 말풍선(900ms 지연)
+  // 의 타이머 — 그 전에 사용자가 다른 상호작용(소품 클릭 등)으로 먼저
+  // showBubble을 호출하면, 이 지연 타이머가 나중에 그 말풍선을 덮어쓰지
+  // 않도록 취소해야 한다(아래 showBubble 참고).
+  const questBubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 로그인한 계정이 두리만 갖고 있는 경우처럼, 기본값('nuri')과 실제
   // 보유 캐릭터가 어긋날 수 있어 보정한다 — 둘 다 있으면 아무것도 하지
@@ -230,8 +235,16 @@ export default function GrowPage() {
     if (questBubbleShownRef.current.has(character.companionType)) return
     if (character.profession && examPassed === null) return
     questBubbleShownRef.current.add(character.companionType)
-    const t = window.setTimeout(() => showBubble(quest.text), 900)
-    return () => window.clearTimeout(t)
+    questBubbleTimeoutRef.current = setTimeout(() => {
+      questBubbleTimeoutRef.current = null
+      showBubble(quest.text)
+    }, 900)
+    return () => {
+      if (questBubbleTimeoutRef.current) {
+        clearTimeout(questBubbleTimeoutRef.current)
+        questBubbleTimeoutRef.current = null
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [character?.companionType, character?.profession, examPassed, quest.text])
 
@@ -244,6 +257,13 @@ export default function GrowPage() {
   }, [])
 
   const showBubble = (text: string) => {
+    // 진입 시 예약된 "먼저 말 거는" 말풍선이 아직 안 떴다면, 지금 다른
+    // 이유로 말풍선을 띄우는 이 호출이 먼저다 — 나중에 그 지연 타이머가
+    // 뒤늦게 발동해 지금 막 띄운 말풍선을 덮어쓰지 않도록 취소한다.
+    if (questBubbleTimeoutRef.current) {
+      clearTimeout(questBubbleTimeoutRef.current)
+      questBubbleTimeoutRef.current = null
+    }
     setBubbleText(text)
     if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
     bubbleTimeoutRef.current = setTimeout(() => setBubbleText(null), 3200)
