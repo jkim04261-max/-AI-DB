@@ -8,6 +8,8 @@ import {
   type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
+import { AGE_TIER_LABEL, ageTierForLevel, type AgeTier } from '../../data/characterAge'
+import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import type { CharacterPose } from './CharacterSprite'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -53,6 +55,11 @@ export default function InteractionPanel({
 }) {
   const { verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
+  // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
+  // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
+  // 쉬운 쪽으로 자연스럽게 유도한다.
+  const characterAgeTier = ageTierForLevel(character.level)
+  const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -117,6 +124,10 @@ export default function InteractionPanel({
   // user_taught or ai_generated), not the `verification` object above
   // (display only).
   const [verificationToken, setVerificationToken] = useState<string | null>(null)
+  // PR #52: 내용은 적합해도 캐릭터가 아직 어려서 막힌 경우 — 저장 버튼을
+  // 숨기고, 몇 살이 되면 다시 가르칠 수 있는지 안내한다.
+  const [ageBlocked, setAgeBlocked] = useState(false)
+  const [requiredAgeTier, setRequiredAgeTier] = useState<AgeTier | null>(null)
   const [teachRemaining, setTeachRemaining] = useState<{ remaining: number; limit: number } | null>(null)
   const [studyRemaining, setStudyRemaining] = useState<{ remaining: number; limit: number } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -143,11 +154,13 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title, content })
       setVerificationToken(result.verificationToken)
       setTeachRemaining({ remaining: result.remaining, limit: result.dailyTeachLimit })
+      setAgeBlocked(result.ageBlocked)
+      setRequiredAgeTier(result.requiredAgeTier)
       // characterReply is server-generated and already persisted
       // server-side (character_messages) — display exactly that text, not
       // a locally invented one.
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
+      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
     } catch (err) {
       setVerification(null)
       setVerifiedSnapshot(null)
@@ -171,8 +184,10 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title: result.knowledge.title, content: result.knowledge.content })
       setVerificationToken(result.verificationToken)
       setStudyRemaining({ remaining: result.remaining, limit: result.dailyStudyLimit })
+      setAgeBlocked(result.ageBlocked)
+      setRequiredAgeTier(result.requiredAgeTier)
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
+      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '스스로 공부하는 중 오류가 발생했어요.')
       flashPose('sad', 2500)
@@ -188,8 +203,21 @@ export default function InteractionPanel({
     // implicitly becomes true, so saving requires re-verifying first.
   }
 
+  // PR #52 후속: 거절(ageBlocked) 직후에도 쉬운 예시를 바로 고를 수 있게
+  // — 입력칸을 통째로 비우고 다시 검증 전 상태로 되돌려서 새로
+  // 가르치기를 시작한 것처럼 만든다.
+  const applyTopicSuggestion = (topic: { title: string; content: string }) => {
+    setTitle(topic.title)
+    setContent(topic.content)
+    setVerification(null)
+    setVerifiedSnapshot(null)
+    setVerificationToken(null)
+    setAgeBlocked(false)
+    setRequiredAgeTier(null)
+  }
+
   const handleSave = async () => {
-    if (!verification || isStale || verification.status !== 'appropriate' || !verifiedSnapshot || !verificationToken) return
+    if (!verification || isStale || verification.status !== 'appropriate' || ageBlocked || !verifiedSnapshot || !verificationToken) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -200,6 +228,8 @@ export default function InteractionPanel({
       setVerification(null)
       setVerifiedSnapshot(null)
       setVerificationToken(null)
+      setAgeBlocked(false)
+      setRequiredAgeTier(null)
       if (recordsOpen) {
         await loadRecords()
       }
@@ -261,6 +291,26 @@ export default function InteractionPanel({
       )}
 
       <div className="flex flex-col gap-2">
+        {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-[11px] text-slate-400">
+              지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {topicSuggestions.map((topic) => (
+                <button
+                  key={topic.title}
+                  type="button"
+                  data-testid="topic-suggestion-chip"
+                  onClick={() => applyTopicSuggestion(topic)}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+                >
+                  {topic.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -316,6 +366,33 @@ export default function InteractionPanel({
           >
             {VERIFICATION_LABEL[verification.status]}
           </span>
+          {ageBlocked && requiredAgeTier && (
+            <div className="flex flex-col gap-1.5">
+              <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-600">
+                🔒 {AGE_TIER_LABEL[requiredAgeTier]}부터 배울 수 있는 지식이에요 — 아직은 저장할 수 없어요.
+              </p>
+              {topicSuggestions.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[11px] text-rose-500">
+                    지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 이런 지식부터 가르쳐 보세요:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {topicSuggestions.map((topic) => (
+                      <button
+                        key={topic.title}
+                        type="button"
+                        data-testid="age-blocked-topic-suggestion-chip"
+                        onClick={() => applyTopicSuggestion(topic)}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100"
+                      >
+                        {topic.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {verification.explanation && <p className="text-xs text-slate-600">설명: {verification.explanation}</p>}
           {verification.relevance && <p className="text-xs text-slate-600">관련성: {verification.relevance}</p>}
           {verification.issues && <p className="text-xs text-red-500">문제점: {verification.issues}</p>}
@@ -347,7 +424,7 @@ export default function InteractionPanel({
 
           <button
             onClick={() => void handleSave()}
-            disabled={saving || isStale || verification.status !== 'appropriate'}
+            disabled={saving || isStale || verification.status !== 'appropriate' || ageBlocked}
             className="self-start rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
           >
             {saving ? '저장 중...' : '저장'}

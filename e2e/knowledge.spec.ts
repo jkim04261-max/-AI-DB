@@ -109,6 +109,74 @@ test('a character with no profession shows guidance instead of a teach form', as
   await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
 })
 
+// PR #52 후속 요청 1번(5차에서 2~3살→8~9살로 상향): toddler 단계에서는
+// 가르치기 폼에 쉬운 예시 주제가 떠서, 너무 어려운 지식만 쓰다가
+// 거절당해 진도가 막히지 않도록 자연스럽게 유도한다. NURI_ACCOUNTANT는
+// level을 안 줘서(기본값 1) toddler 단계다.
+test('the teach form suggests age-appropriate example topics for a toddler-stage character, and clicking one fills the form', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_ACCOUNTANT] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('8~9살 단계에 맞는 예시예요', { exact: false })).toBeVisible()
+  await page.getByTestId('topic-suggestion-chip').filter({ hasText: '이 직업이 하는 일' }).click()
+
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
+  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).not.toHaveValue('')
+})
+
+// PR #52: 연령 제한 지식 흡수 — 내용은 적합해도 캐릭터가 아직 너무 어리면
+// (ageBlocked) 저장 버튼이 비활성화되고, 아동 말투의 거절 안내가 뜬다.
+test('teaching a knowledge item too advanced for the character\'s current age tier shows a rejection notice and disables saving', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'fake-token',
+          characterReply: '아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~',
+          remaining: 9,
+          dailyTeachLimit: 10,
+          ageBlocked: true,
+          characterAgeTier: 'toddler',
+          requiredAgeTier: 'junior_20s',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await page.getByPlaceholder('지식 제목').fill('공인회계사 자격증 취득 절차')
+  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('시험 과목과 응시 자격을 포함한 절차.')
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+
+  await expect(page.getByText('아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~')).toBeVisible()
+  await expect(page.getByTestId('age-blocked-notice')).toBeVisible()
+  await expect(page.getByRole('button', { name: '저장' })).toBeDisabled()
+
+  // PR #52 후속 요청 2번: 거절 직후에도 입력칸이 비어있지 않아서(위쪽
+  // 기본 예시 칩은 안 보임) 바로 쉬운 지식으로 다시 시도할 수 있는 칩이
+  // 거절 안내 바로 아래에 떠야 한다.
+  await expect(page.getByText('지금 8~9살 단계에서는 이런 지식부터 가르쳐 보세요', { exact: false })).toBeVisible()
+  await page.getByTestId('age-blocked-topic-suggestion-chip').filter({ hasText: '이 직업이 하는 일' }).click()
+
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
+  await expect(page.getByTestId('age-blocked-notice')).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeEnabled()
+})
+
 test('verifying appropriate knowledge shows the result and enables 저장, which is not sent until clicked', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })

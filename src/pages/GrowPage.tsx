@@ -21,6 +21,7 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
+import { ageTierForLevel, AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -104,6 +105,11 @@ export default function GrowPage() {
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
   // 오작동한다).
   const questBubbleShownRef = useRef<Set<CompanionType>>(new Set())
+  // 진입 시 한 번 예약되는 "캐릭터가 먼저 말을 거는" 말풍선(900ms 지연)
+  // 의 타이머 — 그 전에 사용자가 다른 상호작용(소품 클릭 등)으로 먼저
+  // showBubble을 호출하면, 이 지연 타이머가 나중에 그 말풍선을 덮어쓰지
+  // 않도록 취소해야 한다(아래 showBubble 참고).
+  const questBubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 로그인한 계정이 두리만 갖고 있는 경우처럼, 기본값('nuri')과 실제
   // 보유 캐릭터가 어긋날 수 있어 보정한다 — 둘 다 있으면 아무것도 하지
@@ -228,9 +234,26 @@ export default function GrowPage() {
     if (!character) return
     if (questBubbleShownRef.current.has(character.companionType)) return
     if (character.profession && examPassed === null) return
-    questBubbleShownRef.current.add(character.companionType)
-    const t = window.setTimeout(() => showBubble(quest.text), 900)
-    return () => window.clearTimeout(t)
+    // "이미 보여줬다"는 예약 시점이 아니라 실제로 뜬 시점에 표시한다 —
+    // examPassed/quest.text가 서로 다른 타이밍에 차례로 들어오면(시험
+    // 결과 먼저, 지식 개수 나중 등) 이 effect가 여러 번 다시 실행되는데,
+    // 예약 시점에 바로 "표시함"으로 마크해버리면 재실행 때마다 걸리는
+    // 취소(cleanup)만 일어나고 다시 예약은 안 되어 말풍선이 영영 안
+    // 뜨는 문제가 있었다(CI에서 재현됨). 매번 최신 quest.text로 다시
+    // 예약하고, 실제로 발동할 때만 "표시함"으로 마크한다.
+    const companionType = character.companionType
+    const text = quest.text
+    questBubbleTimeoutRef.current = setTimeout(() => {
+      questBubbleTimeoutRef.current = null
+      questBubbleShownRef.current.add(companionType)
+      showBubble(text)
+    }, 900)
+    return () => {
+      if (questBubbleTimeoutRef.current) {
+        clearTimeout(questBubbleTimeoutRef.current)
+        questBubbleTimeoutRef.current = null
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [character?.companionType, character?.profession, examPassed, quest.text])
 
@@ -243,6 +266,13 @@ export default function GrowPage() {
   }, [])
 
   const showBubble = (text: string) => {
+    // 진입 시 예약된 "먼저 말 거는" 말풍선이 아직 안 떴다면, 지금 다른
+    // 이유로 말풍선을 띄우는 이 호출이 먼저다 — 나중에 그 지연 타이머가
+    // 뒤늦게 발동해 지금 막 띄운 말풍선을 덮어쓰지 않도록 취소한다.
+    if (questBubbleTimeoutRef.current) {
+      clearTimeout(questBubbleTimeoutRef.current)
+      questBubbleTimeoutRef.current = null
+    }
     setBubbleText(text)
     if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
     bubbleTimeoutRef.current = setTimeout(() => setBubbleText(null), 3200)
@@ -263,11 +293,18 @@ export default function GrowPage() {
 
   const applyProfession = async (profession: ProfessionId) => {
     if (!character) return
+    // PR #52 요청 2번: 처음 직업을 고르는 순간(이전까지 직업이 없었고,
+    // 아직 8~9살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
+    // "직업 변경"으로 바꿀 때는 이미 성장한 캐릭터라 이 대사가 어색하다.
+    const isFirstPick = !character.profession && ageTier === 'toddler'
     setSavingProfession(true)
     setError(null)
     try {
       await setProfession(character.companionType, profession)
       setPendingChange(null)
+      if (isFirstPick) {
+        showBubble(toddlerProfessionGreeting(PROFESSION_LABEL[profession]))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '직업을 저장하는 중 오류가 발생했어요.')
     } finally {
@@ -352,6 +389,12 @@ export default function GrowPage() {
       })
     : null
   const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
+  // PR #52: 6단계 연령대 — character.level에서 그때그때 계산하는
+  // 표시용 파생값(DB 변경 없음, characterAppearance.ts의 tier와 같은 원칙).
+  const ageTier = character ? ageTierForLevel(character.level) : 'toddler'
+  // PR #52 후속 5차 요청 3번: 티어보다 더 구체적인 "지금 몇 살인지" 숫자
+  // 뱃지용 — 역시 character.level에서 그때그때 계산하는 표시용 값이다.
+  const ageNumber = character ? ageNumberForLevel(character.level) : 8
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (
@@ -399,6 +442,8 @@ export default function GrowPage() {
                 onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
                 onPropClick={handlePropClick}
                 tier={tier}
+                ageTier={ageTier}
+                ageNumber={ageNumber}
                 outfitId={inventory.equippedOutfit[character.companionType]}
                 // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
                 // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
@@ -429,6 +474,7 @@ export default function GrowPage() {
                 profession={character.profession}
                 exp={character.exp}
                 recentLine={recentLine}
+                ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
               />
               {statGauges && <StatGaugesPanel values={statGauges} />}
               <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />

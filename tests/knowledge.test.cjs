@@ -17,9 +17,20 @@ async function run() {
   // --- fetch mock: controllable per call, same shape as daily-limit.test.cjs ---
   let geminiBehavior = { kind: 'json', status: 200, result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' } }
   let geminiCallCount = 0
-  global.fetch = async (url) => {
+  // PR #52 후속: 마지막으로 Gemini에 보낸 systemInstruction 텍스트 —
+  // 스스로 공부하기가 캐릭터의 연령대를 실제로 프롬프트에 반영하는지
+  // 확인하는 테스트에서 쓴다.
+  let lastSystemInstruction = null
+  global.fetch = async (url, init) => {
     if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
       geminiCallCount++
+      if (init?.body) {
+        try {
+          lastSystemInstruction = JSON.parse(init.body)?.systemInstruction?.parts?.[0]?.text ?? null
+        } catch {
+          lastSystemInstruction = null
+        }
+      }
       if (geminiBehavior.kind === 'network-error') {
         throw new Error('simulated network failure')
       }
@@ -630,6 +641,132 @@ async function run() {
     const second = mockRes()
     await characterHandler(erinReq({ method: 'GET', query: { action: 'usage' } }), second)
     t.assert(second.body.studyRemaining === 0 && second.body.teachRemaining === 8, 'usage 조회는 여러 번 호출해도 값을 소비하지 않는다(똑같은 값)')
+  }
+
+  // --- PR #52: 연령 제한 지식 흡수 — 아직 어린 캐릭터는 고난도 지식을 거절한다 ---
+  {
+    mock.seedUser(8, { email: 'henry@test.com' })
+    const henryCookie = cookieHeaderFor(auth, 8, 0, 'henry@test.com')
+    const henryReq = (overrides = {}) => ({ headers: { cookie: henryCookie }, query: {}, ...overrides })
+    await characterHandler(henryReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(henryReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+
+    const title = '공인회계사 자격증 취득 절차'
+    const content = '시험 과목, 응시 자격, 합격 후 실무 수습 과정을 포함한 전체 절차.'
+
+    // henry의 누리는 방금 만든 Lv.1(toddler) 캐릭터다 — Gemini가 이
+    // 지식에 "junior_20s(20대) 이상 필요"로 판정해도, 내용 자체는
+    // 적합(appropriate)하다고 가정한다(검증 로직과 연령 게이트는 별개).
+    geminiBehavior = {
+      kind: 'json',
+      result: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '', requiredAgeTier: 'junior_20s' },
+    }
+    const blockedVerify = mockRes()
+    await characterHandler(henryReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title, content } }), blockedVerify)
+    t.assert(blockedVerify.statusCode === 200, '연령 제한에 걸려도 검증 요청 자체는 성공한다(200) — 내용 적합 여부와는 별개')
+    t.assert(blockedVerify.body.ageBlocked === true, '아직 toddler인 캐릭터에게 junior_20s 지식을 가르치면 ageBlocked: true가 내려온다')
+    t.assert(blockedVerify.body.verification.status === 'appropriate', 'Gemini의 내용 적합 판정 자체는 그대로 유지된다')
+    t.assert(blockedVerify.body.characterReply.includes('너무 어려워서'), '거절 메시지가 요청하신 아동 말투 문구를 포함한다')
+    t.assert(blockedVerify.body.characterAgeTier === 'toddler', '응답에 캐릭터의 현재 연령대가 함께 내려온다')
+    t.assert(blockedVerify.body.requiredAgeTier === 'junior_20s', '응답에 이 지식이 필요로 하는 연령대가 함께 내려온다')
+
+    // 서명된 토큰 자체는 유효하지만(내용 일치), 연령 제한에 걸린 토큰으로
+    // 저장을 직접 시도하면 서버가 다시 한번 거부한다 — UI 우회 방지.
+    const blockedSave = mockRes()
+    await characterHandler(
+      henryReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: { companionType: 'nuri', title, originalContent: content, finalContent: content, verificationToken: blockedVerify.body.verificationToken },
+      }),
+      blockedSave,
+    )
+    t.assert(blockedSave.statusCode === 400, '연령 제한에 걸린 토큰으로 저장을 시도하면 400으로 거부된다(우회 방지)')
+
+    // 레벨이 15(junior_20s 구간: Lv.10~19)가 되면 같은 지식도 정상적으로
+    // 배울 수 있다 — DB에 새 컬럼을 만들지 않고 character.level만으로
+    // 판정하므로, 레벨만 바꿔도 연령대가 그대로 따라온다.
+    const henryNuri = mock.state.characters.find((c) => c.user_id === 8 && c.companion_type === 'nuri')
+    henryNuri.level = 15
+
+    const okVerify = mockRes()
+    await characterHandler(henryReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title, content } }), okVerify)
+    t.assert(okVerify.body.ageBlocked === false, 'Lv.15(junior_20s)가 되면 같은 지식도 더 이상 막히지 않는다')
+    t.assert(okVerify.body.characterAgeTier === 'junior_20s', '레벨 15의 캐릭터는 연령대가 junior_20s로 계산된다')
+
+    const okSave = mockRes()
+    await characterHandler(
+      henryReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: { companionType: 'nuri', title, originalContent: content, finalContent: content, verificationToken: okVerify.body.verificationToken },
+      }),
+      okSave,
+    )
+    t.assert(okSave.statusCode === 201, '연령대가 충족되면 저장이 정상적으로 성공한다')
+    t.assert(okSave.body.expAwarded > 0, '정상 저장이면 기존처럼 XP가 지급된다')
+  }
+
+  // --- PR #52: 기초 지식(requiredAgeTier 없음 → 가장 관대한 toddler로 처리)은 나이와 무관하게 통과한다 ---
+  {
+    mock.seedUser(9, { email: 'iris@test.com' })
+    const irisCookie = cookieHeaderFor(auth, 9, 0, 'iris@test.com')
+    const irisReq = (overrides = {}) => ({ headers: { cookie: irisCookie }, query: {}, ...overrides })
+    await characterHandler(irisReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(irisReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+
+    // requiredAgeTier를 아예 넣지 않은, 이 필드를 모르는 구형 모의 응답 —
+    // gemini.ts가 이 필드 하나 때문에 기존 검증 전체를 깨뜨리지 않는지
+    // 확인한다(토큰 발급에도 필수 필드라, 응답 파싱 단계의 관대한 기본값
+    // 처리가 끝까지 이어져야 한다).
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' } }
+    const res = mockRes()
+    await characterHandler(irisReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '기초 개념', content: '쉬운 내용' } }), res)
+    t.assert(res.body.ageBlocked === false, 'requiredAgeTier가 없는 구형 응답은 가장 관대한 기본값으로 처리되어 막히지 않는다')
+    t.assert(res.body.requiredAgeTier === 'toddler', '응답에 내려오는 requiredAgeTier도 기본값(toddler)으로 채워진다')
+  }
+
+  // --- PR #52 후속: 스스로 공부하기가 캐릭터의 연령대를 Gemini 프롬프트에
+  // 실제로 반영하는지(생성 단계부터 눈높이에 맞추려는 시도) 확인한다 —
+  // 사후 판정만으로는 "다 만들고 나서 막혀 하루 한도만 날리는" 진도
+  // 막힘을 못 고치므로, 프롬프트 자체가 연령대별로 달라져야 한다.
+  {
+    mock.seedUser(10, { email: 'jin@test.com' })
+    const jinCookie = cookieHeaderFor(auth, 10, 0, 'jin@test.com')
+    const jinReq = (overrides = {}) => ({ headers: { cookie: jinCookie }, query: {}, ...overrides })
+    await characterHandler(jinReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(jinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '숫자 세기', content: '하나, 둘, 셋', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+    }
+    const toddlerStudy = mockRes()
+    await characterHandler(jinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), toddlerStudy)
+    t.assert(toddlerStudy.statusCode === 200, 'Lv.1(toddler) 캐릭터의 스스로 공부하기 요청이 성공한다')
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('8~9살'),
+      'toddler 단계에서는 프롬프트에 8~9살 눈높이 안내가 포함된다',
+    )
+    t.assert(
+      lastSystemInstruction.includes('전문 용어나 자격증'),
+      'toddler 단계 프롬프트는 전문 자격증 수준 내용을 만들지 말라고 명시한다',
+    )
+
+    const jinNuri = mock.state.characters.find((c) => c.user_id === 10 && c.companion_type === 'nuri')
+    jinNuri.level = 15 // junior_20s
+
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '복식부기 실무', content: '...', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'junior_20s' },
+    }
+    const youngAdultStudy = mockRes()
+    await characterHandler(jinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), youngAdultStudy)
+    t.assert(youngAdultStudy.statusCode === 200, 'Lv.15(junior_20s) 캐릭터의 스스로 공부하기 요청이 성공한다')
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('20대'),
+      'junior_20s 단계에서는 프롬프트에 20대 눈높이 안내가 포함된다(toddler 때와 다른 프롬프트)',
+    )
   }
 
   return t.summary()

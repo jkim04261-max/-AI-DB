@@ -33,6 +33,7 @@ async function mockCharacterApi(
     onQuiz?: (route: Route) => Promise<void>
     onQuizSubmit?: (route: Route) => Promise<void>
     onUsage?: (route: Route) => Promise<void>
+    onSetProfession?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -82,6 +83,24 @@ async function mockCharacterApi(
     }
     if (method === 'GET' && !action) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: options.characters ?? [] }) })
+      return
+    }
+    // PR #52: 직업 저장(PATCH) — 고른 직업을 그대로 반영한 캐릭터를
+    // 돌려준다(기존 목록의 해당 캐릭터를 찾아 profession만 덮어씀).
+    if (method === 'PATCH') {
+      if (options.onSetProfession) {
+        await options.onSetProfession(route)
+        return
+      }
+      const body = route.request().postDataJSON() as { companionType?: string; profession?: string }
+      const base = (options.characters ?? []).find(
+        (c): c is Record<string, unknown> => typeof c === 'object' && c !== null && (c as Record<string, unknown>).companion_type === body.companionType,
+      )
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ character: { ...base, profession: body.profession } }),
+      })
       return
     }
     await route.fallback()
@@ -439,6 +458,168 @@ test('the top resource bar shows real points and energy, not fabricated numbers'
   await expect(page.getByTestId('resource-bar')).toBeVisible()
   await expect(page.getByTestId('resource-points')).toHaveText('40')
   await expect(page.getByTestId('resource-energy')).toHaveText('9/13')
+})
+
+// PR #52: 캐릭터 6단계 연령대 — character.level에서 그때그때 계산하는
+// 표시용 값(DB 변경 없음). Lv.1인 NURI_SINGER는 toddler(8~9살, 후속
+// 5차에서 2~3살→8~9살로 상향) 단계다.
+test('the HUD shows the character\'s current 6-stage age tier, derived from level', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-stage-label')).toContainText('초등 저학년')
+})
+
+// PR #52 후속 긴급 수정 요청 2번: 연령대별 비주얼이 실제로 화면에
+// 반영되는지 — 기본(일러스트) 화면에서 연령대 배지가 실제로 보여야 한다.
+test('the illustrated main stage actually shows the age-tier badge (not just computed, but rendered)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  const badge = page.getByTestId('age-badge-toddler')
+  await expect(badge).toBeVisible()
+  await expect(badge).toContainText('🎒')
+})
+
+// PR #52 후속 5차 요청 3번: 머리 위 나이 뱃지 — 티어와 별개로 구체적인
+// 나이 숫자가 항상 보여야 한다(junior_20s처럼 연령대 이모지가 없는
+// 티어에서도). Lv.1은 ageNumberForLevel 매핑상 8세다.
+test('the character shows a specific age-number badge above the stage, not just the tier badge', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → 8세
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-number-badge')).toHaveText('8세')
+})
+
+// 마스터 단계(Lv.40+)는 요청하신 "장인증서" 배지로 바뀌어야 한다 —
+// 레벨이 달라지면 같은 화면에서 다른 배지가 실제로 뜨는지 확인한다.
+test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of the toddler one', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-badge-master-50s')).toBeVisible()
+  await expect(page.getByTestId('age-badge-master-50s')).toContainText('🏆')
+  await expect(page.getByTestId('age-badge-toddler')).toHaveCount(0)
+  await expect(page.getByTestId('age-stage-label')).toContainText('마스터')
+})
+
+// PR #52 후속 4차: 기본 로비(일러스트 모드)는 PR #50의 고정된 한 장짜리
+// 그림이라 배지/테두리만으로는 "캐릭터 자체가 바뀐다"는 느낌이 약했다
+// — 유저가 실제 화면에서 연령대가 안 바뀐다고 재차 확인해준 뒤,
+// 실제 연령대 초상화를 캐릭터 영역 위에 카드로 띄우도록 고쳤다.
+// 레벨이 바뀌면(토들러→마스터) 이 카드의 그림 자체가 바뀌는지 검증한다.
+test('the default (illustrated) lobby also shows the real age-tier portrait over the character, and swaps when the tier changes', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  const portrait = page.getByTestId('illustrated-age-portrait-nuri')
+  await expect(portrait).toBeVisible()
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+  await page.reload()
+
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-master_50s/)
+})
+
+// CSS 모드(마켓 배경)에서는 캐릭터 자체의 크기가 연령대에 따라 실제로
+// 달라진다 — toddler는 더 작게, master는 더 크게 그려진다.
+test('in a CSS-mode (purchased) background, the character visibly scales with its age tier', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await dialog.getByRole('button', { name: '배경', exact: true }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '구매하기' }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '장착하기' }).click()
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  const wrapper = page.getByTestId('age-scale-wrapper')
+  await expect(wrapper).toBeVisible()
+  await expect(wrapper).toHaveCSS('transform', /matrix\(1\.08/)
+})
+
+// PR #52 후속 3차: 사용자가 제공한 연령대별 일러스트로 CSS 모드(마켓
+// 구매 배경)의 손그림 SVG(파란 도형)를 실제 이미지로 교체했다 — 이
+// 테스트가 "더 이상 도형이 아니라 진짜 그림이 뜬다"를 직접 검증한다.
+test('in a CSS-mode (purchased) background, the character shows the real age-tier portrait image, not the SVG shape', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await dialog.getByRole('button', { name: '배경', exact: true }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '구매하기' }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '장착하기' }).click()
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  const characterRegion = page.getByRole('img', { name: '누리 캐릭터, 대기 중' })
+  await expect(characterRegion).toBeVisible()
+  await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
+  const portrait = page.getByTestId('age-scale-wrapper').locator('img')
+  await expect(portrait).toBeVisible()
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+})
+
+// PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
+// 인사 + "직업을 선택해 주세요!" 안내를 보여준다 — 기존 PR #48의 "캐릭터가
+// 먼저 말을 거는" 메커니즘을 그대로 탄다(새 모달이 아니라 이미 검증된
+// 퀘스트 배너/말풍선 흐름).
+test('a brand-new character greets the user and asks them to pick a profession', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByText('안녕하세요! 저는 아직 아무것도 모르는 초등학생이에요. 직업을 선택해 주세요!')).toBeVisible()
+})
+
+// PR #52 요청 2번: 처음 직업을 고르면("요가강사" 등) 그 직업에 맞는
+// 아동 말투 대사("나 OO 되고 싶어요! ...")가 바로 뜬다 — 나중에 레벨이
+// 올라간 뒤 "직업 변경"을 할 때는 이 유아 대사를 보여주지 않는다
+// (applyProfession의 isFirstPick 조건).
+test('picking a profession for the first time shows a toddler-voiced line about that job', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] }) // level: 1 → toddler, 처음 선택
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '직업 선택' }).click()
+
+  const dialog = page.getByRole('dialog', { name: '직업 선택' })
+  await dialog.getByRole('button', { name: '회계사' }).click()
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('나 회계사 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!')
 })
 
 // PR #49에서 만든 50개 직업 카테고리형 팝업 셀렉터. PR #51(직업 선택
