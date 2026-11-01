@@ -158,11 +158,20 @@ async function run() {
     t.assert(nuri?.profession === 'accountant', 'bob의 시도 이후에도 alice의 누리 직업은 그대로다(실제로 바뀌지 않았음)')
   }
 
-  // 잘못된 입력 검증
+  // PR #51(직업 선택 제한 해제): 50개 직업 전체가 목표 직업으로 저장될
+  // 수 있다 — doctor(시험 콘텐츠는 없지만 50개 카탈로그에는 있는 직업)
+  // 를 골라도 더 이상 거부되지 않는다.
   {
     const res = mockRes()
     await characterHandler(authedReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'doctor' } }), res)
-    t.assert(res.statusCode === 400, '지원하지 않는 직업(doctor)은 거부된다 (400)')
+    t.assert(res.statusCode === 200, '50개 카탈로그에 있는 직업(doctor)은 이제 저장된다 (200)')
+    t.assert(res.body.character?.profession === 'doctor', '응답에 실제로 저장된 직업명이 반영된다')
+  }
+  // 잘못된 입력 검증 — 카탈로그에 아예 없는 임의 문자열은 여전히 거부된다.
+  {
+    const res = mockRes()
+    await characterHandler(authedReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'astronaut' } }), res)
+    t.assert(res.statusCode === 400, '50개 카탈로그에 없는 직업명(astronaut)은 거부된다 (400)')
   }
   {
     const res = mockRes()

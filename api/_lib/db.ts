@@ -185,9 +185,56 @@ export function ensureCharacterTables() {
       // snapshot whichever profession applied at the time, rather than
       // always deferring to this (mutable) column — see api/character.ts's
       // handlePatch for why changing it never deletes the character.
+      //
+      // PR #51(직업 선택 제한 해제, 2026-11-01): 처음엔 회계사·가수 2개만
+      // 저장 가능했지만, 이제 50개 직업 전체를 캐릭터의 목표 직업으로
+      // 저장할 수 있다 — "문제 풀기"(퀴즈/시험)만은 여전히 회계사·가수
+      // 전용 문제은행(api/_lib/examQuestions.ts)에 묶여 있어 별도로
+      // 막혀 있다(api/character.ts의 EXAM_SUPPORTED_PROFESSIONS 참고).
+      //
+      // 주의: CHECK 제약식은 바인드 파라미터(sql 태그드 템플릿의 보통
+      // `${}` 방식)를 쓸 수 없는 상수 표현식이어야 한다 — 그래서 아래
+      // 50개 직업 ID는 변수 보간이 아니라 소스에 직접 적힌 리터럴
+      // 텍스트다(src/data/characterProfessions.ts의 ProfessionId와
+      // 정확히 같은 50개 값이어야 한다).
       await sql`
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS profession TEXT
-          CHECK (profession IN ('accountant', 'singer'))
+          CHECK (profession IN (
+            'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
+            'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
+            'tax-accountant', 'financial-analyst', 'patent-attorney', 'actuary',
+            'consultant', 'realtor', 'doctor', 'nurse', 'pharmacist',
+            'physical-therapist', 'dietitian', 'dentist', 'veterinarian', 'psychologist',
+            'teacher', 'professor', 'researcher', 'librarian', 'translator', 'tutor',
+            'curriculum-developer', 'linguist', 'actor', 'musician', 'writer',
+            'illustrator', 'photographer', 'film-director', 'architect',
+            'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
+            'police-officer', 'civil-servant', 'social-worker', 'event-planner',
+            'massage-therapist'
+          ))
+      `
+      // 이미 배포된 DB는 바로 위 ADD COLUMN IF NOT EXISTS가 아무 일도 하지
+      // 않아서(컬럼이 이미 있으므로) 예전의 좁은(accountant/singer뿐인)
+      // CHECK가 그대로 남아있다 — 그 제약을 지우고 50개짜리로 다시 건다.
+      // 이름 없는 컬럼 CHECK에 PostgreSQL이 붙이는 기본 이름(<테이블>_
+      // <컬럼>_check)에 의존한다 — 콜드스타트마다 실행돼도 몇 번이든
+      // 같은 결과인 멱등 연산이라 안전하다.
+      await sql`ALTER TABLE characters DROP CONSTRAINT IF EXISTS characters_profession_check`
+      await sql`
+        ALTER TABLE characters ADD CONSTRAINT characters_profession_check
+          CHECK (profession IN (
+            'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
+            'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
+            'tax-accountant', 'financial-analyst', 'patent-attorney', 'actuary',
+            'consultant', 'realtor', 'doctor', 'nurse', 'pharmacist',
+            'physical-therapist', 'dietitian', 'dentist', 'veterinarian', 'psychologist',
+            'teacher', 'professor', 'researcher', 'librarian', 'translator', 'tutor',
+            'curriculum-developer', 'linguist', 'actor', 'musician', 'writer',
+            'illustrator', 'photographer', 'film-director', 'architect',
+            'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
+            'police-officer', 'civil-servant', 'social-worker', 'event-planner',
+            'massage-therapist'
+          ))
       `
 
       // PR #45 checkpoint 4: level is a cached/denormalized value derived
@@ -231,7 +278,19 @@ export function ensureKnowledgeTable() {
           id SERIAL PRIMARY KEY,
           user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
-          profession TEXT NOT NULL CHECK (profession IN ('accountant', 'singer')),
+          profession TEXT NOT NULL CHECK (profession IN (
+            'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
+            'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
+            'tax-accountant', 'financial-analyst', 'patent-attorney', 'actuary',
+            'consultant', 'realtor', 'doctor', 'nurse', 'pharmacist',
+            'physical-therapist', 'dietitian', 'dentist', 'veterinarian', 'psychologist',
+            'teacher', 'professor', 'researcher', 'librarian', 'translator', 'tutor',
+            'curriculum-developer', 'linguist', 'actor', 'musician', 'writer',
+            'illustrator', 'photographer', 'film-director', 'architect',
+            'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
+            'police-officer', 'civil-servant', 'social-worker', 'event-planner',
+            'massage-therapist'
+          )),
           title TEXT NOT NULL,
           original_content TEXT NOT NULL,
           final_content TEXT NOT NULL,
@@ -244,6 +303,27 @@ export function ensureKnowledgeTable() {
       await sql`
         CREATE INDEX IF NOT EXISTS character_knowledge_entries_character_created_idx
           ON character_knowledge_entries (character_id, created_at DESC)
+      `
+      // PR #51(직업 선택 제한 해제): characters 테이블과 동일한 이유로,
+      // 이미 배포된 DB에 남아있는 예전(accountant/singer뿐인) CHECK를
+      // 지우고 50개짜리로 다시 건다 — 자세한 설명은 ensureCharacterTables
+      // 위쪽 주석 참고.
+      await sql`ALTER TABLE character_knowledge_entries DROP CONSTRAINT IF EXISTS character_knowledge_entries_profession_check`
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD CONSTRAINT character_knowledge_entries_profession_check
+          CHECK (profession IN (
+            'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
+            'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
+            'tax-accountant', 'financial-analyst', 'patent-attorney', 'actuary',
+            'consultant', 'realtor', 'doctor', 'nurse', 'pharmacist',
+            'physical-therapist', 'dietitian', 'dentist', 'veterinarian', 'psychologist',
+            'teacher', 'professor', 'researcher', 'librarian', 'translator', 'tutor',
+            'curriculum-developer', 'linguist', 'actor', 'musician', 'writer',
+            'illustrator', 'photographer', 'film-director', 'architect',
+            'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
+            'police-officer', 'civil-servant', 'social-worker', 'event-planner',
+            'massage-therapist'
+          ))
       `
       // Lets the client tag a save request with its own idempotency key —
       // handleSaveKnowledge uses this to detect "this exact save was
@@ -435,12 +515,32 @@ export interface MessageAttachmentRow {
   name: string | null
 }
 
+// PR #51(직업 선택 제한 해제): characters.profession/character_knowledge_entries
+// .profession이 저장할 수 있는 50개 직업 — src/data/characterProfessions.ts
+// 의 ProfessionId와 정확히 같은 값이어야 한다(별도 파일이라 타입을 직접
+// 공유하지는 않지만, 이 저장소의 기존 api//src 중복 패턴과 동일). 퀴즈/
+// 시험 관련 행(character_exam_attempts/character_exam_firsts)은 여전히
+// 'accountant' | 'singer'로 좁게 남겨둔다 — 그 기능은 지금도 이 2개
+// 직업뿐이라서(EXAM_SUPPORTED_PROFESSIONS 참고).
+export type ProfessionId =
+  | 'accountant' | 'singer' | 'developer' | 'designer' | 'data-scientist' | 'pm'
+  | 'security-engineer' | 'devops' | 'game-developer' | 'qa-engineer' | 'lawyer'
+  | 'tax-accountant' | 'financial-analyst' | 'patent-attorney' | 'actuary'
+  | 'consultant' | 'realtor' | 'doctor' | 'nurse' | 'pharmacist'
+  | 'physical-therapist' | 'dietitian' | 'dentist' | 'veterinarian' | 'psychologist'
+  | 'teacher' | 'professor' | 'researcher' | 'librarian' | 'translator' | 'tutor'
+  | 'curriculum-developer' | 'linguist' | 'actor' | 'musician' | 'writer'
+  | 'illustrator' | 'photographer' | 'film-director' | 'architect'
+  | 'fashion-designer' | 'chef' | 'barista' | 'flight-attendant' | 'firefighter'
+  | 'police-officer' | 'civil-servant' | 'social-worker' | 'event-planner'
+  | 'massage-therapist'
+
 export interface CharacterRow {
   id: number
   user_id: number
   companion_type: 'nuri' | 'duri'
   stage: 'child' | 'adult'
-  profession: 'accountant' | 'singer' | null
+  profession: ProfessionId | null
   level: number
   exp: number
   created_at: string
@@ -450,7 +550,7 @@ export interface KnowledgeEntryRow {
   id: number
   user_id: number
   character_id: number
-  profession: 'accountant' | 'singer'
+  profession: ProfessionId
   title: string
   original_content: string
   final_content: string

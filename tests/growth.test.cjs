@@ -36,6 +36,44 @@ async function run() {
     t.assert(nuri.level === 1 && nuri.exp === 0, '새 캐릭터는 Lv.1, 0XP로 시작한다')
   }
 
+  // PR #51(직업 선택 제한 해제): 목표 직업은 50개 전부 저장할 수 있지만,
+  // 퀴즈/시험 문제은행은 여전히 accountant/singer뿐이다 — 시험 콘텐츠가
+  // 없는 직업(doctor)으로 quiz/exam 4개 액션을 전부 호출하면
+  // getQuestionsForProfession이 빈 배열을 돌려주다 터지는 게 아니라,
+  // 그 전에 명확한 400으로 막혀야 한다.
+  await characterHandler(authedReq({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
+  await characterHandler(authedReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'doctor' } }), mockRes())
+  {
+    const res = mockRes()
+    await characterHandler(authedReq({ method: 'GET', query: { action: 'quiz', companionType: 'duri' } }), res)
+    t.assert(res.statusCode === 400, '시험 콘텐츠가 없는 직업(doctor)의 퀴즈 요청은 400으로 거부된다')
+  }
+  {
+    const res = mockRes()
+    await characterHandler(
+      authedReq({
+        method: 'POST',
+        query: { action: 'quiz-submit' },
+        body: { companionType: 'duri', questionId: 'accountant-1', answerIndex: 0 },
+      }),
+      res,
+    )
+    t.assert(res.statusCode === 400, '시험 콘텐츠가 없는 직업(doctor)의 퀴즈 제출도 400으로 거부된다')
+  }
+  {
+    const res = mockRes()
+    await characterHandler(authedReq({ method: 'GET', query: { action: 'exam', companionType: 'duri' } }), res)
+    t.assert(res.statusCode === 400, '시험 콘텐츠가 없는 직업(doctor)의 시험 문제 요청은 400으로 거부된다')
+  }
+  {
+    const res = mockRes()
+    await characterHandler(
+      authedReq({ method: 'POST', query: { action: 'exam-submit' }, body: { companionType: 'duri', answers: [] } }),
+      res,
+    )
+    t.assert(res.statusCode === 400, '시험 콘텐츠가 없는 직업(doctor)의 시험 제출도 400으로 거부된다')
+  }
+
   // --- 1 & 2: 퀴즈 문제는 정답 없이 내려오고, 서버가 직접 채점한다 ---
   const quizRes = mockRes()
   await characterHandler(authedReq({ method: 'GET', query: { action: 'quiz', companionType: 'nuri' } }), quizRes)
