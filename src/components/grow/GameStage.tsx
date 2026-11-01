@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import CharacterSprite, { type CharacterPose } from './CharacterSprite'
 import SpeechBubble from './SpeechBubble'
-import { sceneForProfession } from '../../data/growthScenes'
+import { sceneForProfession, type SceneTheme } from '../../data/growthScenes'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
+import type { OutfitId } from '../../data/characterCustomization'
 
 // PR #46: the "room" the character stands in. Pure CSS layering (no
 // Three.js/WebGL) — a few absolutely-positioned gradient layers + emoji
@@ -21,6 +22,8 @@ export default function GameStage({
   onTapCharacter,
   onPropClick,
   tier = 'rookie',
+  outfitId,
+  backgroundOverride,
 }: {
   companionType: CompanionType
   profession: ProfessionId | null
@@ -31,8 +34,13 @@ export default function GameStage({
   // 않으면 기존처럼 순수 장식(aria-hidden)으로 남는다.
   onPropClick?: (emoji: string) => void
   tier?: AppearanceTier
+  // PR #50: 커스터마이징 룸에서 장착한 옷 — CharacterSprite로 그대로 전달.
+  outfitId?: OutfitId
+  // PR #50: 마켓에서 구매해 장착한 배경(BACKGROUND_SCENES) — 지정하면
+  // 기존 직업 기반 배경(sceneForProfession) 대신 이걸 그린다.
+  backgroundOverride?: SceneTheme
 }) {
-  const scene = sceneForProfession(profession)
+  const scene = backgroundOverride ?? sceneForProfession(profession)
   const [tapped, setTapped] = useState(false)
   const reduceMotion =
     typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -137,7 +145,7 @@ export default function GameStage({
             className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             <span className="mx-auto block w-[150px] [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]">
-              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} />
+              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} />
             </span>
           </div>
         </div>

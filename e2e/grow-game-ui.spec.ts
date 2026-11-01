@@ -495,3 +495,43 @@ test('clicking a scene prop gives a short reaction, making it feel interactive r
 
   await expect(page.getByTestId('speech-bubble')).toContainText('🎤')
 })
+
+// PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상 열 수
+// 있다(가르치기 등 나머지 6개와 다르게 alwaysEnabled).
+test('the customization room and item market are always available, even without a profession selected', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '커스터마이징' })).toBeEnabled()
+
+  await page.getByRole('button', { name: '커스터마이징' }).click()
+  await expect(page.getByRole('dialog', { name: '커스터마이징 룸' })).toBeVisible()
+})
+
+// PR #50: 아이템 마켓 구매 흐름 — 모의 골드로 옷을 사면 골드가 깎이고
+// 보유 상태로 바뀌며, 그 자리에서 바로 장착할 수 있다.
+test('buying an outfit in the item market deducts gold and lets you equip it', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await expect(dialog.getByTestId('market-gold')).toHaveText('300')
+
+  // 누리 옷 탭에는 기본 의상(무료, 이미 보유·장착 중)과 한복 블라우스
+  // (150골드, 미보유) 둘뿐이라 "구매하기" 버튼은 하나로 unambiguous하다.
+  await dialog.getByRole('button', { name: '구매하기' }).click()
+  await expect(dialog.getByTestId('market-gold')).toHaveText('150')
+
+  await dialog.getByRole('button', { name: '장착하기' }).click()
+  await expect(dialog.getByText('장착 중')).toBeVisible()
+})
