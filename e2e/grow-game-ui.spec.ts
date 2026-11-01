@@ -441,9 +441,10 @@ test('the top resource bar shows real points and energy, not fabricated numbers'
   await expect(page.getByTestId('resource-energy')).toHaveText('9/13')
 })
 
-// PR #49: 50개 직업 카테고리형 팝업 셀렉터 — 실제 콘텐츠가 없는 48개는
-// "준비 중"으로 비활성화되고, 실제 선택 가능한 직업만 고를 수 있다.
-test('the profession picker groups jobs by category, and disables ones with no real exam content yet', async ({ page }) => {
+// PR #49에서 만든 50개 직업 카테고리형 팝업 셀렉터. PR #51(직업 선택
+// 제한 해제)부터는 50개 전부 클릭해서 고를 수 있다 — 실제 시험 문제가
+// 없는 48개는 막혀있지 않고, 대신 "문제 풀기 준비 중" 안내만 붙는다.
+test('the profession picker lets you choose any of the 50 jobs, with an honest "exam not ready" note on the 48 without real exam content', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -457,11 +458,31 @@ test('the profession picker groups jobs by category, and disables ones with no r
   await expect(dialog.getByText('IT·개발')).toBeVisible()
   await expect(dialog.getByText('헬스케어')).toBeVisible()
 
-  const developerButton = dialog.getByRole('button', { name: '개발자 준비 중', exact: true })
-  await expect(developerButton).toBeDisabled()
-
-  await dialog.getByRole('button', { name: '회계사' }).click()
+  // 시험 콘텐츠가 없는 직업(개발자)도 비활성화되지 않고, "문제 풀기
+  // 준비 중" 안내만 붙은 채로 클릭할 수 있다 — 고르면 실제로 바뀐다.
+  const developerButton = dialog.getByRole('button', { name: '개발자 문제 풀기 준비 중', exact: true })
+  await expect(developerButton).toBeEnabled()
+  await expect(developerButton.getByText('문제 풀기 준비 중')).toBeVisible()
+  await developerButton.click()
   await expect(page.getByText('직업을 변경할까요?')).toBeVisible()
+  await expect(page.getByText('개발자', { exact: false })).toBeVisible()
+})
+
+// PR #51(직업 선택 제한 해제): 시험 문제은행이 없는 직업(개발자)을
+// 고르면 "문제 풀기" 메뉴 버튼만 비활성화되고(나머지 메뉴는 그대로
+// 쓸 수 있음), HUD의 직업 배지에는 고른 직업명이 그대로 보인다.
+test('a profession without exam content disables only the quiz button, while the HUD still shows the chosen job', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: 'developer' }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('profession-badge')).toHaveText(/개발자/)
+  const quizButton = page.getByRole('button', { name: /문제 풀기/ })
+  await expect(quizButton).toBeDisabled()
+  await expect(page.getByRole('button', { name: '가르치기' })).toBeEnabled()
 })
 
 // PR #49 요청 3: 텍스트 입력 폼이 바로 뜨지 않고, 짧은 "턴 진행" 연출이

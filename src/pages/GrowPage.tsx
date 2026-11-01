@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType } from '../context/GrowthContext'
-import { PROFESSION_LABEL, type ProfessionId } from '../data/characterProfessions'
+import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS, type ProfessionId } from '../data/characterProfessions'
 import type { CharacterPose } from '../components/grow/CharacterSprite'
 import GameStage from '../components/grow/GameStage'
 import GrowthHUD from '../components/grow/GrowthHUD'
@@ -127,7 +127,9 @@ export default function GrowPage() {
     setKnowledgeStats({ total: 0, aiGenerated: 0 })
     setMessageTotal(0)
     let cancelled = false
-    if (character.profession) {
+    // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
+    // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
+    if (character.profession && EXAM_SUPPORTED_PROFESSIONS.has(character.profession)) {
       getExam(character.companionType)
         .then((r) => {
           if (!cancelled) setExamPassed(r.alreadyPassed)
@@ -317,10 +319,15 @@ export default function GrowPage() {
   // 즉시 연다 — 기록을 보는 것뿐이라 턴 느낌이 어울리지 않는다. 동작
   // 줄이기 설정에서는 전환 없이 즉시 연다.
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  // PR #51(직업 선택 제한 해제): 지금 고른 직업이 회계사·가수일 때만
+  // "문제 풀기"를 쓸 수 있다 — GameMenu가 이미 버튼을 막아주지만, 혹시
+  // 모를 경우를 대비해 여기서도 한 번 더 막는다(방어적 가드).
+  const examSupported = character?.profession ? EXAM_SUPPORTED_PROFESSIONS.has(character.profession) : false
   const handleMenuSelect = (action: GameMenuAction) => {
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
     // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외).
     if (!character?.profession && action !== 'customize' && action !== 'market') return
+    if (action === 'quiz' && !examSupported) return
     const label = TURN_TRANSITION_LABEL[action]
     if (!label || reduceMotion) {
       setOpenSheet(action)
@@ -428,7 +435,7 @@ export default function GrowPage() {
             </div>
 
             <div className="p-2 pt-0">
-              <GameMenu disabled={!character.profession} onSelect={handleMenuSelect} />
+              <GameMenu disabled={!character.profession} examSupported={examSupported} onSelect={handleMenuSelect} />
             </div>
           </div>
 

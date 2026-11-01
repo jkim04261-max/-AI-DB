@@ -3,10 +3,13 @@ import { PROFESSIONS, CATEGORY_LABEL, type ProfessionCategory, type ProfessionId
 
 const CATEGORY_ORDER: ProfessionCategory[] = ['it', 'professional', 'healthcare', 'education', 'culture', 'service']
 
-// PR #49: 50개 직업을 카테고리별로 묶어 보여주는 팝업 셀렉터. 실제로
-// 선택 가능한 직업(현재는 회계사·가수뿐 — characterProfessions.ts의
-// selectable 플래그 참고)만 클릭할 수 있고, 나머지는 "준비 중" 배지와
-// 함께 비활성 처리된다 — 고르면 저장되는 것처럼 보이게 하지 않는다.
+// PR #49에서 만든 50개 직업 카테고리 셀렉터. PR #51(직업 선택 제한
+// 해제)부터는 50개 전부 클릭해서 목표 직업으로 고르고 저장할 수 있다.
+// 다만 "문제 풀기"(퀴즈/시험)는 여전히 회계사·가수뿐이라
+// (characterProfessions.ts의 examSupported 참고), 그 2개가 아닌 직업에는
+// 작은 "문제 풀기 준비 중" 안내만 붙는다 — 직업 선택 자체를 막지는
+// 않는다(고르면 실제로 저장되고, 가르치기/스스로 공부하기는 그대로
+// 쓸 수 있다).
 export default function ProfessionPicker({
   currentProfession,
   onSelect,
@@ -53,19 +56,16 @@ export default function ProfessionPicker({
                   <button
                     key={p.id}
                     type="button"
-                    disabled={!p.selectable}
-                    onClick={() => p.selectable && onSelect(p.id)}
+                    onClick={() => onSelect(p.id)}
                     aria-current={p.id === currentProfession}
                     className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left text-sm font-semibold transition-colors ${
                       p.id === currentProfession
                         ? 'border-amber-500 bg-amber-100 text-amber-900'
-                        : p.selectable
-                          ? 'border-amber-200 bg-white text-amber-800 hover:bg-amber-50'
-                          : 'cursor-not-allowed border-amber-100 bg-amber-50/40 text-amber-400'
+                        : 'border-amber-200 bg-white text-amber-800 hover:bg-amber-50'
                     }`}
                   >
                     <span>{p.label}</span>
-                    {!p.selectable && <span className="text-[10px] font-normal text-amber-400">준비 중</span>}
+                    {!p.examSupported && <span className="text-[10px] font-normal text-amber-400">문제 풀기 준비 중</span>}
                   </button>
                 ))}
               </div>

@@ -28,9 +28,14 @@ const ITEMS: MenuItem[] = [
 
 export default function GameMenu({
   disabled,
+  examSupported,
   onSelect,
 }: {
   disabled: boolean
+  // PR #51(직업 선택 제한 해제): "문제 풀기"는 지금 고른 직업이 회계사·
+  // 가수일 때만 쓸 수 있다(나머지 48개는 시험 문제은행이 없음) — 이
+  // 메뉴 전체를 막는 disabled와 달리 quiz 버튼 하나만 추가로 막는다.
+  examSupported: boolean
   onSelect: (action: GameMenuAction) => void
 }) {
   return (
@@ -38,19 +43,23 @@ export default function GameMenu({
     // 목록에서, 게임 화면 하단에 붙은 RPG형 액션 바 느낌으로 바꿨다.
     // 버튼 텍스트/role은 그대로라 기존 e2e 셀렉터가 그대로 통한다.
     <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-amber-900/40 bg-amber-950/75 p-1.5 backdrop-blur-sm sm:gap-2">
-      {ITEMS.map(({ action, label, icon: Icon, alwaysEnabled }) => (
-        <button
-          key={action}
-          type="button"
-          onClick={() => onSelect(action)}
-          disabled={!alwaysEnabled && disabled}
-          // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄)
-          className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-semibold text-amber-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100"
-        >
-          <Icon size={17} className="text-amber-300" />
-          {label}
-        </button>
-      ))}
+      {ITEMS.map(({ action, label, icon: Icon, alwaysEnabled }) => {
+        const quizBlocked = action === 'quiz' && !examSupported
+        return (
+          <button
+            key={action}
+            type="button"
+            onClick={() => onSelect(action)}
+            disabled={(!alwaysEnabled && disabled) || quizBlocked}
+            // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄)
+            className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-semibold text-amber-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100"
+          >
+            <Icon size={17} className="text-amber-300" />
+            {label}
+            {quizBlocked && <span className="text-[9px] font-normal text-amber-300/70">준비 중</span>}
+          </button>
+        )
+      })}
     </div>
   )
 }

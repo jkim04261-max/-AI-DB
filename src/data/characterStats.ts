@@ -1,4 +1,4 @@
-import type { ProfessionId } from './characterProfessions'
+import { PROFESSION_CATEGORY, type ProfessionCategory, type ProfessionId } from './characterProfessions'
 
 // PR #47 체크포인트 1: 지식/업무/소통/창의 4개 스탯 게이지.
 //
@@ -48,6 +48,22 @@ const PROFESSION_STAT_WEIGHT: Partial<Record<ProfessionId, StatGauges>> = {
   singer: { knowledge: 0.9, work: 0.8, communication: 1.2, creativity: 1.3 },
 }
 
+// PR #51(직업 선택 제한 해제): 이제 50개 직업 전부 선택할 수 있지만,
+// 개별 가중치는 여전히 회계사·가수 2개뿐이다(나머지 48개까지 직업 하나
+// 하나 손으로 맞추는 건 과한 범위라 판단). 대신 6개 카테고리 단위로
+// "이 계열은 대체로 이런 쪽에 강하다" 정도의 기본값을 둬서, 적어도
+// 업무/전문직 계열과 문화·예술 계열의 게이지가 완전히 똑같아 보이지는
+// 않게 한다 — PROFESSION_STAT_WEIGHT와 마찬가지로 실제 AI 성능과는
+// 무관한 임의의 게임 밸런스 값이다.
+const CATEGORY_STAT_WEIGHT: Record<ProfessionCategory, StatGauges> = {
+  it: { knowledge: 1.1, work: 1.2, communication: 0.8, creativity: 1.1 },
+  professional: { knowledge: 1.2, work: 1.3, communication: 0.9, creativity: 0.7 },
+  healthcare: { knowledge: 1.3, work: 1.1, communication: 1.0, creativity: 0.7 },
+  education: { knowledge: 1.3, work: 0.9, communication: 1.1, creativity: 0.8 },
+  culture: { knowledge: 0.8, work: 0.8, communication: 1.1, creativity: 1.4 },
+  service: { knowledge: 0.8, work: 1.0, communication: 1.3, creativity: 0.9 },
+}
+
 export function computeStatGauges({
   level,
   knowledgeTotal,
@@ -56,7 +72,8 @@ export function computeStatGauges({
   examPassed,
   profession,
 }: StatGaugeInputs): StatGauges {
-  const weight = (profession && PROFESSION_STAT_WEIGHT[profession]) || DEFAULT_STAT_WEIGHT
+  const category = profession ? PROFESSION_CATEGORY[profession] : null
+  const weight = (profession && PROFESSION_STAT_WEIGHT[profession]) || (category && CATEGORY_STAT_WEIGHT[category]) || DEFAULT_STAT_WEIGHT
   const knowledge = clampPct(knowledgeTotal * 10 * weight.knowledge)
   const communication = clampPct(messageTotal * 4 * weight.communication)
   const creativity = clampPct(aiGeneratedTotal * 20 * weight.creativity)

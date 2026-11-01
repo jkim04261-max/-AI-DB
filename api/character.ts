@@ -25,11 +25,88 @@ import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOL
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
-// PR #43's first two supported professions. Extending this later (e.g. a
-// third job) is a one-line change here — a plain nullable column, not a
-// separate table, so no migration is needed either.
-const PROFESSIONS = new Set(['accountant', 'singer'])
-const PROFESSION_LABEL: Record<string, string> = { accountant: '회계사', singer: '가수' }
+// PR #51(직업 선택 제한 해제, 2026-11-01): 처음엔 회계사·가수 2개만
+// 목표 직업으로 저장할 수 있었지만, 이제 src/data/characterProfessions.ts
+// 의 50개 직업 전체를 저장할 수 있다(api/_lib/db.ts의 CHECK 제약도
+// 같이 넓혔다) — 가르치기/스스로 공부하기는 Gemini에 직업명만 문자열로
+// 넘기므로 어떤 직업이든 그대로 동작한다.
+const PROFESSIONS = new Set([
+  'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
+  'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
+  'tax-accountant', 'financial-analyst', 'patent-attorney', 'actuary',
+  'consultant', 'realtor', 'doctor', 'nurse', 'pharmacist',
+  'physical-therapist', 'dietitian', 'dentist', 'veterinarian', 'psychologist',
+  'teacher', 'professor', 'researcher', 'librarian', 'translator', 'tutor',
+  'curriculum-developer', 'linguist', 'actor', 'musician', 'writer',
+  'illustrator', 'photographer', 'film-director', 'architect',
+  'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
+  'police-officer', 'civil-servant', 'social-worker', 'event-planner',
+  'massage-therapist',
+])
+const PROFESSION_LABEL: Record<string, string> = {
+  accountant: '회계사',
+  singer: '가수',
+  developer: '개발자',
+  designer: 'UX/UI 디자이너',
+  'data-scientist': '데이터 사이언티스트',
+  pm: '기획자(PM)',
+  'security-engineer': '보안 엔지니어',
+  devops: '데브옵스 엔지니어',
+  'game-developer': '게임 개발자',
+  'qa-engineer': 'QA 엔지니어',
+  lawyer: '변호사',
+  'tax-accountant': '세무사',
+  'financial-analyst': '금융 애널리스트',
+  'patent-attorney': '변리사',
+  actuary: '보험계리사',
+  consultant: '경영 컨설턴트',
+  realtor: '공인중개사',
+  doctor: '의사',
+  nurse: '간호사',
+  pharmacist: '약사',
+  'physical-therapist': '물리치료사',
+  dietitian: '영양사',
+  dentist: '치과의사',
+  veterinarian: '수의사',
+  psychologist: '심리상담사',
+  teacher: '교사',
+  professor: '교수',
+  researcher: '연구원',
+  librarian: '사서',
+  translator: '번역가',
+  tutor: '과외교사',
+  'curriculum-developer': '교육 콘텐츠 기획자',
+  linguist: '언어학자',
+  actor: '배우',
+  musician: '연주자',
+  writer: '작가',
+  illustrator: '일러스트레이터',
+  photographer: '사진작가',
+  'film-director': '영화감독',
+  architect: '건축가',
+  'fashion-designer': '패션 디자이너',
+  chef: '요리사',
+  barista: '바리스타',
+  'flight-attendant': '승무원',
+  firefighter: '소방관',
+  'police-officer': '경찰관',
+  'civil-servant': '공무원',
+  'social-worker': '사회복지사',
+  'event-planner': '이벤트 기획자',
+  'massage-therapist': '마사지 테라피스트',
+}
+// "문제 풀기"(퀴즈/시험)는 사람이 직접 쓴 문제은행(api/_lib/examQuestions.ts)
+// 에 묶여 있고, 그건 여전히 회계사·가수 2개뿐이다(법률·헬스케어 등은
+// 틀리면 안 되는 영역이라 임의로 대량 생성할 수 없음) — handleGetQuiz
+// 등 4개 핸들러가 이 집합으로 가드한다.
+const EXAM_SUPPORTED_PROFESSIONS = new Set(['accountant', 'singer'])
+const EXAM_NOT_SUPPORTED_MESSAGE = '이 직업은 아직 문제 풀기를 지원하지 않아요. 지금은 회계사·가수만 가능해요.'
+// getQuestionsForProfession/getQuestionById는 여전히 'accountant' | 'singer'
+// 만 받는다 — 이 가드를 타입 내로잉으로도 써서, 아래 4개 핸들러가 더 넓은
+// ProfessionId를 두 값으로 좁힌 다음에만 그 함수들을 호출하게 한다.
+function isExamSupportedProfession(profession: string): profession is 'accountant' | 'singer' {
+  return EXAM_SUPPORTED_PROFESSIONS.has(profession)
+}
 
 const MAX_TITLE_LENGTH = 100
 const MAX_CONTENT_LENGTH = 2000
@@ -815,6 +892,10 @@ async function handleGetQuiz(req: VercelRequest, res: VercelResponse, userId: nu
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
       return
     }
+    if (!isExamSupportedProfession(character.profession)) {
+      res.status(400).json({ error: EXAM_NOT_SUPPORTED_MESSAGE })
+      return
+    }
 
     const questions = getQuestionsForProfession(character.profession)
     const question = questions[Math.floor(Math.random() * questions.length)]
@@ -862,6 +943,10 @@ async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId:
     }
     if (!character.profession) {
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+    if (!isExamSupportedProfession(character.profession)) {
+      res.status(400).json({ error: EXAM_NOT_SUPPORTED_MESSAGE })
       return
     }
 
@@ -933,6 +1018,10 @@ async function handleGetExam(req: VercelRequest, res: VercelResponse, userId: nu
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
       return
     }
+    if (!isExamSupportedProfession(character.profession)) {
+      res.status(400).json({ error: EXAM_NOT_SUPPORTED_MESSAGE })
+      return
+    }
 
     const questions = getQuestionsForProfession(character.profession)
     const alreadyPassed = await sql<{ character_id: number }>`
@@ -980,6 +1069,10 @@ async function handleSubmitExam(req: VercelRequest, res: VercelResponse, userId:
     }
     if (!character.profession) {
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+    if (!isExamSupportedProfession(character.profession)) {
+      res.status(400).json({ error: EXAM_NOT_SUPPORTED_MESSAGE })
       return
     }
 
