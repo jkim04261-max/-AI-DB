@@ -276,12 +276,14 @@ test('the main screen shows 4 real-time stat gauges computed from existing data 
   await page.goto('/grow')
 
   await expect(page.getByTestId('stat-gauges')).toBeVisible()
-  // 지식 = 지식 저장 2건 * 10 = 20, 소통 = 메시지 3건 * 4 = 12,
-  // 창의 = ai_generated 1건 * 20 = 20, 업무 = 시험 합격이라 100.
-  await expect(page.getByTestId('stat-gauge-knowledge')).toHaveAttribute('style', /width:\s*20%/)
-  await expect(page.getByTestId('stat-gauge-communication')).toHaveAttribute('style', /width:\s*12%/)
-  await expect(page.getByTestId('stat-gauge-creativity')).toHaveAttribute('style', /width:\s*20%/)
-  await expect(page.getByTestId('stat-gauge-work')).toHaveAttribute('style', /width:\s*100%/)
+  // NURI_SINGER(직업: 가수)의 PR #48 직업별 가중치(지식 0.9/업무 0.8/
+  // 소통 1.2/창의 1.3) 적용 — 지식 = 2건*10*0.9 = 18, 소통 = 3건*4*1.2
+  // = 14(소수점 반올림), 창의 = 1건*20*1.3 = 26, 업무 = 시험 합격 100*0.8
+  // = 80.
+  await expect(page.getByTestId('stat-gauge-knowledge')).toHaveAttribute('style', /width:\s*18%/)
+  await expect(page.getByTestId('stat-gauge-communication')).toHaveAttribute('style', /width:\s*14%/)
+  await expect(page.getByTestId('stat-gauge-creativity')).toHaveAttribute('style', /width:\s*26%/)
+  await expect(page.getByTestId('stat-gauge-work')).toHaveAttribute('style', /width:\s*80%/)
 })
 
 // PR #47 체크포인트 1: 레벨이 실제로 오를 때만(단순 XP 획득과 구분되는)
@@ -339,4 +341,69 @@ test('a high-level character shows the expert appearance accessory, not just the
 
   await expect(page.getByTestId('appearance-accessory-expert')).toBeVisible()
   await expect(page.getByTestId('appearance-accessory-student')).toHaveCount(0)
+})
+
+// PR #48 "게임 루프 강화": 퀘스트 배너 — 아직 가르친 지식이 없는
+// 캐릭터에게는 "첫 지식을 가르쳐달라"는 퀘스트를 제안하고, "바로가기"를
+// 누르면 그 자리에서 가르치기 패널이 바로 열린다(새 화면 전환 없음).
+test('the quest banner suggests teaching first knowledge, and its CTA opens the right panel directly', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_SINGER],
+    onExam: async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
+    },
+  })
+
+  await page.goto('/grow')
+
+  const banner = page.getByTestId('quest-banner')
+  await expect(banner).toContainText('첫 지식을 가르쳐주시겠어요?')
+  await banner.getByRole('button', { name: '바로가기' }).click()
+
+  await expect(page.getByRole('dialog')).toContainText('가르치기')
+})
+
+// PR #48 "게임 루프 강화": 캐릭터가 먼저 말을 거는 효과 — 유저가 캐릭터를
+// 탭하지 않아도, 화면에 들어오면 지금 추천하는 퀘스트 문구가 말풍선으로
+// 자동으로 뜬다.
+test('the character proactively speaks up with the current quest, without the user tapping it', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_SINGER],
+    onExam: async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: true }) })
+    },
+    onListKnowledge: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          total: 1,
+          entries: [
+            {
+              id: 1,
+              character_id: 1,
+              profession: 'singer',
+              title: '복식호흡',
+              original_content: '숨을 깊게 들이쉰다',
+              final_content: '숨을 깊게 들이쉰다',
+              verification_status: 'appropriate',
+              verification_explanation: '정확해요',
+              source: 'user_taught',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('오늘도 새로운 지식을 가르치거나 스스로 공부시켜보세요')
 })

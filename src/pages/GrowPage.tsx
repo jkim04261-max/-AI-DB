@@ -13,8 +13,10 @@ import ExamPanel from '../components/grow/ExamPanel'
 import ChatLogPanel from '../components/grow/ChatLogPanel'
 import RecordsPanel from '../components/grow/RecordsPanel'
 import StatGaugesPanel from '../components/grow/StatGauges'
+import QuestBanner from '../components/grow/QuestBanner'
 import { computeStatGauges } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
+import { computeActiveQuest } from '../data/characterQuests'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const SHEET_TITLE: Record<GameMenuAction, string> = {
@@ -52,10 +54,24 @@ export default function GrowPage() {
   const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null)
 
   const character = characters.find((c) => c.companionType === selected) ?? null
+  // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
+  // goalText를 대체한다. GrowthHUD의 문구와 QuestBanner/말풍선이 서로
+  // 다른 소스를 보여주며 어긋나는 일이 없도록 한다.
+  const quest = computeActiveQuest({
+    profession: character?.profession ?? null,
+    professionLabel: character?.profession ? PROFESSION_LABEL[character.profession] : null,
+    knowledgeTotal: knowledgeStats.total,
+    examPassed,
+  })
   const prevExpRef = useRef<number | null>(null)
   const prevLevelRef = useRef<number | null>(null)
   const bubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const levelUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
+  // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
+  // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
+  // 오작동한다).
+  const questBubbleShownRef = useRef<Set<CompanionType>>(new Set())
 
   // 로그인한 계정이 두리만 갖고 있는 경우처럼, 기본값('nuri')과 실제
   // 보유 캐릭터가 어긋날 수 있어 보정한다 — 둘 다 있으면 아무것도 하지
@@ -143,6 +159,21 @@ export default function GrowPage() {
     prevLevelRef.current = character?.level ?? null
   }, [character?.companionType])
 
+  // PR #48 "게임 루프 강화": 캐릭터가 먼저 말을 거는 효과 — 캐릭터를
+  // 고를 때마다(또는 처음 들어왔을 때) 한 번만, 지금 추천하는 퀘스트
+  // 문구를 말풍선으로 띄운다. examPassed를 아직 못 받아온 상태(로딩 중)
+  // 에는 기다렸다가 실제 값이 정해진 뒤에 띄워서 "틀린 추천"이 잠깐
+  // 보였다 바뀌는 깜빡임을 막는다.
+  useEffect(() => {
+    if (!character) return
+    if (questBubbleShownRef.current.has(character.companionType)) return
+    if (character.profession && examPassed === null) return
+    questBubbleShownRef.current.add(character.companionType)
+    const t = window.setTimeout(() => showBubble(quest.text), 900)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character?.companionType, character?.profession, examPassed, quest.text])
+
   useEffect(() => {
     return () => {
       if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
@@ -218,16 +249,6 @@ export default function GrowPage() {
   const hasDuri = characters.some((c) => c.companionType === 'duri')
   const otherProfessions = character ? PROFESSIONS.filter((p) => p.id !== character.profession) : []
 
-  const goalText = !character
-    ? ''
-    : !character.profession
-      ? '먼저 직업을 선택해 보세요'
-      : examPassed === false
-        ? `${PROFESSION_LABEL[character.profession]} 자격시험에 도전해보세요`
-        : examPassed === true
-          ? '오늘도 지식을 가르치거나 스스로 공부시켜보세요'
-          : '오늘도 함께 성장해볼까요?'
-
   const handleMenuSelect = (action: GameMenuAction) => {
     if (!character?.profession) return
     setOpenSheet(action)
@@ -240,6 +261,7 @@ export default function GrowPage() {
         aiGeneratedTotal: knowledgeStats.aiGenerated,
         messageTotal,
         examPassed,
+        profession: character.profession,
       })
     : null
   const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
@@ -298,11 +320,12 @@ export default function GrowPage() {
             stage={character.stage}
             profession={character.profession}
             exp={character.exp}
-            goalText={goalText}
             recentLine={recentLine}
           />
 
           {statGauges && <StatGaugesPanel values={statGauges} />}
+
+          <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
 
           <div className="flex items-center justify-between">
             <button
