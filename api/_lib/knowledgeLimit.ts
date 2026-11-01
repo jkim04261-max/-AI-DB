@@ -64,6 +64,20 @@ export async function reserveTeach(userId: number): Promise<ReserveTeachResult> 
   return { ok: true, remaining: DAILY_TEACH_LIMIT - row.used_count }
 }
 
+// PR #49: 행동력(에너지) HUD에 쓸 "소비하지 않는" 조회 — reserveTeach와
+// 달리 아무것도 INSERT/UPDATE하지 않는 순수 SELECT라, 화면을 열어볼
+// 때마다 한도를 깎아먹지 않는다. 테이블/스키마 변경 없음.
+export async function peekTeachUsage(userId: number): Promise<{ remaining: number }> {
+  await ensureTeachUsageTable()
+
+  const result = await sql<{ used_count: number }>`
+    SELECT used_count FROM daily_teach_usage
+    WHERE user_id = ${userId} AND usage_date = (now() AT TIME ZONE 'Asia/Seoul')::date
+  `
+  const used = result.rows[0]?.used_count ?? 0
+  return { remaining: Math.max(0, DAILY_TEACH_LIMIT - used) }
+}
+
 // Undoes exactly one reservation this request made — called only when the
 // Gemini verification call itself failed (network/timeout/non-2xx), so a
 // failed attempt that produced no usable result doesn't count against the

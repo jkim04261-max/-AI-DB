@@ -28,15 +28,15 @@ export default function BottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[88vh] w-full flex-col rounded-t-3xl bg-white sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl"
+        className="motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[88vh] w-full flex-col rounded-t-3xl bg-amber-50 sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl"
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-bold text-slate-900">{title}</p>
+        <div className="flex shrink-0 items-center justify-between border-b border-amber-200 px-4 py-3">
+          <p className="text-sm font-bold text-amber-900">{title}</p>
           <button
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-amber-500 hover:bg-amber-100 hover:text-amber-700"
           >
             <X size={18} />
           </button>

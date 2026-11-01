@@ -19,6 +19,7 @@ export default function GameStage({
   pose,
   bubbleText,
   onTapCharacter,
+  onPropClick,
   tier = 'rookie',
 }: {
   companionType: CompanionType
@@ -26,6 +27,9 @@ export default function GameStage({
   pose: CharacterPose
   bubbleText: string | null
   onTapCharacter?: () => void
+  // PR #49: 소품(책상/책 등)도 클릭 가능한 인터랙션으로 — 지정하지
+  // 않으면 기존처럼 순수 장식(aria-hidden)으로 남는다.
+  onPropClick?: (emoji: string) => void
   tier?: AppearanceTier
 }) {
   const scene = sceneForProfession(profession)
@@ -41,7 +45,9 @@ export default function GameStage({
   }
 
   return (
-    <div className="relative h-56 w-full overflow-hidden rounded-2xl sm:h-64">
+    // PR #49: 이전(h-56/sm:h-64)보다 훨씬 키워 화면의 '메인 프레임'
+    // 역할을 하도록 했다 — 더 이상 작은 미리보기 박스가 아니다.
+    <div className="relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-96">
       {/* 배경 레이어 (뒤->앞), 아주 약한 패럴랙스 오프셋만 — 스크롤 리스너 없이 CSS만 사용 */}
       {scene.layers.map((layer, i) => (
         <div
@@ -52,25 +58,59 @@ export default function GameStage({
         />
       ))}
 
-      {/* 창문 느낌의 둥근 사각형 + 소품(이모지) — 실제 에셋 전까지의 임시 표현 */}
-      <div aria-hidden className="absolute right-4 top-3 h-12 w-16 rounded-lg bg-white/50 ring-1 ring-white/70 sm:h-14 sm:w-20" />
-      {scene.props.map((emoji, i) => (
-        <span
-          key={emoji + i}
-          aria-hidden
-          className="absolute select-none text-xl opacity-80 sm:text-2xl"
-          style={{
-            left: `${12 + i * 28}%`,
-            top: `${18 + (i % 2) * 10}%`,
-            animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
-          }}
-        >
-          {emoji}
-        </span>
-      ))}
+      {/* PR #49: 목재 액자 느낌의 창문 — 이중 테두리로 프레임감을 준다
+          (실제 에셋 전까지의 임시 표현, 구조는 PR #46과 동일). */}
+      <div aria-hidden className="absolute right-4 top-3 h-12 w-16 rounded-lg border-2 border-amber-700/70 bg-sky-100/60 ring-2 ring-amber-900/40 ring-offset-1 ring-offset-amber-50/60 sm:h-14 sm:w-20" />
+      {/* PR #49: 상단 비네트 — 방 안쪽으로 시선이 모이는 아늑한 느낌 */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{ boxShadow: 'inset 0 18px 24px -18px rgba(120, 72, 24, 0.35), inset 0 -10px 16px -10px rgba(120, 72, 24, 0.25)' }}
+      />
+      {scene.props.map((emoji, i) =>
+        onPropClick ? (
+          <button
+            key={emoji + i}
+            type="button"
+            aria-label={`소품 ${emoji} 살펴보기`}
+            onClick={() => onPropClick(emoji)}
+            className="absolute select-none text-xl opacity-80 transition-transform hover:scale-110 active:scale-95 sm:text-2xl"
+            style={{
+              left: `${12 + i * 28}%`,
+              top: `${18 + (i % 2) * 10}%`,
+              animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
+            }}
+          >
+            {emoji}
+          </button>
+        ) : (
+          <span
+            key={emoji + i}
+            aria-hidden
+            className="absolute select-none text-xl opacity-80 sm:text-2xl"
+            style={{
+              left: `${12 + i * 28}%`,
+              top: `${18 + (i % 2) * 10}%`,
+              animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
+            }}
+          >
+            {emoji}
+          </span>
+        ),
+      )}
 
-      {/* 바닥 */}
+      {/* 바닥 + PR #49: 목재 마루 느낌의 가로 결(반복 그라디언트) 오버레이 —
+          색은 scene.floorClassName(Tailwind 그라디언트)이 그대로 맡고,
+          결 무늬는 별도 레이어로 얹어 인라인 style과 충돌하지 않게 했다. */}
       <div aria-hidden className={`absolute inset-x-0 bottom-0 h-16 ${scene.floorClassName}`} />
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-16"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(0deg, rgba(120, 72, 24, 0.12) 0px, rgba(120, 72, 24, 0.12) 2px, transparent 2px, transparent 16px)',
+        }}
+      />
 
       {/* 캐릭터 + 그림자 + 말풍선 */}
       <div className="absolute inset-x-0 bottom-2 flex flex-col items-center">

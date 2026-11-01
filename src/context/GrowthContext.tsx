@@ -153,6 +153,7 @@ interface GrowthContextValue {
     answerIndex: number,
   ) => Promise<{ correct: boolean; explanation: string; message: string } & GrowthUpdate>
   getExam: (companionType: CompanionType) => Promise<{ questions: ExamQuestion[]; alreadyPassed: boolean }>
+  getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
     answers: { questionId: string; answerIndex: number }[],
@@ -528,6 +529,30 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     [updateCharacterGrowth],
   )
 
+  // PR #49: 메인 화면 상단 "행동력" HUD용 — 오늘 남은 가르치기/스스로
+  // 공부하기 횟수를 소비 없이 조회만 한다(서버의 peekTeachUsage/
+  // peekStudyUsage, 순수 SELECT). 캐릭터별이 아니라 계정 전체 하루
+  // 한도라 companionType 파라미터가 없다.
+  const getUsage = useCallback(async () => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'usage' })}`)
+    const data = (await res.json().catch(() => ({}))) as {
+      teachRemaining?: number
+      teachLimit?: number
+      studyRemaining?: number
+      studyLimit?: number
+      error?: string
+    }
+    if (!res.ok || data.teachRemaining === undefined || data.studyRemaining === undefined) {
+      throw new Error(data.error || '오늘의 행동력 정보를 불러오는 중 오류가 발생했어요.')
+    }
+    return {
+      teachRemaining: data.teachRemaining,
+      teachLimit: data.teachLimit ?? 0,
+      studyRemaining: data.studyRemaining,
+      studyLimit: data.studyLimit ?? 0,
+    }
+  }, [])
+
   return (
     <GrowthContext.Provider
       value={{
@@ -544,6 +569,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         submitQuiz,
         getExam,
         submitExam,
+        getUsage,
       }}
     >
       {children}

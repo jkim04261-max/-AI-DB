@@ -6,7 +6,7 @@
 export default function SpeechBubble({ text }: { text: string }) {
   return (
     <div data-testid="speech-bubble" className="pointer-events-none absolute -top-2 left-1/2 w-max max-w-[85%] -translate-x-1/2 -translate-y-full px-2">
-      <div className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-md ring-1 ring-slate-900/5">
+      <div className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] rounded-2xl rounded-bl-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-900/5">
         {text}
       </div>
     </div>

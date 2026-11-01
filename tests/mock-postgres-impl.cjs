@@ -555,6 +555,14 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- api/_lib/knowledgeLimit.ts: peekTeachUsage (PR #49, 소비 없는 조회) ---
+  if (has(text, 'SELECT used_count FROM daily_teach_usage')) {
+    const [userId] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.teachUsage.get(key)
+    return Promise.resolve({ rows: row ? [{ used_count: row.used_count }] : [] })
+  }
+
   // --- api/_lib/studyLimit.ts: reserveStudy (PR #45 checkpoint 3 — same
   // atomic conditional upsert shape as daily_teach_usage, fully separate
   // table/counter) ---
@@ -580,6 +588,14 @@ function sql(strings, ...values) {
     const row = state.studyUsage.get(key)
     if (row && row.used_count > 0) row.used_count -= 1
     return Promise.resolve({ rows: [] })
+  }
+
+  // --- api/_lib/studyLimit.ts: peekStudyUsage (PR #49, 소비 없는 조회) ---
+  if (has(text, 'SELECT used_count FROM daily_study_usage')) {
+    const [userId] = values
+    const key = `${userId}|${state.fakeDateKST}`
+    const row = state.studyUsage.get(key)
+    return Promise.resolve({ rows: row ? [{ used_count: row.used_count }] : [] })
   }
 
   // --- api/character.ts: handleSaveKnowledge's idempotency lookup (checked

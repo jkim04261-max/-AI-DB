@@ -4,13 +4,15 @@ import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfess
 
 const STAGE_LABEL: Record<'child' | 'adult', string> = { child: '어린이', adult: '성인' }
 
-// PR #46: compact status strip under the stage — level/XP and a one-line
-// "recent activity" preview. All values are passed in by GrowPage, computed
-// from data GrowthContext already fetches (characters list, listMessages,
-// getExam's alreadyPassed) — this component adds no new API calls of its
-// own. PR #48: the "오늘의 목표" line moved out to QuestBanner (now with a
-// bigger, action-button-carrying "퀘스트 제안" role) so the same
-// recommendation isn't shown twice on the same screen.
+// PR #46: compact status strip — level/XP and a one-line "recent activity"
+// preview. All values are passed in by GrowPage, computed from data
+// GrowthContext already fetches (characters list, listMessages, getExam's
+// alreadyPassed) — this component adds no new API calls of its own. PR #48:
+// the "오늘의 목표" line moved out to QuestBanner. PR #49: 더 이상 자체
+// 카드(흰/크림 박스)를 갖지 않는다 — GrowPage가 스테이지 하단의 단일
+// 목재 패널(footer) 안에 다른 HUD 요소들과 함께 이어붙여서 "여러 개의
+// 흰 박스가 쌓인 목록"처럼 보이지 않게 한다. 배경색은 그 패널이 맡고,
+// 이 컴포넌트는 어두운 배경에 맞는 밝은 글자색만 책임진다.
 export default function GrowthHUD({
   name,
   stage,
@@ -28,34 +30,34 @@ export default function GrowthHUD({
   const progressPct = expForNextLevel > 0 ? Math.min(100, Math.round((expIntoLevel / expForNextLevel) * 100)) : 0
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+    <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-bold text-slate-900">{name}</p>
-          <span className="text-[11px] text-slate-400">{STAGE_LABEL[stage]}</span>
+          <p className="text-sm font-bold text-amber-50">{name}</p>
+          <span className="text-[11px] text-amber-200/70">{STAGE_LABEL[stage]}</span>
         </div>
-        <div data-testid="profession-badge" className="flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+        <div data-testid="profession-badge" className="flex items-center gap-1 rounded-full bg-amber-50/15 px-2.5 py-1 text-[11px] font-medium text-amber-100">
           <Briefcase size={11} />
           {profession ? PROFESSION_LABEL[profession] : '직업 미선택'}
         </div>
       </div>
 
       <div className="flex items-center gap-2">
-        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-500">Lv.{level}</span>
-        <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-amber-300/40">Lv.{level}</span>
+        <span className="h-2 flex-1 overflow-hidden rounded-full bg-amber-50/15">
           <span
-            className="block h-full rounded-full bg-gradient-to-r from-indigo-400 to-blue-400 transition-[width] duration-500"
+            className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 transition-[width] duration-500"
             style={{ width: `${progressPct}%` }}
           />
         </span>
-        <span className="shrink-0 text-[11px] text-slate-400">
+        <span className="shrink-0 text-[11px] text-amber-200/70">
           {expIntoLevel}/{expForNextLevel} XP
         </span>
       </div>
 
-      {recentLine && <p className="truncate text-[11px] text-slate-400">최근: {recentLine}</p>}
+      {recentLine && <p className="truncate text-[11px] text-amber-200/60">최근: {recentLine}</p>}
 
-      <p className="text-[10px] leading-tight text-slate-300">{KNOWLEDGE_VS_MODEL_DISCLAIMER}</p>
+      <p className="text-[10px] leading-tight text-amber-200/40">{KNOWLEDGE_VS_MODEL_DISCLAIMER}</p>
     </div>
   )
 }

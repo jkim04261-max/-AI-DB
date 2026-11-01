@@ -44,6 +44,11 @@ function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) })
       return
     }
+    // PR #49: 상단 리소스 바의 "행동력"용 GET ?action=usage 기본값.
+    if (method === 'GET' && action === 'usage') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
+      return
+    }
     const handled = await handle(route, action, method)
     if (!handled) await route.fallback()
   })
