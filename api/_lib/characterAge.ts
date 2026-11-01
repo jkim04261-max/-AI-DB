@@ -7,8 +7,10 @@ export type AgeTier = 'toddler' | 'teen' | 'junior_20s' | 'career_30s' | 'vetera
 
 export const AGE_TIER_ORDER: AgeTier[] = ['toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s']
 
+// PR #52 후속 5차: toddler 라벨을 2~3살 → 8~9살로 상향(프런트 사본과
+// 반드시 일치해야 한다). 내부 식별자 'toddler'/레벨 임계값은 그대로.
 export const AGE_TIER_LABEL: Record<AgeTier, string> = {
-  toddler: '2~3살',
+  toddler: '8~9살',
   teen: '10대',
   junior_20s: '20대',
   career_30s: '30대',

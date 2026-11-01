@@ -366,9 +366,10 @@ export default function CharacterSprite({
             동일 — 과거 호출부/테스트는 전혀 영향받지 않는다. */}
         {ageTier === 'toddler' && (
           <g data-testid="age-badge-toddler" transform="translate(80 26)">
-            {/* 아기 고무젖꼭지 */}
-            <circle cx={0} cy={0} r={7} fill="#ffd1dc" stroke="#ffffff" strokeWidth={1.5} />
-            <rect x={-3} y={6} width={6} height={5} rx={2} fill="#ffffff" />
+            {/* PR #52 후속 5차: 시작 연령이 8~9살(초등 저학년)로 바뀌어
+                아기 고무젖꼭지 대신 작은 책가방으로 교체 */}
+            <rect x={-7} y={-5} width={14} height={13} rx={3} fill="#7cc3ff" stroke="#ffffff" strokeWidth={1.2} />
+            <rect x={-4} y={-8} width={8} height={4} rx={1.5} fill="#5ba3e0" />
           </g>
         )}
         {ageTier === 'teen' && (

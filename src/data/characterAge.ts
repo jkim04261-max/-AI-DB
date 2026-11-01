@@ -12,8 +12,12 @@ export type AgeTier = 'toddler' | 'teen' | 'junior_20s' | 'career_30s' | 'vetera
 
 export const AGE_TIER_ORDER: AgeTier[] = ['toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s']
 
+// PR #52 후속 5차: 시작 연령을 2~3살(영유아)에서 8~9살(초등 저학년)로
+// 상향해달라는 요청에 따라 toddler 라벨만 바꿨다 — 내부 식별자
+// 'toddler'/레벨 구간/게이팅 로직은 과거 데이터·테스트와의 호환을
+// 위해 그대로 두고, 화면에 보이는 문구만 전부 바꿨다.
 export const AGE_TIER_LABEL: Record<AgeTier, string> = {
-  toddler: '2~3살',
+  toddler: '8~9살',
   teen: '10대',
   junior_20s: '20대',
   career_30s: '30대',
@@ -23,7 +27,7 @@ export const AGE_TIER_LABEL: Record<AgeTier, string> = {
 
 // 메뉴/HUD 등에서 "지금 어떤 단계인지" 한 단어로 보여줄 때 쓰는 짧은 이름.
 export const AGE_TIER_STAGE_LABEL: Record<AgeTier, string> = {
-  toddler: '왕초보 유아',
+  toddler: '초등 저학년',
   teen: '청소년',
   junior_20s: '청년',
   career_30s: '중급 전문가',
@@ -40,6 +44,38 @@ export function ageTierForLevel(level: number): AgeTier {
   return 'toddler'
 }
 
+// PR #52 후속 5차 요청 3번: 머리 위 나이 뱃지용 — 티어보다 더 촘촘하게
+// "지금 레벨이면 몇 살인지" 하나의 숫자로 보여준다. 각 티어 내부에서
+// 레벨 구간을 그 티어의 나이 구간에 선형으로 매핑한다(레벨 구간/나이
+// 구간 경계는 ageTierForLevel·AGE_TIER_LABEL과 반드시 같은 뜻이어야
+// 하므로 아래 두 표에서만 따로 관리). toddler 레벨 1~2→8세, 3~4→9세로
+// 요청하신 예시와 정확히 맞아떨어진다.
+const AGE_NUMBER_LEVEL_RANGE: Record<AgeTier, [number, number]> = {
+  toddler: [1, 4],
+  teen: [5, 9],
+  junior_20s: [10, 19],
+  career_30s: [20, 29],
+  veteran_40s: [30, 39],
+  master_50s: [40, 65],
+}
+const AGE_NUMBER_AGE_RANGE: Record<AgeTier, [number, number]> = {
+  toddler: [8, 9],
+  teen: [10, 19],
+  junior_20s: [20, 29],
+  career_30s: [30, 39],
+  veteran_40s: [40, 49],
+  master_50s: [50, 65],
+}
+
+export function ageNumberForLevel(level: number): number {
+  const tier = ageTierForLevel(level)
+  const [lvLo, lvHi] = AGE_NUMBER_LEVEL_RANGE[tier]
+  const [ageLo, ageHi] = AGE_NUMBER_AGE_RANGE[tier]
+  const clampedLevel = Math.min(Math.max(level, lvLo), lvHi)
+  const ratio = lvHi === lvLo ? 0 : (clampedLevel - lvLo) / (lvHi - lvLo)
+  return Math.round(ageLo + ratio * (ageHi - ageLo))
+}
+
 export function ageTierIndex(tier: AgeTier): number {
   return AGE_TIER_ORDER.indexOf(tier)
 }
@@ -49,8 +85,9 @@ export function meetsAgeTier(current: AgeTier, required: AgeTier): boolean {
   return ageTierIndex(current) >= ageTierIndex(required)
 }
 
-// 2~3살 유아가 직업을 고른 직후 보여줄, 아동스러운 말투의 인사 — PR #52
-// 요청 2번의 튜토리얼 대사. 직업 라벨을 그대로 끼워 넣는다.
+// 8~9살(초등 저학년) 캐릭터가 직업을 고른 직후 보여줄, 아동스러운
+// 말투의 인사 — PR #52 요청 2번의 튜토리얼 대사. 직업 라벨을 그대로
+// 끼워 넣는다.
 export function toddlerProfessionGreeting(professionLabel: string): string {
   return `나 ${professionLabel} 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!`
 }

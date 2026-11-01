@@ -745,8 +745,8 @@ async function run() {
     await characterHandler(jinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), toddlerStudy)
     t.assert(toddlerStudy.statusCode === 200, 'Lv.1(toddler) 캐릭터의 스스로 공부하기 요청이 성공한다')
     t.assert(
-      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('2~3살'),
-      'toddler 단계에서는 프롬프트에 2~3살 눈높이 안내가 포함된다',
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('8~9살'),
+      'toddler 단계에서는 프롬프트에 8~9살 눈높이 안내가 포함된다',
     )
     t.assert(
       lastSystemInstruction.includes('전문 용어나 자격증'),

@@ -27,12 +27,12 @@ export interface QuestInputs {
 
 export function computeActiveQuest({ profession, professionLabel, knowledgeTotal, examPassed }: QuestInputs): ActiveQuest {
   if (!profession) {
-    // PR #52 요청 2번: 처음 'AI 키우기'에 들어온 2~3살 유아 캐릭터의
-    // 인사 + 가이드 — GrowPage의 "캐릭터가 먼저 말을 거는" 기존 말풍선
-    // 메커니즘(PR #48)을 그대로 타고 나간다. 새 모달/팝업을 따로 만들지
-    // 않고, 이미 검증된 "진입 시 자동으로 한 번 뜨는 말풍선" 흐름을
+    // PR #52 요청 2번(후속 5차: 8~9살로 상향): 처음 'AI 키우기'에 들어온
+    // 캐릭터의 인사 + 가이드 — GrowPage의 "캐릭터가 먼저 말을 거는" 기존
+    // 말풍선 메커니즘(PR #48)을 그대로 타고 나간다. 새 모달/팝업을 따로
+    // 만들지 않고, 이미 검증된 "진입 시 자동으로 한 번 뜨는 말풍선" 흐름을
     // 그대로 재사용한다.
-    return { text: '안녕하세요! 저는 아직 아무것도 모르는 아기예요. 직업을 선택해 주세요!', action: null }
+    return { text: '안녕하세요! 저는 아직 아무것도 모르는 초등학생이에요. 직업을 선택해 주세요!', action: null }
   }
   if (knowledgeTotal === 0) {
     return { text: '아직 가르쳐준 지식이 없어요. 첫 지식을 가르쳐주시겠어요?', action: 'teach' }

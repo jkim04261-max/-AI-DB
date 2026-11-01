@@ -286,7 +286,7 @@ export interface KnowledgeVerificationResult {
 
 const VERIFICATION_STATUSES = new Set<string>(['appropriate', 'needs_revision', 'unverifiable'])
 const AGE_TIER_VALUES = new Set<string>(['toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'])
-const AGE_TIER_GUIDE = `- toddler(2~3살)/teen(10대): 쉬운 기초 지식·역사·개념
+const AGE_TIER_GUIDE = `- toddler(8~9살)/teen(10대): 쉬운 기초 지식·역사·개념
 - junior_20s(20대) 이상: 전문 자격증·라이센스, 고난도 해부학/실무 등 숙련이 필요한 내용
 그 지식을 이해하고 정확히 받아들이는 데 최소 몇 살이 필요한지 기준으로, 위 6개 값(toddler/teen/junior_20s/career_30s/veteran_40s/master_50s) 중 가장 낮은 값을 고르세요. 애매하면 더 낮은(쉬운) 값을 고르세요.`
 
@@ -437,7 +437,7 @@ export class SelfStudyParseError extends GeminiApiError {
 // 판정(requiredAgeTier)만으로는 못 막는 문제라, 생성 단계부터 캐릭터의
 // 지금 연령대에 맞는 눈높이로 만들어달라고 명시적으로 요청한다.
 const AGE_TIER_CONTENT_POOL_GUIDE: Record<AgeTier, string> = {
-  toddler: '숫자·색깔·동물 이름, 인사말, 아주 쉬운 생활 습관처럼 2~3살 아이도 알 수 있는 가장 기초적인 개념만 만드세요. 전문 용어나 자격증·실무 내용은 절대 만들지 마세요.',
+  toddler: '그 직업이 하는 일을 한두 문장으로 쉽게 설명하거나, 자주 쓰는 아주 쉬운 낱말·흥미로운 이야기처럼 초등학교 저학년(8~9살)도 이해할 수 있는 가장 기초적인 개념만 만드세요. 전문 용어나 자격증·실무 내용은 절대 만들지 마세요.',
   teen: '그 직업의 역사·기본 개념·유명한 사례처럼 10대 학생도 이해할 수 있는 입문 수준만 만드세요. 실무 자격증이나 고난도 전문 지식은 만들지 마세요.',
   junior_20s: '그 직업의 기초 실무·용어·기본 이론 등 사회 초년생이 배우는 수준의 내용을 만드세요.',
   career_30s: '그 직업의 중급 실무·응용 지식을 만드세요.',

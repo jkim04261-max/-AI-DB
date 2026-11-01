@@ -31,7 +31,7 @@ const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
 // 레이어 분리가 안 됨 — PR #50과 같은 한계). junior_20s는 기존
 // "기본 모습"과 같은 뜻이라 배지를 붙이지 않는다.
 const AGE_TIER_EMOJI: Partial<Record<AgeTier, string>> = {
-  toddler: '🍼',
+  toddler: '🎒',
   teen: '📘',
   career_30s: '💼',
   veteran_40s: '👓',
@@ -84,6 +84,7 @@ export default function GameStage({
   outfitId,
   backgroundOverride,
   ageTier,
+  ageNumber,
 }: {
   companionType: CompanionType
   profession: ProfessionId | null
@@ -102,6 +103,10 @@ export default function GameStage({
   // PR #52: 6단계 연령대 — 지정하지 않으면 배지를 아예 그리지 않는다
   // (기존 화면과 100% 동일).
   ageTier?: AgeTier
+  // PR #52 후속 5차 요청 3번: 머리 위에 표시할 구체적인 나이 숫자 —
+  // ageTier(6단계)보다 더 촘촘한 표시용 값이다. 지정하지 않으면 뱃지를
+  // 그리지 않는다.
+  ageNumber?: number
 }) {
   const scene = backgroundOverride ?? sceneForProfession(profession)
   const [tapped, setTapped] = useState(false)
@@ -138,59 +143,14 @@ export default function GameStage({
           src={scene.backgroundImageSrc}
           alt=""
           aria-hidden
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 z-0 h-full w-full object-cover"
         />
         {/* 아늑한 느낌의 상/하단 비네트 — 실제 일러스트 위에도 자연스럽게 얹힌다 */}
         <div
           aria-hidden
-          className="absolute inset-0"
+          className="absolute inset-0 z-0"
           style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
         />
-
-        {bubbleText && (
-          <div className="absolute top-[4%] -translate-x-1/2" style={{ left: region.anchorLeft }}>
-            <SpeechBubble text={bubbleText} />
-          </div>
-        )}
-        {moodIcon && (
-          <span
-            aria-hidden
-            className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute top-0 -translate-x-1/2 text-2xl drop-shadow"
-            style={{ left: region.anchorLeft }}
-          >
-            {moodIcon}
-          </span>
-        )}
-        {tier === 'student' && (
-          <span
-            data-testid="appearance-accessory-student"
-            aria-hidden
-            className="pointer-events-none absolute top-[14%] -translate-x-1/2 text-lg drop-shadow"
-            style={{ left: region.anchorLeft }}
-          >
-            🤓
-          </span>
-        )}
-        {tier === 'expert' && (
-          <span
-            data-testid="appearance-accessory-expert"
-            aria-hidden
-            className="pointer-events-none absolute top-[14%] -translate-x-1/2 text-lg drop-shadow"
-            style={{ left: region.anchorLeft }}
-          >
-            🏅
-          </span>
-        )}
-        {ageTier && AGE_TIER_EMOJI[ageTier] && (
-          <span
-            data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
-            aria-hidden
-            className="pointer-events-none absolute top-[18%] flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-xl shadow-lg"
-            style={{ left: region.anchorLeft }}
-          >
-            {AGE_TIER_EMOJI[ageTier]}
-          </span>
-        )}
 
         {/* 지금 선택된 캐릭터 영역 — role=img/aria-label은 기존 CharacterSprite와
             동일한 포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로
@@ -200,7 +160,11 @@ export default function GameStage({
             초상화를 이 영역 가운데에 카드 형태로 띄워, 기본 로비
             화면에서도 "지금 몇 살 단계인지"가 실제로 다른 그림으로
             보이게 한다(badge/ring 테두리만으로는 부족하다는 반복된
-            피드백에 대한 대응). */}
+            피드백에 대한 대응). PR #52 후속 5차: 말풍선/뱃지류를 전부
+            이 영역 "뒤"가 아니라 "다음"(z-index 더 높게)에 그려서,
+            카드에 가려 안 보이던 겹침 문제를 없앴다 — z-0(배경) <
+            z-10(초상화 카드) < z-20(말풍선·뱃지)로 레이어를 명시적으로
+            분리했다. */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -213,7 +177,7 @@ export default function GameStage({
             }
           }}
           tabIndex={0}
-          className="absolute cursor-pointer overflow-visible rounded-2xl transition-shadow duration-200"
+          className="absolute z-10 cursor-pointer overflow-visible rounded-2xl transition-shadow duration-200"
           style={{
             left: region.left,
             top: region.top,
@@ -230,8 +194,56 @@ export default function GameStage({
               src={portraitSrc}
               alt=""
               aria-hidden
-              className="pointer-events-none absolute left-1/2 top-1/2 h-auto w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-2xl object-cover shadow-xl ring-2 ring-amber-100/80 transition-transform duration-300"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-auto w-[82%] -translate-x-1/2 -translate-y-1/2 rounded-2xl object-cover shadow-xl ring-2 ring-amber-100/80 transition-transform duration-300"
             />
+          )}
+        </div>
+
+        {bubbleText && (
+          <div className="absolute top-[4%] z-20 -translate-x-1/2" style={{ left: region.anchorLeft }}>
+            <SpeechBubble text={bubbleText} />
+          </div>
+        )}
+        {moodIcon && (
+          <span
+            aria-hidden
+            className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute top-0 z-20 -translate-x-1/2 text-2xl drop-shadow"
+            style={{ left: region.anchorLeft }}
+          >
+            {moodIcon}
+          </span>
+        )}
+        <div
+          className="pointer-events-none absolute top-[12%] z-20 flex -translate-x-1/2 items-center gap-1"
+          style={{ left: region.anchorLeft }}
+        >
+          {tier === 'student' && (
+            <span data-testid="appearance-accessory-student" aria-hidden className="text-lg drop-shadow">
+              🤓
+            </span>
+          )}
+          {tier === 'expert' && (
+            <span data-testid="appearance-accessory-expert" aria-hidden className="text-lg drop-shadow">
+              🏅
+            </span>
+          )}
+          {ageTier && AGE_TIER_EMOJI[ageTier] && (
+            <span
+              data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
+              aria-hidden
+              className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-lg shadow-lg"
+            >
+              {AGE_TIER_EMOJI[ageTier]}
+            </span>
+          )}
+          {ageNumber !== undefined && (
+            <span
+              data-testid="age-number-badge"
+              aria-hidden
+              className="rounded-full border-2 border-amber-200/80 bg-amber-950/85 px-2 py-0.5 text-xs font-bold text-amber-50 shadow-lg"
+            >
+              {ageNumber}세
+            </span>
           )}
         </div>
       </div>
@@ -330,7 +342,7 @@ export default function GameStage({
               }
             }}
             tabIndex={0}
-            className={`relative cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
+            className={`relative z-10 cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             {portraitSrc ? (
               <span
@@ -349,40 +361,49 @@ export default function GameStage({
                 <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
               </span>
             )}
+            {/* PR #52 후속 5차: 뱃지들이 카드 모서리에 딱 걸쳐 반쯤 잘려
+                보이던 겹침 문제 — 한 줄로 묶어 카드 "위"(z-20, 음수
+                top)로 확실히 띄우고, 기분 이모지는 그보다 더 위에
+                둬서 서로도 겹치지 않게 했다. */}
             {portraitSrc && moodIcon && (
               <span
                 aria-hidden
-                className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 text-2xl drop-shadow"
+                className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute -top-8 left-1/2 z-20 -translate-x-1/2 text-2xl drop-shadow"
               >
                 {moodIcon}
               </span>
             )}
-            {portraitSrc && tier === 'student' && (
-              <span
-                data-testid="appearance-accessory-student"
-                aria-hidden
-                className="pointer-events-none absolute right-1 top-1 text-lg drop-shadow"
-              >
-                🤓
-              </span>
-            )}
-            {portraitSrc && tier === 'expert' && (
-              <span
-                data-testid="appearance-accessory-expert"
-                aria-hidden
-                className="pointer-events-none absolute right-1 top-1 text-lg drop-shadow"
-              >
-                🏅
-              </span>
-            )}
-            {portraitSrc && ageTier && AGE_TIER_EMOJI[ageTier] && (
-              <span
-                data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
-                aria-hidden
-                className="pointer-events-none absolute left-1 top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-base shadow-lg"
-              >
-                {AGE_TIER_EMOJI[ageTier]}
-              </span>
+            {portraitSrc && (
+              <div className="pointer-events-none absolute -top-3 inset-x-0 z-20 flex items-center justify-center gap-1">
+                {tier === 'student' && (
+                  <span data-testid="appearance-accessory-student" aria-hidden className="text-lg drop-shadow">
+                    🤓
+                  </span>
+                )}
+                {tier === 'expert' && (
+                  <span data-testid="appearance-accessory-expert" aria-hidden className="text-lg drop-shadow">
+                    🏅
+                  </span>
+                )}
+                {ageTier && AGE_TIER_EMOJI[ageTier] && (
+                  <span
+                    data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
+                    aria-hidden
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-base shadow-lg"
+                  >
+                    {AGE_TIER_EMOJI[ageTier]}
+                  </span>
+                )}
+                {ageNumber !== undefined && (
+                  <span
+                    data-testid="age-number-badge"
+                    aria-hidden
+                    className="rounded-full border-2 border-amber-200/80 bg-amber-950/85 px-2 py-0.5 text-xs font-bold text-amber-50 shadow-lg"
+                  >
+                    {ageNumber}세
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>

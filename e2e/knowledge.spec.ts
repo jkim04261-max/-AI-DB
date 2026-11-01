@@ -109,10 +109,10 @@ test('a character with no profession shows guidance instead of a teach form', as
   await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
 })
 
-// PR #52 후속 요청 1번: 2~3살(toddler) 단계에서는 가르치기 폼에 쉬운
-// 예시 주제가 떠서, 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지
-// 않도록 자연스럽게 유도한다. NURI_ACCOUNTANT는 level을 안 줘서(기본값
-// 1) toddler 단계다.
+// PR #52 후속 요청 1번(5차에서 2~3살→8~9살로 상향): toddler 단계에서는
+// 가르치기 폼에 쉬운 예시 주제가 떠서, 너무 어려운 지식만 쓰다가
+// 거절당해 진도가 막히지 않도록 자연스럽게 유도한다. NURI_ACCOUNTANT는
+// level을 안 줘서(기본값 1) toddler 단계다.
 test('the teach form suggests age-appropriate example topics for a toddler-stage character, and clicking one fills the form', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -122,10 +122,10 @@ test('the teach form suggests age-appropriate example topics for a toddler-stage
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  await expect(page.getByText('2~3살 단계에 맞는 예시예요', { exact: false })).toBeVisible()
-  await page.getByTestId('topic-suggestion-chip').filter({ hasText: '숫자 세기' }).click()
+  await expect(page.getByText('8~9살 단계에 맞는 예시예요', { exact: false })).toBeVisible()
+  await page.getByTestId('topic-suggestion-chip').filter({ hasText: '이 직업이 하는 일' }).click()
 
-  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숫자 세기')
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
   await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).not.toHaveValue('')
 })
 
@@ -169,10 +169,10 @@ test('teaching a knowledge item too advanced for the character\'s current age ti
   // PR #52 후속 요청 2번: 거절 직후에도 입력칸이 비어있지 않아서(위쪽
   // 기본 예시 칩은 안 보임) 바로 쉬운 지식으로 다시 시도할 수 있는 칩이
   // 거절 안내 바로 아래에 떠야 한다.
-  await expect(page.getByText('지금 2~3살 단계에서는 이런 지식부터 가르쳐 보세요', { exact: false })).toBeVisible()
-  await page.getByTestId('age-blocked-topic-suggestion-chip').filter({ hasText: '숫자 세기' }).click()
+  await expect(page.getByText('지금 8~9살 단계에서는 이런 지식부터 가르쳐 보세요', { exact: false })).toBeVisible()
+  await page.getByTestId('age-blocked-topic-suggestion-chip').filter({ hasText: '이 직업이 하는 일' }).click()
 
-  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숫자 세기')
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
   await expect(page.getByTestId('age-blocked-notice')).not.toBeVisible()
   await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeEnabled()
 })

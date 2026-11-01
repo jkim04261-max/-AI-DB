@@ -21,7 +21,7 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
-import { ageTierForLevel, AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting } from '../data/characterAge'
+import { ageTierForLevel, AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -294,7 +294,7 @@ export default function GrowPage() {
   const applyProfession = async (profession: ProfessionId) => {
     if (!character) return
     // PR #52 요청 2번: 처음 직업을 고르는 순간(이전까지 직업이 없었고,
-    // 아직 2~3살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
+    // 아직 8~9살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
     // "직업 변경"으로 바꿀 때는 이미 성장한 캐릭터라 이 대사가 어색하다.
     const isFirstPick = !character.profession && ageTier === 'toddler'
     setSavingProfession(true)
@@ -392,6 +392,9 @@ export default function GrowPage() {
   // PR #52: 6단계 연령대 — character.level에서 그때그때 계산하는
   // 표시용 파생값(DB 변경 없음, characterAppearance.ts의 tier와 같은 원칙).
   const ageTier = character ? ageTierForLevel(character.level) : 'toddler'
+  // PR #52 후속 5차 요청 3번: 티어보다 더 구체적인 "지금 몇 살인지" 숫자
+  // 뱃지용 — 역시 character.level에서 그때그때 계산하는 표시용 값이다.
+  const ageNumber = character ? ageNumberForLevel(character.level) : 8
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (
@@ -440,6 +443,7 @@ export default function GrowPage() {
                 onPropClick={handlePropClick}
                 tier={tier}
                 ageTier={ageTier}
+                ageNumber={ageNumber}
                 outfitId={inventory.equippedOutfit[character.companionType]}
                 // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
                 // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로

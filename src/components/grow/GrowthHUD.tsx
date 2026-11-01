@@ -26,7 +26,7 @@ export default function GrowthHUD({
   profession: ProfessionId | null
   exp: number
   recentLine: string | null
-  // PR #52: 6단계 연령대 중 지금 단계의 짧은 이름(예: "왕초보 유아").
+  // PR #52: 6단계 연령대 중 지금 단계의 짧은 이름(예: "초등 저학년").
   ageStageLabel?: string
 }) {
   const { level, expIntoLevel, expForNextLevel } = levelProgress(exp)

@@ -461,7 +461,8 @@ test('the top resource bar shows real points and energy, not fabricated numbers'
 })
 
 // PR #52: 캐릭터 6단계 연령대 — character.level에서 그때그때 계산하는
-// 표시용 값(DB 변경 없음). Lv.1인 NURI_SINGER는 toddler(2~3살) 단계다.
+// 표시용 값(DB 변경 없음). Lv.1인 NURI_SINGER는 toddler(8~9살, 후속
+// 5차에서 2~3살→8~9살로 상향) 단계다.
 test('the HUD shows the character\'s current 6-stage age tier, derived from level', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -470,7 +471,7 @@ test('the HUD shows the character\'s current 6-stage age tier, derived from leve
 
   await page.goto('/grow')
 
-  await expect(page.getByTestId('age-stage-label')).toContainText('왕초보 유아')
+  await expect(page.getByTestId('age-stage-label')).toContainText('초등 저학년')
 })
 
 // PR #52 후속 긴급 수정 요청 2번: 연령대별 비주얼이 실제로 화면에
@@ -485,7 +486,21 @@ test('the illustrated main stage actually shows the age-tier badge (not just com
 
   const badge = page.getByTestId('age-badge-toddler')
   await expect(badge).toBeVisible()
-  await expect(badge).toContainText('🍼')
+  await expect(badge).toContainText('🎒')
+})
+
+// PR #52 후속 5차 요청 3번: 머리 위 나이 뱃지 — 티어와 별개로 구체적인
+// 나이 숫자가 항상 보여야 한다(junior_20s처럼 연령대 이모지가 없는
+// 티어에서도). Lv.1은 ageNumberForLevel 매핑상 8세다.
+test('the character shows a specific age-number badge above the stage, not just the tier badge', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → 8세
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-number-badge')).toHaveText('8세')
 })
 
 // 마스터 단계(Lv.40+)는 요청하신 "장인증서" 배지로 바뀌어야 한다 —
@@ -585,7 +600,7 @@ test('a brand-new character greets the user and asks them to pick a profession',
 
   await page.goto('/grow')
 
-  await expect(page.getByText('안녕하세요! 저는 아직 아무것도 모르는 아기예요. 직업을 선택해 주세요!')).toBeVisible()
+  await expect(page.getByText('안녕하세요! 저는 아직 아무것도 모르는 초등학생이에요. 직업을 선택해 주세요!')).toBeVisible()
 })
 
 // PR #52 요청 2번: 처음 직업을 고르면("요가강사" 등) 그 직업에 맞는
