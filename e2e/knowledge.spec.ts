@@ -165,6 +165,16 @@ test('teaching a knowledge item too advanced for the character\'s current age ti
   await expect(page.getByText('아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~')).toBeVisible()
   await expect(page.getByTestId('age-blocked-notice')).toBeVisible()
   await expect(page.getByRole('button', { name: '저장' })).toBeDisabled()
+
+  // PR #52 후속 요청 2번: 거절 직후에도 입력칸이 비어있지 않아서(위쪽
+  // 기본 예시 칩은 안 보임) 바로 쉬운 지식으로 다시 시도할 수 있는 칩이
+  // 거절 안내 바로 아래에 떠야 한다.
+  await expect(page.getByText('지금 2~3살 단계에서는 이런 지식부터 가르쳐 보세요', { exact: false })).toBeVisible()
+  await page.getByTestId('age-blocked-topic-suggestion-chip').filter({ hasText: '숫자 세기' }).click()
+
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숫자 세기')
+  await expect(page.getByTestId('age-blocked-notice')).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeEnabled()
 })
 
 test('verifying appropriate knowledge shows the result and enables 저장, which is not sent until clicked', async ({ page }) => {

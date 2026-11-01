@@ -203,6 +203,19 @@ export default function InteractionPanel({
     // implicitly becomes true, so saving requires re-verifying first.
   }
 
+  // PR #52 후속: 거절(ageBlocked) 직후에도 쉬운 예시를 바로 고를 수 있게
+  // — 입력칸을 통째로 비우고 다시 검증 전 상태로 되돌려서 새로
+  // 가르치기를 시작한 것처럼 만든다.
+  const applyTopicSuggestion = (topic: { title: string; content: string }) => {
+    setTitle(topic.title)
+    setContent(topic.content)
+    setVerification(null)
+    setVerifiedSnapshot(null)
+    setVerificationToken(null)
+    setAgeBlocked(false)
+    setRequiredAgeTier(null)
+  }
+
   const handleSave = async () => {
     if (!verification || isStale || verification.status !== 'appropriate' || ageBlocked || !verifiedSnapshot || !verificationToken) return
     setSaving(true)
@@ -289,10 +302,7 @@ export default function InteractionPanel({
                   key={topic.title}
                   type="button"
                   data-testid="topic-suggestion-chip"
-                  onClick={() => {
-                    setTitle(topic.title)
-                    setContent(topic.content)
-                  }}
+                  onClick={() => applyTopicSuggestion(topic)}
                   className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
                 >
                   {topic.title}
@@ -357,9 +367,31 @@ export default function InteractionPanel({
             {VERIFICATION_LABEL[verification.status]}
           </span>
           {ageBlocked && requiredAgeTier && (
-            <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-600">
-              🔒 {AGE_TIER_LABEL[requiredAgeTier]}부터 배울 수 있는 지식이에요 — 아직은 저장할 수 없어요.
-            </p>
+            <div className="flex flex-col gap-1.5">
+              <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-600">
+                🔒 {AGE_TIER_LABEL[requiredAgeTier]}부터 배울 수 있는 지식이에요 — 아직은 저장할 수 없어요.
+              </p>
+              {topicSuggestions.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[11px] text-rose-500">
+                    지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 이런 지식부터 가르쳐 보세요:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {topicSuggestions.map((topic) => (
+                      <button
+                        key={topic.title}
+                        type="button"
+                        data-testid="age-blocked-topic-suggestion-chip"
+                        onClick={() => applyTopicSuggestion(topic)}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100"
+                      >
+                        {topic.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {verification.explanation && <p className="text-xs text-slate-600">설명: {verification.explanation}</p>}
           {verification.relevance && <p className="text-xs text-slate-600">관련성: {verification.relevance}</p>}
