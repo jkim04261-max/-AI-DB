@@ -481,19 +481,51 @@ test('choosing 가르치기 shows a brief turn transition before the teach panel
 
 // PR #49 요청 1: 소품(책상/마이크 등)도 클릭 가능한 인터랙션 — 눌러보면
 // 짧은 반응이 온다.
-test('clicking a scene prop gives a short reaction, making it feel interactive rather than decorative', async ({ page }) => {
+// PR #50 긴급 재작업: 메인 화면 기본(로비) 배경이 CSS 그라디언트 방이
+// 아니라 제공받은 실제 일러스트 이미지 파일로 뜨는지 직접 검증한다 —
+// "파란 동그라미 캐릭터가 사라지고 실제 일러스트가 떠야 한다"는 요청을
+// 코드가 아니라 테스트로도 못박아 둔다.
+test('the default stage shows the real illustrated image, not a CSS-drawn room with the circle SVG character', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   await mockCharacterApi(page, { characters: [NURI_SINGER] })
 
   await page.goto('/grow')
+
+  await expect(page.getByTestId('illustrated-scene-background')).toBeVisible()
+  // 일러스트 모드에서는 손그림 SVG 캐릭터가 아예 렌더링되지 않는다 —
+  // role=img는 여전히 있지만(접근성 계약 유지), <svg>가 아니라 탭
+  // 가능한 영역(div)이어야 한다.
+  const characterRegion = page.getByRole('img', { name: /누리 캐릭터/ })
+  await expect(characterRegion).toBeVisible()
+  await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
+})
+
+// PR #50 긴급 재작업: 기본(로비) 배경은 이제 제공받은 실제 일러스트라
+// 소품 자체가 없다(그림 안에 이미 다 그려져 있음) — 소품 클릭 인터랙션은
+// 전용 아트가 없는 마켓 구매 배경(사무실 등 CSS 기반 8곳)에서만
+// 유효하다. 그래서 먼저 사무실 배경을 구매·장착한 뒤 그 소품을 누른다.
+test('clicking a scene prop gives a short reaction, in a purchased CSS-based background (offices etc. have no illustrated art yet)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await dialog.getByRole('button', { name: '배경', exact: true }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '구매하기' }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '장착하기' }).click()
+  await page.getByRole('button', { name: '닫기' }).click()
+
   // 소품은 계속 흔들리는 CSS 애니메이션이 있어(grow-prop-sway) Playwright의
   // "안정될 때까지 대기" 체크가 끝나지 않는다 — 실제 사용자는 흔들리는
   // 이모지도 문제없이 탭할 수 있으므로 force로 그 체크만 건너뛴다.
-  await page.getByRole('button', { name: '소품 🎤 살펴보기' }).click({ force: true })
+  await page.getByRole('button', { name: '소품 💻 살펴보기' }).click({ force: true })
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('🎤')
+  await expect(page.getByTestId('speech-bubble')).toContainText('💻')
 })
 
 // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상 열 수

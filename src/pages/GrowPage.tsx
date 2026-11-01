@@ -393,11 +393,11 @@ export default function GrowPage() {
                 onPropClick={handlePropClick}
                 tier={tier}
                 outfitId={inventory.equippedOutfit[character.companionType]}
-                // 'lobby'(기본값)는 기존처럼 직업별 방 꾸밈(sceneForProfession)을
-                // 그대로 쓴다 — 마켓에서 다른 배경을 사서 실제로 장착했을
-                // 때만 덮어쓴다. 그래야 아무도 안 바꿔도 기존 PR #46/#49
-                // 동작이 그대로 유지된다.
-                backgroundOverride={inventory.equippedBackground === 'lobby' ? undefined : BACKGROUND_SCENES[inventory.equippedBackground]}
+                // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
+                // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
+                // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
+                // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
+                backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
               />
               {xpPopup !== null && (
                 <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-300 drop-shadow">

@@ -81,7 +81,7 @@ function OutfitCard({
   const canAfford = inventory.gold >= price
 
   return (
-    <div className="flex flex-col items-center gap-1 rounded-xl border border-amber-200 bg-white p-3 text-center">
+    <div className="flex flex-col items-center gap-1 rounded-xl border-2 border-[#d4af37]/60 bg-gradient-to-b from-white to-amber-50 p-3 text-center shadow-[0_1px_0_rgba(212,175,55,0.5)]">
       <span className="text-2xl">{icon}</span>
       <p className="text-xs font-semibold text-amber-900">{label}</p>
       {price === 0 ? (
@@ -120,7 +120,7 @@ function BackgroundCard({
   const canAfford = inventory.gold >= price
 
   return (
-    <div className="flex flex-col items-center gap-1 rounded-xl border border-amber-200 bg-white p-3 text-center">
+    <div className="flex flex-col items-center gap-1 rounded-xl border-2 border-[#d4af37]/60 bg-gradient-to-b from-white to-amber-50 p-3 text-center shadow-[0_1px_0_rgba(212,175,55,0.5)]">
       <span className="text-2xl">{icon}</span>
       <p className="text-xs font-semibold text-amber-900">{label}</p>
       {price === 0 ? (

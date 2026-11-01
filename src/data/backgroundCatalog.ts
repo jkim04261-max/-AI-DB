@@ -1,4 +1,4 @@
-import type { SceneTheme } from './growthScenes'
+import { DEFAULT_SCENE, type SceneTheme } from './growthScenes'
 
 // PR #50: 배경(장소) 카탈로그 — 요청하신 9개 장소. 로비(기본)만 무료
 // 배포, 나머지는 마켓에서 골드로 구매해 잠금 해제한다. 실제 DB에는
@@ -30,15 +30,9 @@ export const BACKGROUND_CATALOG: BackgroundItem[] = [
 // 의 SceneTheme과 같은 구조를 재사용한다(GameStage는 둘 중 하나를
 // 받아 그대로 렌더링).
 export const BACKGROUND_SCENES: Record<BackgroundId, SceneTheme> = {
-  lobby: {
-    label: '로비',
-    layers: [
-      { className: 'bg-gradient-to-b from-amber-100 via-orange-50 to-amber-50' },
-      { className: 'bg-gradient-to-t from-amber-900/0 via-amber-900/0 to-amber-900/10' },
-    ],
-    props: ['🪴', '📚', '🏆'],
-    floorClassName: 'bg-gradient-to-t from-amber-300/70 to-amber-100/40',
-  },
+  // PR #50 긴급 재작업: 로비는 growthScenes.ts의 실제 일러스트 장면을
+  // 그대로 가리킨다 — CSS 그라디언트 방이 아니다.
+  lobby: DEFAULT_SCENE,
   office: {
     label: '사무실',
     layers: [

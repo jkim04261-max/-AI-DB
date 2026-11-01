@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Lock, Check } from 'lucide-react'
-import conceptLobbyImg from '../../assets/grow/concept-lobby.webp'
 import CharacterSprite from './CharacterSprite'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
@@ -38,10 +37,12 @@ export default function CustomizationRoom({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="overflow-hidden rounded-2xl border border-amber-200">
-        <img src={conceptLobbyImg} alt="참고 컨셉 아트 — 목표로 하는 분위기" className="w-full object-cover" />
-        <p className="bg-amber-50 px-2 py-1 text-center text-[10px] text-amber-600">참고 컨셉 아트 — 이 느낌으로 점점 발전시킬 예정이에요</p>
-      </div>
+      {/* PR #50 긴급 재작업: 메인 화면이 이제 실제 일러스트 자체를 그대로
+          보여주므로, 여기서 같은 그림을 "참고용"으로 또 보여줄 필요가
+          없어졌다. 대신 옷을 실시간으로 갈아입혀 볼 수 있는 이 미리보기는
+          (그림 한 장짜리 일러스트로는 불가능한 기능이라) 기존 SVG로
+          계속 보여준다 — 그 차이를 짧게 안내한다. */}
+      <p className="text-center text-[11px] text-amber-600">메인 화면은 제공해주신 일러스트로 표시돼요. 여기서는 옷을 실시간으로 갈아입혀 미리 볼 수 있어요.</p>
 
       <div className="flex justify-center rounded-2xl bg-amber-950 p-4">
         <CharacterSprite companionType={companionType} pose="idle" size={140} tier={tier} outfitId={equippedOutfitId as OutfitId} />
@@ -67,7 +68,10 @@ export default function CustomizationRoom({
           const owned = activeCategory === 'outfit' ? inventory.ownedOutfits.has(item.id as OutfitId) : item.priceGold === 0
           const equipped = activeCategory === 'outfit' && item.id === equippedOutfitId
           return (
-            <div key={item.id} className="flex flex-col items-center gap-1 rounded-xl border border-amber-200 bg-white p-3 text-center">
+            <div
+              key={item.id}
+              className="flex flex-col items-center gap-1 rounded-xl border-2 border-[#d4af37]/60 bg-gradient-to-b from-white to-amber-50 p-3 text-center shadow-[0_1px_0_rgba(212,175,55,0.5)]"
+            >
               <span className="text-2xl">{item.icon}</span>
               <p className="text-xs font-semibold text-amber-900">{item.label}</p>
               {!item.visuallyWired && <p className="text-[9px] text-amber-400">곧 추가될 예정</p>}
