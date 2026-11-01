@@ -1,5 +1,6 @@
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
+import type { OutfitId } from '../../data/characterCustomization'
 
 // Independent from GrowthContext's CharacterPose-less status types — this
 // is purely a *visual* state, driven today only by the existing
@@ -47,6 +48,21 @@ const PALETTE: Record<CompanionType, Palette> = {
   },
 }
 
+// PR #50: 옷(Outfit) 커스터마이징 중 실제로 그림에 반영되는 첫 사례 —
+// 유저가 참고로 준 레퍼런스 일러스트의 한복(빨강·금장) 톤을 그대로
+// 가져왔다. CUSTOMIZATION_CATALOG의 visuallyWired=true 항목만 여기에
+// 올린다 — 나머지(머리/얼굴/키/목소리)는 아직 기본 PALETTE 그대로다.
+const OUTFIT_PALETTE_OVERRIDE: Partial<Record<OutfitId, Palette>> = {
+  hanbok_blouse: {
+    skin: '#ffe0bd',
+    hair: '#4453d8',
+    hairDark: '#2f3bb0',
+    outfit: '#b5293f',
+    outfitDark: '#7a1d2b',
+    accent: '#d4af37',
+  },
+}
+
 // 포즈별 입 모양(path) — 표정 변화의 핵심. 좌표는 160x220 viewBox 기준.
 const MOUTH_PATH: Record<CharacterPose, string> = {
   idle: 'M 64 96 Q 80 104 96 96',
@@ -77,6 +93,7 @@ export default function CharacterSprite({
   pose = 'idle',
   size = 96,
   tier = 'rookie',
+  outfitId,
 }: {
   companionType: CompanionType
   pose?: CharacterPose
@@ -85,8 +102,13 @@ export default function CharacterSprite({
   // 요소(안경/배지)만 추가하는 최소 구현이고, 기본값('rookie')은 기존
   // PR #45/#46의 모습과 100% 동일해 과거 테스트·스냅샷을 깨지 않는다.
   tier?: AppearanceTier
+  // PR #50: 커스터마이징 룸에서 장착한 옷. 지정하지 않으면(undefined)
+  // 또는 매핑이 없으면 기존 기본 PALETTE 그대로 — 과거 호출부/테스트는
+  // 전혀 안 바뀐다.
+  outfitId?: OutfitId
 }) {
-  const palette = PALETTE[companionType]
+  const palette = (outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId]) || PALETTE[companionType]
+  const isHanbok = outfitId === 'hanbok_blouse'
   const isNuri = companionType === 'nuri'
   const name = isNuri ? '누리' : '두리'
   const eyebrow = EYEBROW_TRANSFORM[pose]
@@ -127,6 +149,17 @@ export default function CharacterSprite({
 
         {/* 몸(옷) */}
         <rect x={34} y={120} width={92} height={72} rx={26} fill={palette.outfit} />
+        {/* PR #50: 한복 블라우스 전용 — 금장 깃 테두리(레퍼런스 일러스트의
+            금박 자수 느낌을 단순화한 라인) */}
+        {isHanbok && (
+          <path
+            d="M 38 124 Q 80 112 122 124"
+            stroke={palette.accent}
+            strokeWidth={3}
+            fill="none"
+            strokeLinecap="round"
+          />
+        )}
         {/* 목깃 */}
         <path d="M 66 120 L 80 136 L 94 120 Z" fill={palette.outfitDark} />
         {isNuri ? (

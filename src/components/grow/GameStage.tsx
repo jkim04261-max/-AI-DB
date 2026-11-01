@@ -1,18 +1,38 @@
 import { useState } from 'react'
-import CharacterSprite, { type CharacterPose } from './CharacterSprite'
+import CharacterSprite, { POSE_LABEL, type CharacterPose } from './CharacterSprite'
 import SpeechBubble from './SpeechBubble'
-import { sceneForProfession } from '../../data/growthScenes'
+import { sceneForProfession, type SceneTheme } from '../../data/growthScenes'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
+import type { OutfitId } from '../../data/characterCustomization'
 
-// PR #46: the "room" the character stands in. Pure CSS layering (no
-// Three.js/WebGL) — a few absolutely-positioned gradient layers + emoji
-// props give a sense of depth, and the character itself is rendered via
-// the existing CharacterSprite (same pose prop contract as before, so
-// InteractionPanel/ExamPanel's onPoseChange callers don't need to change
-// at all). Swapping any of this for real art/3D later only touches this
-// file and growthScenes.ts, never the business-logic components.
+const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
+
+// PR #50 긴급 재작업: 제공받은 실제 일러스트 속 누리·두리 대략적인
+// 위치(퍼센트 좌표) — 캐릭터별 탭 타깃·말풍선·기분 이모지를 그 위에
+// 겹쳐 그린다. 그림 자체는 통째로 하나라 두 사람을 따로 자르지 않고
+// 같이 보여주고, "지금 선택된 쪽"만 금색 테두리로 강조한다.
+const ILLUSTRATED_REGION: Record<CompanionType, { left: string; top: string; width: string; height: string; anchorLeft: string }> = {
+  nuri: { left: '2%', top: '3%', width: '48%', height: '94%', anchorLeft: '26%' },
+  duri: { left: '50%', top: '3%', width: '48%', height: '94%', anchorLeft: '72%' },
+}
+
+const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
+  happy: '✨',
+  sad: '💧',
+  studying: '📖',
+}
+
+// PR #46: the "room" the character stands in. 두 가지 렌더링 모드가 있다:
+// (1) scene.backgroundImageSrc가 있으면(기본 로비) — 제공받은 실제
+//     일러스트를 그대로 배경으로 쓰고, 그 위에 선택 표시·말풍선·기분
+//     이모지만 얹는다(그림 속에 누리·두리가 이미 함께 그려져 있어서
+//     SVG 캐릭터는 그리지 않는다).
+// (2) 그 외(마켓에서 산 사무실/병원 등 전용 아트가 없는 8개 장소) — 기존
+//     CSS 그라디언트 레이어 + CharacterSprite SVG로 그대로 그린다.
+// 어느 쪽이든 바깥 role="img"/aria-label/data-testid 계약은 동일해서
+// (companionType/pose 기반) 기존 e2e의 포즈·소품 검증이 그대로 통한다.
 export default function GameStage({
   companionType,
   profession,
@@ -21,6 +41,8 @@ export default function GameStage({
   onTapCharacter,
   onPropClick,
   tier = 'rookie',
+  outfitId,
+  backgroundOverride,
 }: {
   companionType: CompanionType
   profession: ProfessionId | null
@@ -31,8 +53,13 @@ export default function GameStage({
   // 않으면 기존처럼 순수 장식(aria-hidden)으로 남는다.
   onPropClick?: (emoji: string) => void
   tier?: AppearanceTier
+  // PR #50: 커스터마이징 룸에서 장착한 옷 — CharacterSprite로 그대로 전달.
+  outfitId?: OutfitId
+  // PR #50: 마켓에서 구매해 장착한 배경(BACKGROUND_SCENES) — 지정하면
+  // 기존 직업 기반 배경(sceneForProfession) 대신 이걸 그린다.
+  backgroundOverride?: SceneTheme
 }) {
-  const scene = sceneForProfession(profession)
+  const scene = backgroundOverride ?? sceneForProfession(profession)
   const [tapped, setTapped] = useState(false)
   const reduceMotion =
     typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -44,10 +71,96 @@ export default function GameStage({
     window.setTimeout(() => setTapped(false), 320)
   }
 
+  const frameClassName = 'relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-96'
+
+  if (scene.backgroundImageSrc) {
+    const name = COMPANION_NAME[companionType]
+    const region = ILLUSTRATED_REGION[companionType]
+    const moodIcon = MOOD_ICON[pose]
+
+    return (
+      <div className={frameClassName}>
+        <img
+          data-testid="illustrated-scene-background"
+          src={scene.backgroundImageSrc}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        {/* 아늑한 느낌의 상/하단 비네트 — 실제 일러스트 위에도 자연스럽게 얹힌다 */}
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
+        />
+
+        {bubbleText && (
+          <div className="absolute top-[4%] -translate-x-1/2" style={{ left: region.anchorLeft }}>
+            <SpeechBubble text={bubbleText} />
+          </div>
+        )}
+        {moodIcon && (
+          <span
+            aria-hidden
+            className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute top-0 -translate-x-1/2 text-2xl drop-shadow"
+            style={{ left: region.anchorLeft }}
+          >
+            {moodIcon}
+          </span>
+        )}
+        {tier === 'student' && (
+          <span
+            data-testid="appearance-accessory-student"
+            aria-hidden
+            className="pointer-events-none absolute top-[14%] -translate-x-1/2 text-lg drop-shadow"
+            style={{ left: region.anchorLeft }}
+          >
+            🤓
+          </span>
+        )}
+        {tier === 'expert' && (
+          <span
+            data-testid="appearance-accessory-expert"
+            aria-hidden
+            className="pointer-events-none absolute top-[14%] -translate-x-1/2 text-lg drop-shadow"
+            style={{ left: region.anchorLeft }}
+          >
+            🏅
+          </span>
+        )}
+
+        {/* 지금 선택된 캐릭터 영역 — role=img/aria-label은 기존 CharacterSprite와
+            동일한 포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로
+            "지금 이 캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐). */}
+        <div
+          data-testid="character-tap-target"
+          role="img"
+          aria-label={`${name} 캐릭터, ${POSE_LABEL[pose]}`}
+          onClick={handleTap}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleTap()
+            }
+          }}
+          tabIndex={0}
+          className="absolute cursor-pointer rounded-2xl transition-shadow duration-200"
+          style={{
+            left: region.left,
+            top: region.top,
+            width: region.width,
+            height: region.height,
+            boxShadow: tapped
+              ? 'inset 0 0 0 3px rgba(212, 175, 55, 0.9), 0 0 16px 2px rgba(212, 175, 55, 0.5)'
+              : 'inset 0 0 0 2px rgba(212, 175, 55, 0.5)',
+          }}
+        />
+      </div>
+    )
+  }
+
   return (
-    // PR #49: 이전(h-56/sm:h-64)보다 훨씬 키워 화면의 '메인 프레임'
-    // 역할을 하도록 했다 — 더 이상 작은 미리보기 박스가 아니다.
-    <div className="relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-96">
+    <div className={frameClassName}>
       {/* 배경 레이어 (뒤->앞), 아주 약한 패럴랙스 오프셋만 — 스크롤 리스너 없이 CSS만 사용 */}
       {scene.layers.map((layer, i) => (
         <div
@@ -137,7 +250,7 @@ export default function GameStage({
             className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             <span className="mx-auto block w-[150px] [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]">
-              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} />
+              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} />
             </span>
           </div>
         </div>

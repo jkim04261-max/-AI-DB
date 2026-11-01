@@ -1,4 +1,5 @@
 import type { ProfessionId } from './characterProfessions'
+import conceptLobbyImg from '../assets/grow/concept-lobby.webp'
 
 // PR #46: purely a visual theme lookup (profession -> room dressing). No
 // DB/API involved — this never decides what profession a character has,
@@ -8,10 +9,6 @@ import type { ProfessionId } from './characterProfessions'
 // hardcode a companion-to-profession lock). Kept as plain data so a future
 // 2.5D/3D reskin only has to edit this file, never the components that
 // read it.
-//
-// PR #49: 전면 톤 리뉴얼 — 차갑던 인디고/블루 계열 배경을 따뜻한 목재·
-// 크림 톤으로 바꿨다(레퍼런스: 클래식 육성 게임 특유의 아늑한 방 느낌).
-// 구조(레이어 수/프롭/바닥)는 그대로, 색만 전면 교체했다.
 export interface SceneLayer {
   // Tailwind gradient classes, back-to-front — rendered as stacked
   // absolutely-positioned divs inside GameStage with a slight parallax
@@ -22,49 +19,39 @@ export interface SceneLayer {
 export interface SceneTheme {
   label: string
   layers: SceneLayer[]
-  // Small emoji "props" scattered in the mid-layer to suggest depth
-  // (desk/books for accountant, mic/notes for singer) without needing
-  // real art assets yet — swappable 1:1 for sprites later.
+  // Small emoji "props" scattered in the mid-layer to suggest depth —
+  // only used when backgroundImageSrc is unset (the illustrated scene
+  // already has its own detailed objects drawn in, so props/floor are
+  // skipped for it in GameStage).
   props: string[]
   floorClassName: string
+  // PR #50 후속: 실제 제공받은 일러스트 에셋. 설정돼 있으면 GameStage가
+  // CSS 그라디언트 레이어 대신 이 이미지를 그대로 배경으로 쓴다 — 누리·
+  // 두리가 이미 한 장에 같이 그려진 완성본이라, 캐릭터 SVG는 이 모드에서
+  // 렌더링하지 않고 그림 위에 선택 표시·말풍선·기분 이모지만 얹는다.
+  backgroundImageSrc?: string
 }
 
+// PR #50 긴급 재작업: 사용자가 제공한 실제 고품질 일러스트를 기본(로비)
+// 장면으로 쓴다 — 직업별로 다른 CSS 그라디언트 방을 쓰던 기존 방식
+// (PR #46~#49)보다 압도적으로 품질이 높아서, 직업과 무관하게 "기본
+// 방"의 대표 모습으로 승격했다. 다른 직업 전용 아트가 생기기 전까지는
+// 모든 직업이 이 공통 일러스트를 공유한다.
 export const DEFAULT_SCENE: SceneTheme = {
-  label: '아늑한 방',
-  layers: [
-    { className: 'bg-gradient-to-b from-amber-100 via-orange-50 to-amber-50' },
-    { className: 'bg-gradient-to-t from-amber-900/0 via-amber-900/0 to-amber-900/10' },
-  ],
-  props: ['🪴', '📚'],
-  floorClassName: 'bg-gradient-to-t from-amber-300/70 to-amber-100/40',
+  label: '누리·두리의 방',
+  layers: [],
+  props: [],
+  floorClassName: '',
+  backgroundImageSrc: conceptLobbyImg,
 }
 
-// PR #49: 직업이 50종으로 늘어나면서 모든 직업에 전용 방 꾸밈을 바로
-// 만들 수는 없다 — 전용 테마가 없는 직업은 sceneForProfession이
-// DEFAULT_SCENE으로 자연스럽게 떨어진다(Partial이라 모든 키를 채울
-// 필요가 없음).
-export const SCENE_BY_PROFESSION: Partial<Record<ProfessionId, SceneTheme>> = {
-  accountant: {
-    label: '회계사의 공부방',
-    layers: [
-      { className: 'bg-gradient-to-b from-orange-100 via-amber-50 to-amber-50' },
-      { className: 'bg-gradient-to-t from-amber-900/0 via-amber-900/0 to-amber-900/10' },
-    ],
-    props: ['📖', '🖊️', '🪴'],
-    floorClassName: 'bg-gradient-to-t from-amber-400/60 to-amber-100/30',
-  },
-  singer: {
-    label: '가수의 연습실',
-    layers: [
-      { className: 'bg-gradient-to-b from-rose-100 via-amber-50 to-amber-50' },
-      { className: 'bg-gradient-to-t from-amber-900/0 via-amber-900/0 to-amber-900/10' },
-    ],
-    props: ['🎤', '🎵', '✨'],
-    floorClassName: 'bg-gradient-to-t from-rose-300/50 to-amber-100/30',
-  },
-}
+// PR #50: 마켓에서 구매하는 9개 장소 중 "로비"도 이 일러스트를 그대로
+// 쓴다(backgroundCatalog.ts). 사무실/병원 등 나머지 8곳은 아직 전용
+// 아트가 없어 기존 CSS 그라디언트 방식을 유지한다 — SCENE_BY_PROFESSION
+// 은 더 이상 쓰지 않지만(모든 직업이 DEFAULT_SCENE을 공유), 전용 아트가
+// 생기면 다시 여기에 직업별로 채워 넣을 수 있도록 타입은 남겨둔다.
+export const SCENE_BY_PROFESSION: Partial<Record<ProfessionId, SceneTheme>> = {}
 
-export function sceneForProfession(profession: ProfessionId | null): SceneTheme {
-  if (!profession) return DEFAULT_SCENE
-  return SCENE_BY_PROFESSION[profession] ?? DEFAULT_SCENE
+export function sceneForProfession(_profession: ProfessionId | null): SceneTheme {
+  return DEFAULT_SCENE
 }

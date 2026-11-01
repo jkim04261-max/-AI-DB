@@ -31,15 +31,15 @@ export default function ProfessionPicker({
         aria-modal="true"
         aria-label="직업 선택"
         onClick={(e) => e.stopPropagation()}
-        className="motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[80vh] w-full flex-col rounded-t-3xl bg-amber-50 sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl"
+        className="motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[80vh] w-full flex-col rounded-t-3xl border-2 border-[#d4af37] bg-amber-50 shadow-[0_8px_30px_rgba(0,0,0,0.35)] ring-4 ring-[#2b1a0f] ring-inset sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl"
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-amber-200 px-4 py-3">
-          <p className="text-sm font-bold text-amber-900">직업 선택</p>
+        <div className="flex shrink-0 items-center justify-between rounded-t-[22px] border-b-2 border-[#d4af37] bg-gradient-to-b from-[#4a2f1a] to-[#2b1a0f] px-4 py-3">
+          <p className="text-sm font-bold tracking-wide text-[#f4d58d]">직업 선택</p>
           <button
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-amber-500 hover:bg-amber-100 hover:text-amber-700"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d4af37]/70 text-[#f4d58d] hover:bg-[#d4af37]/20"
           >
             ✕
           </button>

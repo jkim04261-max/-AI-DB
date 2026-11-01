@@ -17,9 +17,13 @@ import QuestBanner from '../components/grow/QuestBanner'
 import ResourceBar from '../components/grow/ResourceBar'
 import ProfessionPicker from '../components/grow/ProfessionPicker'
 import TurnTransition from '../components/grow/TurnTransition'
+import CustomizationRoom from '../components/grow/CustomizationRoom'
+import ItemMarket from '../components/grow/ItemMarket'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { computeActiveQuest } from '../data/characterQuests'
+import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
+import { useMockInventory } from '../hooks/useMockInventory'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const SHEET_TITLE: Record<GameMenuAction, string> = {
@@ -28,6 +32,8 @@ const SHEET_TITLE: Record<GameMenuAction, string> = {
   quiz: '문제 풀기',
   study: '가르치기 · 스스로 공부하기',
   growth: '성장 보기',
+  customize: '커스터마이징 룸',
+  market: '아이템 마켓',
   album: '앨범 · 기록',
 }
 // PR #49 요청 3: 텍스트 입력 폼(InteractionPanel/ExamPanel)을 대체하지는
@@ -72,6 +78,10 @@ export default function GrowPage() {
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
   const [usage, setUsage] = useState({ teachRemaining: 0, teachLimit: 0, studyRemaining: 0, studyLimit: 0 })
+  // PR #50: 커스터마이징/마켓 뼈대 — 모의 재화·보유·장착 상태(새로고침
+  // 시 초기화, 실제 DB 저장 없음). 자세한 설계 의도는 useMockInventory.ts
+  // 참고.
+  const inventory = useMockInventory()
 
   const character = characters.find((c) => c.companionType === selected) ?? null
   // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
@@ -308,7 +318,9 @@ export default function GrowPage() {
   // 줄이기 설정에서는 전환 없이 즉시 연다.
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const handleMenuSelect = (action: GameMenuAction) => {
-    if (!character?.profession) return
+    // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
+    // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외).
+    if (!character?.profession && action !== 'customize' && action !== 'market') return
     const label = TURN_TRANSITION_LABEL[action]
     if (!label || reduceMotion) {
       setOpenSheet(action)
@@ -380,6 +392,12 @@ export default function GrowPage() {
                 onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
                 onPropClick={handlePropClick}
                 tier={tier}
+                outfitId={inventory.equippedOutfit[character.companionType]}
+                // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
+                // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
+                // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
+                // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
+                backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
               />
               {xpPopup !== null && (
                 <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-300 drop-shadow">
@@ -499,17 +517,26 @@ export default function GrowPage() {
         </div>
       )}
 
-      {openSheet && character?.profession && (
+      {openSheet && character && (character.profession || openSheet === 'customize' || openSheet === 'market') && (
         <BottomSheet title={SHEET_TITLE[openSheet]} onClose={() => setOpenSheet(null)}>
-          {(openSheet === 'teach' || openSheet === 'study') && (
+          {(openSheet === 'teach' || openSheet === 'study') && character.profession && (
             <InteractionPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
           )}
-          {openSheet === 'quiz' && (
+          {openSheet === 'quiz' && character.profession && (
             <ExamPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
           )}
           {openSheet === 'chat-log' && <ChatLogPanel character={character} />}
           {openSheet === 'growth' && <RecordsPanel character={character} variant="growth" />}
           {openSheet === 'album' && <RecordsPanel character={character} variant="album" />}
+          {openSheet === 'customize' && (
+            <CustomizationRoom
+              companionType={character.companionType}
+              tier={tier}
+              inventory={inventory}
+              onOpenMarket={() => setOpenSheet('market')}
+            />
+          )}
+          {openSheet === 'market' && <ItemMarket companionType={character.companionType} inventory={inventory} />}
         </BottomSheet>
       )}
     </div>
