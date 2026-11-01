@@ -8,7 +8,8 @@ import {
   type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
-import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
+import { AGE_TIER_LABEL, ageTierForLevel, type AgeTier } from '../../data/characterAge'
+import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import type { CharacterPose } from './CharacterSprite'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -54,6 +55,11 @@ export default function InteractionPanel({
 }) {
   const { verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
+  // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
+  // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
+  // 쉬운 쪽으로 자연스럽게 유도한다.
+  const characterAgeTier = ageTierForLevel(character.level)
+  const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -272,6 +278,29 @@ export default function InteractionPanel({
       )}
 
       <div className="flex flex-col gap-2">
+        {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-[11px] text-slate-400">
+              지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {topicSuggestions.map((topic) => (
+                <button
+                  key={topic.title}
+                  type="button"
+                  data-testid="topic-suggestion-chip"
+                  onClick={() => {
+                    setTitle(topic.title)
+                    setContent(topic.content)
+                  }}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+                >
+                  {topic.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}

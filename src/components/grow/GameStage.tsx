@@ -37,6 +37,32 @@ const AGE_TIER_EMOJI: Partial<Record<AgeTier, string>> = {
   master_50s: '🏆',
 }
 
+// PR #52 후속: "배지만 있고 실제로는 안 바뀌는 것 같다"는 피드백을 반영해,
+// 방 전체 액자 테두리 색도 연령대에 따라 함께 바뀌도록 했다 — 새 그림
+// 에셋 없이도 화면 전체가 지금 몇 살 단계인지 한눈에 느껴지게 하는
+// 가장 눈에 띄는 변화다. ageTier가 없으면(지정 안 함) 기존 amber 그대로.
+const AGE_TIER_RING_CLASS: Record<AgeTier, string> = {
+  toddler: 'ring-pink-300/80',
+  teen: 'ring-sky-400/80',
+  junior_20s: 'ring-amber-800/80',
+  career_30s: 'ring-emerald-600/80',
+  veteran_40s: 'ring-indigo-700/80',
+  master_50s: 'ring-yellow-400/90',
+}
+
+// PR #52 후속: CSS 모드(마켓 배경)에서 캐릭터 자체의 크기를 연령대에 따라
+// 실제로 다르게 그려서 "자라는" 느낌을 준다 — 내부 SVG는 전혀 건드리지
+// 않고 바깥 래퍼에 CSS scale만 적용하므로(CharacterSprite.tsx 내부 좌표/
+// path는 그대로) 기존 포즈·표정 로직이 깨질 위험이 없다.
+const AGE_TIER_SCALE: Record<AgeTier, number> = {
+  toddler: 0.78,
+  teen: 0.88,
+  junior_20s: 1,
+  career_30s: 1,
+  veteran_40s: 1,
+  master_50s: 1.08,
+}
+
 // PR #46: the "room" the character stands in. 두 가지 렌더링 모드가 있다:
 // (1) scene.backgroundImageSrc가 있으면(기본 로비) — 제공받은 실제
 //     일러스트를 그대로 배경으로 쓰고, 그 위에 선택 표시·말풍선·기분
@@ -88,7 +114,7 @@ export default function GameStage({
     window.setTimeout(() => setTapped(false), 320)
   }
 
-  const frameClassName = 'relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-96'
+  const frameClassName = `relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-96 transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
 
   if (scene.backgroundImageSrc) {
     const name = COMPANION_NAME[companionType]
@@ -149,7 +175,7 @@ export default function GameStage({
           <span
             data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
             aria-hidden
-            className="pointer-events-none absolute top-[20%] -translate-x-1/2 text-base drop-shadow"
+            className="pointer-events-none absolute top-[18%] flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-xl shadow-lg"
             style={{ left: region.anchorLeft }}
           >
             {AGE_TIER_EMOJI[ageTier]}
@@ -276,7 +302,11 @@ export default function GameStage({
             tabIndex={0}
             className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
-            <span className="mx-auto block w-[150px] [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]">
+            <span
+              data-testid="age-scale-wrapper"
+              className="mx-auto block w-[150px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]"
+              style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
+            >
               <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
             </span>
           </div>

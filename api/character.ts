@@ -567,9 +567,13 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
 
     let study
     try {
+      // PR #52 후속: 생성 단계부터 캐릭터의 지금 연령대 눈높이로 만들어
+      // 달라고 요청한다 — 사후 판정(ageBlocked)만으로는 "다 만들고 나서
+      // 막혀서 하루 한도만 날린다"는 진도 막힘을 못 막는다.
       study = await generateSelfStudy(
         PROFESSION_LABEL[character.profession],
         knownTitlesResult.rows.map((r) => r.title),
+        ageTierForLevel(character.level),
       )
     } catch (err) {
       // 생성 자체가 실패했거나(설정/타임아웃/네트워크/비2xx) 응답을 해석할

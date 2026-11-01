@@ -17,9 +17,20 @@ async function run() {
   // --- fetch mock: controllable per call, same shape as daily-limit.test.cjs ---
   let geminiBehavior = { kind: 'json', status: 200, result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' } }
   let geminiCallCount = 0
-  global.fetch = async (url) => {
+  // PR #52 후속: 마지막으로 Gemini에 보낸 systemInstruction 텍스트 —
+  // 스스로 공부하기가 캐릭터의 연령대를 실제로 프롬프트에 반영하는지
+  // 확인하는 테스트에서 쓴다.
+  let lastSystemInstruction = null
+  global.fetch = async (url, init) => {
     if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
       geminiCallCount++
+      if (init?.body) {
+        try {
+          lastSystemInstruction = JSON.parse(init.body)?.systemInstruction?.parts?.[0]?.text ?? null
+        } catch {
+          lastSystemInstruction = null
+        }
+      }
       if (geminiBehavior.kind === 'network-error') {
         throw new Error('simulated network failure')
       }
@@ -713,6 +724,49 @@ async function run() {
     await characterHandler(irisReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '기초 개념', content: '쉬운 내용' } }), res)
     t.assert(res.body.ageBlocked === false, 'requiredAgeTier가 없는 구형 응답은 가장 관대한 기본값으로 처리되어 막히지 않는다')
     t.assert(res.body.requiredAgeTier === 'toddler', '응답에 내려오는 requiredAgeTier도 기본값(toddler)으로 채워진다')
+  }
+
+  // --- PR #52 후속: 스스로 공부하기가 캐릭터의 연령대를 Gemini 프롬프트에
+  // 실제로 반영하는지(생성 단계부터 눈높이에 맞추려는 시도) 확인한다 —
+  // 사후 판정만으로는 "다 만들고 나서 막혀 하루 한도만 날리는" 진도
+  // 막힘을 못 고치므로, 프롬프트 자체가 연령대별로 달라져야 한다.
+  {
+    mock.seedUser(10, { email: 'jin@test.com' })
+    const jinCookie = cookieHeaderFor(auth, 10, 0, 'jin@test.com')
+    const jinReq = (overrides = {}) => ({ headers: { cookie: jinCookie }, query: {}, ...overrides })
+    await characterHandler(jinReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(jinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '숫자 세기', content: '하나, 둘, 셋', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+    }
+    const toddlerStudy = mockRes()
+    await characterHandler(jinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), toddlerStudy)
+    t.assert(toddlerStudy.statusCode === 200, 'Lv.1(toddler) 캐릭터의 스스로 공부하기 요청이 성공한다')
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('2~3살'),
+      'toddler 단계에서는 프롬프트에 2~3살 눈높이 안내가 포함된다',
+    )
+    t.assert(
+      lastSystemInstruction.includes('전문 용어나 자격증'),
+      'toddler 단계 프롬프트는 전문 자격증 수준 내용을 만들지 말라고 명시한다',
+    )
+
+    const jinNuri = mock.state.characters.find((c) => c.user_id === 10 && c.companion_type === 'nuri')
+    jinNuri.level = 15 // junior_20s
+
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '복식부기 실무', content: '...', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'junior_20s' },
+    }
+    const youngAdultStudy = mockRes()
+    await characterHandler(jinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), youngAdultStudy)
+    t.assert(youngAdultStudy.statusCode === 200, 'Lv.15(junior_20s) 캐릭터의 스스로 공부하기 요청이 성공한다')
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('20대'),
+      'junior_20s 단계에서는 프롬프트에 20대 눈높이 안내가 포함된다(toddler 때와 다른 프롬프트)',
+    )
   }
 
   return t.summary()

@@ -109,6 +109,26 @@ test('a character with no profession shows guidance instead of a teach form', as
   await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
 })
 
+// PR #52 후속 요청 1번: 2~3살(toddler) 단계에서는 가르치기 폼에 쉬운
+// 예시 주제가 떠서, 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지
+// 않도록 자연스럽게 유도한다. NURI_ACCOUNTANT는 level을 안 줘서(기본값
+// 1) toddler 단계다.
+test('the teach form suggests age-appropriate example topics for a toddler-stage character, and clicking one fills the form', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_ACCOUNTANT] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('2~3살 단계에 맞는 예시예요', { exact: false })).toBeVisible()
+  await page.getByTestId('topic-suggestion-chip').filter({ hasText: '숫자 세기' }).click()
+
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숫자 세기')
+  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).not.toHaveValue('')
+})
+
 // PR #52: 연령 제한 지식 흡수 — 내용은 적합해도 캐릭터가 아직 너무 어리면
 // (ageBlocked) 저장 버튼이 비활성화되고, 아동 말투의 거절 안내가 뜬다.
 test('teaching a knowledge item too advanced for the character\'s current age tier shows a rejection notice and disables saving', async ({ page }) => {

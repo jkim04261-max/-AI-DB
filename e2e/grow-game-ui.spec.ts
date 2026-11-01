@@ -473,6 +473,58 @@ test('the HUD shows the character\'s current 6-stage age tier, derived from leve
   await expect(page.getByTestId('age-stage-label')).toContainText('왕초보 유아')
 })
 
+// PR #52 후속 긴급 수정 요청 2번: 연령대별 비주얼이 실제로 화면에
+// 반영되는지 — 기본(일러스트) 화면에서 연령대 배지가 실제로 보여야 한다.
+test('the illustrated main stage actually shows the age-tier badge (not just computed, but rendered)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  const badge = page.getByTestId('age-badge-toddler')
+  await expect(badge).toBeVisible()
+  await expect(badge).toContainText('🍼')
+})
+
+// 마스터 단계(Lv.40+)는 요청하신 "장인증서" 배지로 바뀌어야 한다 —
+// 레벨이 달라지면 같은 화면에서 다른 배지가 실제로 뜨는지 확인한다.
+test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of the toddler one', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-badge-master-50s')).toBeVisible()
+  await expect(page.getByTestId('age-badge-master-50s')).toContainText('🏆')
+  await expect(page.getByTestId('age-badge-toddler')).toHaveCount(0)
+  await expect(page.getByTestId('age-stage-label')).toContainText('마스터')
+})
+
+// CSS 모드(마켓 배경)에서는 캐릭터 자체의 크기가 연령대에 따라 실제로
+// 달라진다 — toddler는 더 작게, master는 더 크게 그려진다.
+test('in a CSS-mode (purchased) background, the character visibly scales with its age tier', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await dialog.getByRole('button', { name: '배경', exact: true }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '구매하기' }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '장착하기' }).click()
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  const wrapper = page.getByTestId('age-scale-wrapper')
+  await expect(wrapper).toBeVisible()
+  await expect(wrapper).toHaveCSS('transform', /matrix\(1\.08/)
+})
+
 // PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
 // 인사 + "직업을 선택해 주세요!" 안내를 보여준다 — 기존 PR #48의 "캐릭터가
 // 먼저 말을 거는" 메커니즘을 그대로 탄다(새 모달이 아니라 이미 검증된
