@@ -525,6 +525,31 @@ test('in a CSS-mode (purchased) background, the character visibly scales with it
   await expect(wrapper).toHaveCSS('transform', /matrix\(1\.08/)
 })
 
+// PR #52 후속 3차: 사용자가 제공한 연령대별 일러스트로 CSS 모드(마켓
+// 구매 배경)의 손그림 SVG(파란 도형)를 실제 이미지로 교체했다 — 이
+// 테스트가 "더 이상 도형이 아니라 진짜 그림이 뜬다"를 직접 검증한다.
+test('in a CSS-mode (purchased) background, the character shows the real age-tier portrait image, not the SVG shape', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '아이템 마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '아이템 마켓' })
+  await dialog.getByRole('button', { name: '배경', exact: true }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '구매하기' }).click()
+  await dialog.getByText('사무실').locator('..').getByRole('button', { name: '장착하기' }).click()
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  const characterRegion = page.getByRole('img', { name: '누리 캐릭터, 대기 중' })
+  await expect(characterRegion).toBeVisible()
+  await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
+  const portrait = page.getByTestId('age-scale-wrapper').locator('img')
+  await expect(portrait).toBeVisible()
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+})
+
 // PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
 // 인사 + "직업을 선택해 주세요!" 안내를 보여준다 — 기존 PR #48의 "캐릭터가
 // 먼저 말을 거는" 메커니즘을 그대로 탄다(새 모달이 아니라 이미 검증된

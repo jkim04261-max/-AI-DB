@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import CharacterSprite, { POSE_LABEL, type CharacterPose } from './CharacterSprite'
+import CharacterSprite, { POSE_LABEL, OUTFIT_PALETTE_OVERRIDE, type CharacterPose } from './CharacterSprite'
 import SpeechBubble from './SpeechBubble'
 import { sceneForProfession, type SceneTheme } from '../../data/growthScenes'
 import type { CompanionType } from '../../context/GrowthContext'
@@ -7,6 +7,7 @@ import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
 import type { AgeTier } from '../../data/characterAge'
+import { AGE_PORTRAIT_SRC } from '../../data/characterAgePortraits'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -116,10 +117,19 @@ export default function GameStage({
 
   const frameClassName = `relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-96 transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
 
+  // PR #52 후속 3차: CSS 모드(마켓 구매 배경 8곳)에서 그동안 손그림 SVG
+  // (파란 도형)만 쓰던 캐릭터를, 연령대를 알 때는 실제로 제공받은
+  // 초상화로 바꿔 그린다. 단, 한복처럼 그림에 실제로 색이 반영되는
+  // 옷(OUTFIT_PALETTE_OVERRIDE에 있는 outfitId)을 장착한 경우에는
+  // 커스터마이징이 눈에 안 보이게 되므로 계속 SVG를 쓴다 — 정적
+  // 초상화 한 장으로는 옷 갈아입히기를 반영할 수 없기 때문이다.
+  const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
+  const portraitSrc = ageTier && !outfitHasVisualOverride ? AGE_PORTRAIT_SRC[companionType][ageTier] : null
+  const name = COMPANION_NAME[companionType]
+  const moodIcon = MOOD_ICON[pose]
+
   if (scene.backgroundImageSrc) {
-    const name = COMPANION_NAME[companionType]
     const region = ILLUSTRATED_REGION[companionType]
-    const moodIcon = MOOD_ICON[pose]
 
     return (
       <div className={frameClassName}>
@@ -289,9 +299,13 @@ export default function GameStage({
               포즈 검증이 의존하는 바로 그 role). 평범한 div로 클릭/터치
               반응만 유지하고 캐릭터 고유의 img 역할은 그대로 보존한다.
               (쓰다듬기는 부가 연출이라 키보드 접근성을 완전히 희생하지
-              않는 선에서 tabIndex만 남겨둔다.) */}
+              않는 선에서 tabIndex만 남겨둔다.) 실제 초상화 모드에서는
+              역할/이름을 이 바깥 div가 직접 들고(일러스트 모드와 동일한
+              계약), 안쪽 <img>는 장식용(aria-hidden)으로 둔다. */}
           <div
             data-testid="character-tap-target"
+            role={portraitSrc ? 'img' : undefined}
+            aria-label={portraitSrc ? `${name} 캐릭터, ${POSE_LABEL[pose]}` : undefined}
             onClick={handleTap}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -300,15 +314,60 @@ export default function GameStage({
               }
             }}
             tabIndex={0}
-            className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
+            className={`relative cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
-            <span
-              data-testid="age-scale-wrapper"
-              className="mx-auto block w-[150px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]"
-              style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
-            >
-              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
-            </span>
+            {portraitSrc ? (
+              <span
+                data-testid="age-scale-wrapper"
+                className="mx-auto block w-[150px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[180px]"
+                style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
+              >
+                <img src={portraitSrc} alt="" aria-hidden className="h-auto w-full object-cover" />
+              </span>
+            ) : (
+              <span
+                data-testid="age-scale-wrapper"
+                className="mx-auto block w-[150px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]"
+                style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
+              >
+                <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
+              </span>
+            )}
+            {portraitSrc && moodIcon && (
+              <span
+                aria-hidden
+                className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 text-2xl drop-shadow"
+              >
+                {moodIcon}
+              </span>
+            )}
+            {portraitSrc && tier === 'student' && (
+              <span
+                data-testid="appearance-accessory-student"
+                aria-hidden
+                className="pointer-events-none absolute right-1 top-1 text-lg drop-shadow"
+              >
+                🤓
+              </span>
+            )}
+            {portraitSrc && tier === 'expert' && (
+              <span
+                data-testid="appearance-accessory-expert"
+                aria-hidden
+                className="pointer-events-none absolute right-1 top-1 text-lg drop-shadow"
+              >
+                🏅
+              </span>
+            )}
+            {portraitSrc && ageTier && AGE_TIER_EMOJI[ageTier] && (
+              <span
+                data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
+                aria-hidden
+                className="pointer-events-none absolute left-1 top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-amber-200/80 bg-amber-950/70 text-base shadow-lg"
+              >
+                {AGE_TIER_EMOJI[ageTier]}
+              </span>
+            )}
           </div>
         </div>
         <div aria-hidden className="-mt-1 h-3 w-24 rounded-[50%] bg-slate-900/15 blur-[2px] sm:w-28" />

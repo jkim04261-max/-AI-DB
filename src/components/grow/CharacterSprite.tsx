@@ -53,7 +53,12 @@ const PALETTE: Record<CompanionType, Palette> = {
 // 유저가 참고로 준 레퍼런스 일러스트의 한복(빨강·금장) 톤을 그대로
 // 가져왔다. CUSTOMIZATION_CATALOG의 visuallyWired=true 항목만 여기에
 // 올린다 — 나머지(머리/얼굴/키/목소리)는 아직 기본 PALETTE 그대로다.
-const OUTFIT_PALETTE_OVERRIDE: Partial<Record<OutfitId, Palette>> = {
+// PR #52 후속 3차: GameStage가 CSS 모드에서 실제 연령대 초상화로 바꿔
+// 그릴지 판단할 때, "지금 장착한 옷이 그림에 실제로 다르게 반영되는
+// 옷인지"를 여기(단일 출처)에서 그대로 가져다 쓴다 — 한복처럼 색이
+// 바뀌는 옷을 입었는데 초상화로 바뀌면 커스터마이징이 안 보이게
+// 되므로, 그 경우에만 기존 SVG를 계속 쓰게 하기 위함.
+export const OUTFIT_PALETTE_OVERRIDE: Partial<Record<OutfitId, Palette>> = {
   hanbok_blouse: {
     skin: '#ffe0bd',
     hair: '#4453d8',
