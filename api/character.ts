@@ -17,8 +17,8 @@ import {
   generateSelfStudy,
   type KnowledgeVerificationResult,
 } from './_lib/gemini'
-import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach } from './_lib/knowledgeLimit'
-import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy } from './_lib/studyLimit'
+import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
+import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
 import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOLD, levelForExp } from './_lib/characterGrowth'
@@ -90,6 +90,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetExam(req, res, session.sub)
       return
     }
+    if (action === 'usage') {
+      await handleGetUsage(res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -155,6 +159,25 @@ async function handleGet(res: VercelResponse, userId: number) {
   } catch (err) {
     console.error('[api/character] unexpected error on GET', err)
     res.status(500).json({ error: '캐릭터 정보를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #49: 메인 화면 상단 "행동력" HUD용 — 오늘 남은 가르치기/스스로
+// 공부하기 횟수를 소비 없이 조회만 한다(peekTeachUsage/peekStudyUsage는
+// 순수 SELECT). 새 테이블/스키마 변경 없음, 기존 reserveTeach/
+// reserveStudy 로직은 전혀 건드리지 않았다.
+async function handleGetUsage(res: VercelResponse, userId: number) {
+  try {
+    const [teach, study] = await Promise.all([peekTeachUsage(userId), peekStudyUsage(userId)])
+    res.status(200).json({
+      teachRemaining: teach.remaining,
+      teachLimit: DAILY_TEACH_LIMIT,
+      studyRemaining: study.remaining,
+      studyLimit: DAILY_STUDY_LIMIT,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on GET usage', err)
+    res.status(500).json({ error: '오늘의 행동력 정보를 불러오는 중 오류가 발생했어요.' })
   }
 }
 

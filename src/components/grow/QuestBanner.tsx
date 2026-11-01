@@ -2,10 +2,13 @@ import { Sparkles } from 'lucide-react'
 import type { QuestAction } from '../../data/characterQuests'
 import type { GameMenuAction } from './GameMenu'
 
-// PR #48: 메인 화면에 항상 보이는 "퀘스트 제안" 카드 — characterQuests.ts가
+// PR #48: 메인 화면에 항상 보이는 "퀘스트 제안" — characterQuests.ts가
 // 계산한 문구를 보여주고, 바로 그 자리에서 해당 게임 메뉴를 열 수 있는
 // 버튼을 둔다(새 화면 전환 없이 GrowPage의 기존 BottomSheet를 그대로
 // 재사용). action이 없으면(직업 미선택) 버튼 없이 안내 문구만 보여준다.
+// PR #49: 더 이상 자체 카드(흰/크림 배경)를 갖지 않는다 — 스테이지
+// 하단의 단일 목재 패널 안에서 GrowthHUD/StatGauges와 같은 줄에
+// 자연스럽게 이어 붙는다.
 export default function QuestBanner({
   text,
   action,
@@ -16,15 +19,15 @@ export default function QuestBanner({
   onAction: (action: GameMenuAction) => void
 }) {
   return (
-    <div data-testid="quest-banner" className="flex items-center justify-between gap-2 rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-100 to-yellow-50 px-3 py-2.5 shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
-        <Sparkles size={15} className="shrink-0 text-amber-600" />
+    <div data-testid="quest-banner" className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-50">
+        <Sparkles size={13} className="shrink-0 text-amber-300" />
         <span>{text}</span>
       </div>
       {action && (
         <button
           onClick={() => onAction(action)}
-          className="shrink-0 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-3 py-1.5 text-xs font-bold text-white shadow active:scale-95"
+          className="shrink-0 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 px-3 py-1.5 text-xs font-bold text-amber-950 shadow active:scale-95"
         >
           바로가기
         </button>

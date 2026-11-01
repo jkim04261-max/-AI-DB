@@ -57,6 +57,19 @@ export async function reserveStudy(userId: number): Promise<ReserveStudyResult> 
   return { ok: true, remaining: DAILY_STUDY_LIMIT - row.used_count }
 }
 
+// PR #49: 행동력(에너지) HUD에 쓸 "소비하지 않는" 조회 — peekTeachUsage와
+// 동일한 패턴의 순수 SELECT. 테이블/스키마 변경 없음.
+export async function peekStudyUsage(userId: number): Promise<{ remaining: number }> {
+  await ensureStudyUsageTable()
+
+  const result = await sql<{ used_count: number }>`
+    SELECT used_count FROM daily_study_usage
+    WHERE user_id = ${userId} AND usage_date = (now() AT TIME ZONE 'Asia/Seoul')::date
+  `
+  const used = result.rows[0]?.used_count ?? 0
+  return { remaining: Math.max(0, DAILY_STUDY_LIMIT - used) }
+}
+
 // Gemini 호출 자체가 실패했을 때(설정 오류/타임아웃/네트워크/비2xx 또는
 // 응답을 해석할 수 없는 SelfStudyParseError)만 호출 — 실제로 쓸 수 있는
 // 결과가 없었던 시도는 하루 한도에서 제외한다. generateSelfStudy가

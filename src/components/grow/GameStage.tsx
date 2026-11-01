@@ -19,6 +19,7 @@ export default function GameStage({
   pose,
   bubbleText,
   onTapCharacter,
+  onPropClick,
   tier = 'rookie',
 }: {
   companionType: CompanionType
@@ -26,6 +27,9 @@ export default function GameStage({
   pose: CharacterPose
   bubbleText: string | null
   onTapCharacter?: () => void
+  // PR #49: 소품(책상/책 등)도 클릭 가능한 인터랙션으로 — 지정하지
+  // 않으면 기존처럼 순수 장식(aria-hidden)으로 남는다.
+  onPropClick?: (emoji: string) => void
   tier?: AppearanceTier
 }) {
   const scene = sceneForProfession(profession)
@@ -41,7 +45,9 @@ export default function GameStage({
   }
 
   return (
-    <div className="relative h-56 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-64">
+    // PR #49: 이전(h-56/sm:h-64)보다 훨씬 키워 화면의 '메인 프레임'
+    // 역할을 하도록 했다 — 더 이상 작은 미리보기 박스가 아니다.
+    <div className="relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-96">
       {/* 배경 레이어 (뒤->앞), 아주 약한 패럴랙스 오프셋만 — 스크롤 리스너 없이 CSS만 사용 */}
       {scene.layers.map((layer, i) => (
         <div
@@ -61,20 +67,37 @@ export default function GameStage({
         className="absolute inset-0"
         style={{ boxShadow: 'inset 0 18px 24px -18px rgba(120, 72, 24, 0.35), inset 0 -10px 16px -10px rgba(120, 72, 24, 0.25)' }}
       />
-      {scene.props.map((emoji, i) => (
-        <span
-          key={emoji + i}
-          aria-hidden
-          className="absolute select-none text-xl opacity-80 sm:text-2xl"
-          style={{
-            left: `${12 + i * 28}%`,
-            top: `${18 + (i % 2) * 10}%`,
-            animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
-          }}
-        >
-          {emoji}
-        </span>
-      ))}
+      {scene.props.map((emoji, i) =>
+        onPropClick ? (
+          <button
+            key={emoji + i}
+            type="button"
+            aria-label={`소품 ${emoji} 살펴보기`}
+            onClick={() => onPropClick(emoji)}
+            className="absolute select-none text-xl opacity-80 transition-transform hover:scale-110 active:scale-95 sm:text-2xl"
+            style={{
+              left: `${12 + i * 28}%`,
+              top: `${18 + (i % 2) * 10}%`,
+              animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
+            }}
+          >
+            {emoji}
+          </button>
+        ) : (
+          <span
+            key={emoji + i}
+            aria-hidden
+            className="absolute select-none text-xl opacity-80 sm:text-2xl"
+            style={{
+              left: `${12 + i * 28}%`,
+              top: `${18 + (i % 2) * 10}%`,
+              animation: reduceMotion ? undefined : `grow-prop-sway ${3.4 + i * 0.6}s ease-in-out infinite`,
+            }}
+          >
+            {emoji}
+          </span>
+        ),
+      )}
 
       {/* 바닥 + PR #49: 목재 마루 느낌의 가로 결(반복 그라디언트) 오버레이 —
           색은 scene.floorClassName(Tailwind 그라디언트)이 그대로 맡고,

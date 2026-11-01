@@ -609,6 +609,29 @@ async function run() {
     )
   }
 
+  // --- PR #49: GET action=usage — 메인 화면 "행동력" HUD용 조회(소비 없음) ---
+  {
+    const res = mockRes()
+    await characterHandler({ method: 'GET', headers: {}, query: { action: 'usage' } }, res)
+    t.assert(res.statusCode === 401, 'usage 조회도 로그인 없이는 401로 거부된다')
+  }
+  {
+    // erin은 이 테스트 안에서 study-generate를 성공적으로 3번(하루 한도
+    // 끝까지) 썼고, verify-knowledge는 성공적으로 2번 썼다(위 블록들) —
+    // 실패해서 환불된 시도나 429로 막힌 시도는 소비로 치지 않는다.
+    const first = mockRes()
+    await characterHandler(erinReq({ method: 'GET', query: { action: 'usage' } }), first)
+    t.assert(first.statusCode === 200, '로그인한 사용자는 usage 조회에 성공한다 (200)')
+    t.assert(first.body.studyRemaining === 0, 'erin은 study-generate를 하루 한도(3)까지 다 써서 studyRemaining이 0이다')
+    t.assert(first.body.studyLimit === 3, 'studyLimit은 하루 한도(3)를 그대로 보여준다')
+    t.assert(first.body.teachRemaining === 8, 'erin은 verify-knowledge를 성공적으로 2번 써서 teachRemaining이 10-2=8이다')
+    t.assert(first.body.teachLimit === 10, 'teachLimit은 하루 한도(10)를 그대로 보여준다')
+
+    const second = mockRes()
+    await characterHandler(erinReq({ method: 'GET', query: { action: 'usage' } }), second)
+    t.assert(second.body.studyRemaining === 0 && second.body.teachRemaining === 8, 'usage 조회는 여러 번 호출해도 값을 소비하지 않는다(똑같은 값)')
+  }
+
   return t.summary()
 }
 

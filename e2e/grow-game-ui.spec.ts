@@ -32,6 +32,7 @@ async function mockCharacterApi(
     onExam?: (route: Route) => Promise<void>
     onQuiz?: (route: Route) => Promise<void>
     onQuizSubmit?: (route: Route) => Promise<void>
+    onUsage?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -61,6 +62,14 @@ async function mockCharacterApi(
         return
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
+      return
+    }
+    if (method === 'GET' && action === 'usage') {
+      if (options.onUsage) {
+        await options.onUsage(route)
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
       return
     }
     if (method === 'GET' && action === 'quiz' && options.onQuiz) {
@@ -406,4 +415,83 @@ test('the character proactively speaks up with the current quest, without the us
   await page.goto('/grow')
 
   await expect(page.getByTestId('speech-bubble')).toContainText('오늘도 새로운 지식을 가르치거나 스스로 공부시켜보세요')
+})
+
+// PR #49: 상단 리소스 바 — 가짜 재화를 새로 만들지 않고, 실제 캐릭터
+// exp("포인트")와 실제 서버 행동력 조회 값만 보여준다.
+test('the top resource bar shows real points and energy, not fabricated numbers', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_SINGER], // exp: 40
+    onUsage: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ teachRemaining: 7, teachLimit: 10, studyRemaining: 2, studyLimit: 3 }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('resource-bar')).toBeVisible()
+  await expect(page.getByTestId('resource-points')).toHaveText('40')
+  await expect(page.getByTestId('resource-energy')).toHaveText('9/13')
+})
+
+// PR #49: 50개 직업 카테고리형 팝업 셀렉터 — 실제 콘텐츠가 없는 48개는
+// "준비 중"으로 비활성화되고, 실제 선택 가능한 직업만 고를 수 있다.
+test('the profession picker groups jobs by category, and disables ones with no real exam content yet', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '직업 변경' }).click()
+
+  const dialog = page.getByRole('dialog', { name: '직업 선택' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('IT·개발')).toBeVisible()
+  await expect(dialog.getByText('헬스케어')).toBeVisible()
+
+  const developerButton = dialog.getByRole('button', { name: '개발자 준비 중', exact: true })
+  await expect(developerButton).toBeDisabled()
+
+  await dialog.getByRole('button', { name: '회계사' }).click()
+  await expect(page.getByText('직업을 변경할까요?')).toBeVisible()
+})
+
+// PR #49 요청 3: 텍스트 입력 폼이 바로 뜨지 않고, 짧은 "턴 진행" 연출이
+// 먼저 나온다 — InteractionPanel 내부 로직은 그대로다.
+test('choosing 가르치기 shows a brief turn transition before the teach panel opens', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('turn-transition')).toBeVisible()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+// PR #49 요청 1: 소품(책상/마이크 등)도 클릭 가능한 인터랙션 — 눌러보면
+// 짧은 반응이 온다.
+test('clicking a scene prop gives a short reaction, making it feel interactive rather than decorative', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  // 소품은 계속 흔들리는 CSS 애니메이션이 있어(grow-prop-sway) Playwright의
+  // "안정될 때까지 대기" 체크가 끝나지 않는다 — 실제 사용자는 흔들리는
+  // 이모지도 문제없이 탭할 수 있으므로 force로 그 체크만 건너뛴다.
+  await page.getByRole('button', { name: '소품 🎤 살펴보기' }).click({ force: true })
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('🎤')
 })

@@ -39,7 +39,11 @@ export const DEFAULT_SCENE: SceneTheme = {
   floorClassName: 'bg-gradient-to-t from-amber-300/70 to-amber-100/40',
 }
 
-export const SCENE_BY_PROFESSION: Record<ProfessionId, SceneTheme> = {
+// PR #49: 직업이 50종으로 늘어나면서 모든 직업에 전용 방 꾸밈을 바로
+// 만들 수는 없다 — 전용 테마가 없는 직업은 sceneForProfession이
+// DEFAULT_SCENE으로 자연스럽게 떨어진다(Partial이라 모든 키를 채울
+// 필요가 없음).
+export const SCENE_BY_PROFESSION: Partial<Record<ProfessionId, SceneTheme>> = {
   accountant: {
     label: '회계사의 공부방',
     layers: [
@@ -62,5 +66,5 @@ export const SCENE_BY_PROFESSION: Record<ProfessionId, SceneTheme> = {
 
 export function sceneForProfession(profession: ProfessionId | null): SceneTheme {
   if (!profession) return DEFAULT_SCENE
-  return SCENE_BY_PROFESSION[profession]
+  return SCENE_BY_PROFESSION[profession] ?? DEFAULT_SCENE
 }
