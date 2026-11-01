@@ -89,6 +89,33 @@ const ARM_TRANSFORM: Record<CharacterPose, { left: string; right: string }> = {
   sad: { left: 'rotate(-8deg) translate(2px, 4px)', right: 'rotate(8deg) translate(-2px, 4px)' },
 }
 
+// PR #52 후속: 배지만으로는 "연령대별로 실제로 다른 아바타"라는 느낌이
+// 약하다는 피드백을 받아, 머리/몸 비율 자체를 연령대별로 다르게 그린다
+// — 2~3살은 머리가 크고 몸이 작은 "아기자기한" 비율, 10대는 그 중간,
+// 20대부터는 기존 비율 그대로(scale 1 — 과거 호출부·테스트와 100%
+// 동일). 머리 그룹은 머리가 목과 만나는 지점(y=116)을 축으로, 몸 그룹은
+// 목깃(y=120)을 축으로 각각 따로 확대/축소해서 두 그룹이 거의 같은
+// 지점에서 자연스럽게 이어지도록 했다(좌표를 직접 고치는 대신 그룹
+// 전체를 감싸는 transform만 추가 — 기존 포즈·표정 좌표는 전혀 안 바뀜).
+const AGE_TIER_HEAD_SCALE: Record<AgeTier, number> = {
+  toddler: 1.22,
+  teen: 1.08,
+  junior_20s: 1,
+  career_30s: 1,
+  veteran_40s: 1,
+  master_50s: 1,
+}
+const AGE_TIER_BODY_SCALE: Record<AgeTier, number> = {
+  toddler: 0.78,
+  teen: 0.9,
+  junior_20s: 1,
+  career_30s: 1,
+  veteran_40s: 1,
+  master_50s: 1,
+}
+const HEAD_PIVOT_Y = 116 // 머리(반지름 44, 중심 y=72)의 아래쪽 끝 — 목과 만나는 지점
+const BODY_PIVOT_Y = 120 // 몸통 사각형의 윗변 — 목깃이 달리는 지점
+
 export default function CharacterSprite({
   companionType,
   pose = 'idle',
@@ -122,6 +149,11 @@ export default function CharacterSprite({
   // sad 포즈에서는 눈이 정적으로 살짝 처진 느낌을 주기 위해 눈 위쪽을
   // 피부색 사각형으로 조금 더 가린다(애니메이션인 깜빡임과는 별개).
   const staticLidHeight = pose === 'sad' ? 5 : 0
+  const headScale = ageTier ? AGE_TIER_HEAD_SCALE[ageTier] : 1
+  const bodyScale = ageTier ? AGE_TIER_BODY_SCALE[ageTier] : 1
+  const headGroupTransform = `translate(80 ${HEAD_PIVOT_Y}) scale(${headScale}) translate(-80 -${HEAD_PIVOT_Y})`
+  const bodyGroupTransform = `translate(80 ${BODY_PIVOT_Y}) scale(${bodyScale}) translate(-80 -${BODY_PIVOT_Y})`
+  const isToddler = ageTier === 'toddler'
 
   return (
     <svg
@@ -136,72 +168,95 @@ export default function CharacterSprite({
       style={{ filter: 'drop-shadow(0 6px 6px rgba(120, 72, 24, 0.22))' }}
     >
       <g className="grow-sprite-body">
-        {/* 뒤쪽 팔 (studying 시 노트를 받치는 왼팔, 몸보다 먼저 그려 뒤에 깔림) */}
-        <rect
-          x={-8}
-          y={0}
-          width={16}
-          height={46}
-          rx={8}
-          fill={palette.skin}
-          transform={`translate(40 128) ${arm.left}`}
-        />
-
-        {/* 다리/신발 */}
-        <rect x={50} y={184} width={20} height={14} rx={6} fill="#ffffff" />
-        <rect x={90} y={184} width={20} height={14} rx={6} fill="#ffffff" />
-        <rect x={48} y={194} width={24} height={10} rx={5} fill={palette.outfitDark} />
-        <rect x={88} y={194} width={24} height={10} rx={5} fill={palette.outfitDark} />
-
-        {/* 몸(옷) */}
-        <rect x={34} y={120} width={92} height={72} rx={26} fill={palette.outfit} />
-        {/* PR #50: 한복 블라우스 전용 — 금장 깃 테두리(레퍼런스 일러스트의
-            금박 자수 느낌을 단순화한 라인) */}
-        {isHanbok && (
-          <path
-            d="M 38 124 Q 80 112 122 124"
-            stroke={palette.accent}
-            strokeWidth={3}
-            fill="none"
-            strokeLinecap="round"
+        {/* PR #52 후속: 몸 그룹 — 목깃(y=120)을 축으로 연령대별 bodyScale
+            만큼 확대/축소한다. 내부 좌표는 전혀 안 바꾸고 그룹 전체에만
+            transform을 건다. */}
+        <g transform={bodyGroupTransform}>
+          {/* 뒤쪽 팔 (studying 시 노트를 받치는 왼팔, 몸보다 먼저 그려 뒤에 깔림) */}
+          <rect
+            x={-8}
+            y={0}
+            width={16}
+            height={46}
+            rx={8}
+            fill={palette.skin}
+            transform={`translate(40 128) ${arm.left}`}
           />
-        )}
-        {/* 목깃 */}
-        <path d="M 66 120 L 80 136 L 94 120 Z" fill={palette.outfitDark} />
-        {isNuri ? (
-          // 누리: 작은 넥타이
-          <path d="M 78 128 L 82 128 L 85 150 L 80 158 L 75 150 Z" fill={palette.accent} />
-        ) : (
-          // 두리: 작은 리본
-          <>
-            <path d="M 80 130 L 68 122 L 70 136 Z" fill={palette.accent} />
-            <path d="M 80 130 L 92 122 L 90 136 Z" fill={palette.accent} />
-            <circle cx={80} cy={130} r={4} fill={palette.accent} />
-          </>
-        )}
 
-        {/* 앞쪽 팔 (오른팔) */}
-        <rect
-          x={-8}
-          y={0}
-          width={16}
-          height={46}
-          rx={8}
-          fill={palette.skin}
-          transform={`translate(120 128) ${arm.right}`}
-        />
+          {/* 다리/신발 */}
+          <rect x={50} y={184} width={20} height={14} rx={6} fill="#ffffff" />
+          <rect x={90} y={184} width={20} height={14} rx={6} fill="#ffffff" />
+          <rect x={48} y={194} width={24} height={10} rx={5} fill={palette.outfitDark} />
+          <rect x={88} y={194} width={24} height={10} rx={5} fill={palette.outfitDark} />
 
-        {/* studying 전용: 작은 공책 */}
-        {pose === 'studying' && (
-          <g transform="translate(60 150) rotate(-8)">
-            <rect x={0} y={0} width={34} height={24} rx={3} fill="#ffffff" stroke="#d8dbe6" strokeWidth={1.5} />
-            <line x1={6} y1={8} x2={28} y2={8} stroke="#c7cbe0" strokeWidth={1.5} />
-            <line x1={6} y1={14} x2={28} y2={14} stroke="#c7cbe0" strokeWidth={1.5} />
-            <line x1={6} y1={20} x2={22} y2={20} stroke="#c7cbe0" strokeWidth={1.5} />
-          </g>
-        )}
+          {/* 몸(옷) */}
+          <rect x={34} y={120} width={92} height={72} rx={26} fill={palette.outfit} />
+          {/* PR #50: 한복 블라우스 전용 — 금장 깃 테두리(레퍼런스 일러스트의
+              금박 자수 느낌을 단순화한 라인) */}
+          {isHanbok && (
+            <path
+              d="M 38 124 Q 80 112 122 124"
+              stroke={palette.accent}
+              strokeWidth={3}
+              fill="none"
+              strokeLinecap="round"
+            />
+          )}
+          {/* 목깃 — PR #52 후속: 2~3살(toddler)은 넥타이/리본 대신 아기자기한
+              둥근 턱받이(bib) + 단추 하나로 유아복 느낌을 낸다. */}
+          {isToddler ? (
+            <>
+              <path d="M 60 120 Q 80 134 100 120 L 95 140 Q 80 148 65 140 Z" fill={palette.outfitDark} />
+              <circle cx={80} cy={132} r={4} fill={palette.accent} />
+            </>
+          ) : (
+            <>
+              <path d="M 66 120 L 80 136 L 94 120 Z" fill={palette.outfitDark} />
+              {isNuri ? (
+                // 누리: 작은 넥타이
+                <path d="M 78 128 L 82 128 L 85 150 L 80 158 L 75 150 Z" fill={palette.accent} />
+              ) : (
+                // 두리: 작은 리본
+                <>
+                  <path d="M 80 130 L 68 122 L 70 136 Z" fill={palette.accent} />
+                  <path d="M 80 130 L 92 122 L 90 136 Z" fill={palette.accent} />
+                  <circle cx={80} cy={130} r={4} fill={palette.accent} />
+                </>
+              )}
+            </>
+          )}
 
-        {/* happy 전용: 반짝이는 별 */}
+          {/* 앞쪽 팔 (오른팔) */}
+          <rect
+            x={-8}
+            y={0}
+            width={16}
+            height={46}
+            rx={8}
+            fill={palette.skin}
+            transform={`translate(120 128) ${arm.right}`}
+          />
+
+          {/* studying 전용: 작은 공책 */}
+          {pose === 'studying' && (
+            <g transform="translate(60 150) rotate(-8)">
+              <rect x={0} y={0} width={34} height={24} rx={3} fill="#ffffff" stroke="#d8dbe6" strokeWidth={1.5} />
+              <line x1={6} y1={8} x2={28} y2={8} stroke="#c7cbe0" strokeWidth={1.5} />
+              <line x1={6} y1={14} x2={28} y2={14} stroke="#c7cbe0" strokeWidth={1.5} />
+              <line x1={6} y1={20} x2={22} y2={20} stroke="#c7cbe0" strokeWidth={1.5} />
+            </g>
+          )}
+
+          {/* tier='expert' 전용: 작은 전문가 배지 — 레벨 6 이상부터 보임 */}
+          {tier === 'expert' && (
+            <g data-testid="appearance-accessory-expert">
+              <circle cx={104} cy={136} r={7} fill="#ffd54a" stroke={palette.outfitDark} strokeWidth={1.5} />
+              <path d="M 104 132 l 2 4 l 4 0.5 l -3 3 l 0.7 4 l -3.7 -2 l -3.7 2 l 0.7 -4 l -3 -3 l 4 -0.5 Z" fill={palette.accent} />
+            </g>
+          )}
+        </g>
+
+        {/* happy 전용: 반짝이는 별 — 머리/몸 비율과 무관한 장식이라 그대로 둔다 */}
         {pose === 'happy' && (
           <>
             <path
@@ -222,75 +277,83 @@ export default function CharacterSprite({
           </>
         )}
 
-        {/* sad 전용: 눈물 한 방울 */}
-        {pose === 'sad' && <path d="M 106 78 q 5 8 0 13 a 5 5 0 1 1 0 -13 Z" fill="#7cc3ff" opacity={0.85} />}
+        {/* PR #52 후속: 머리 그룹 — 목과 만나는 지점(y=116)을 축으로
+            연령대별 headScale만큼 확대/축소한다. 눈·눈썹·입 등 얼굴
+            부위는 전부 이 안에 있어야 머리 크기가 바뀌어도 자연스럽게
+            같이 움직인다. */}
+        <g transform={headGroupTransform}>
+          {/* sad 전용: 눈물 한 방울 */}
+          {pose === 'sad' && <path d="M 106 78 q 5 8 0 13 a 5 5 0 1 1 0 -13 Z" fill="#7cc3ff" opacity={0.85} />}
 
-        {/* 머리 */}
-        <circle cx={80} cy={72} r={44} fill={palette.skin} />
+          {/* 머리 */}
+          <circle cx={80} cy={72} r={44} fill={palette.skin} />
 
-        {/* 머리카락 */}
-        {isNuri ? (
-          <path
-            d="M 36 66 Q 32 20 80 22 Q 128 20 124 66 Q 118 40 100 44 Q 90 30 80 44 Q 70 30 60 44 Q 42 40 36 66 Z"
-            fill={palette.hair}
-          />
-        ) : (
-          <>
-            <circle cx={30} cy={78} r={16} fill={palette.hair} />
-            <circle cx={130} cy={78} r={16} fill={palette.hair} />
+          {/* 머리카락 */}
+          {isNuri ? (
             <path
-              d="M 34 60 Q 30 18 80 18 Q 130 18 126 60 Q 116 36 80 40 Q 44 36 34 60 Z"
+              d="M 36 66 Q 32 20 80 22 Q 128 20 124 66 Q 118 40 100 44 Q 90 30 80 44 Q 70 30 60 44 Q 42 40 36 66 Z"
               fill={palette.hair}
             />
-            <path d="M 24 70 L 16 62 L 20 76 Z" fill={palette.hairDark} />
-            <path d="M 136 70 L 144 62 L 140 76 Z" fill={palette.hairDark} />
-          </>
-        )}
+          ) : (
+            <>
+              <circle cx={30} cy={78} r={16} fill={palette.hair} />
+              <circle cx={130} cy={78} r={16} fill={palette.hair} />
+              <path
+                d="M 34 60 Q 30 18 80 18 Q 130 18 126 60 Q 116 36 80 40 Q 44 36 34 60 Z"
+                fill={palette.hair}
+              />
+              <path d="M 24 70 L 16 62 L 20 76 Z" fill={palette.hairDark} />
+              <path d="M 136 70 L 144 62 L 140 76 Z" fill={palette.hairDark} />
+            </>
+          )}
 
-        {/* 볼터치 */}
-        <circle cx={54} cy={84} r={7} fill="#ff9fb0" opacity={0.5} />
-        <circle cx={106} cy={84} r={7} fill="#ff9fb0" opacity={0.5} />
+          {/* 볼터치 */}
+          <circle cx={54} cy={84} r={7} fill="#ff9fb0" opacity={0.5} />
+          <circle cx={106} cy={84} r={7} fill="#ff9fb0" opacity={0.5} />
 
-        {/* 눈썹 */}
-        <rect x={48} y={54} width={18} height={5} rx={2.5} fill={palette.hairDark} transform={`translate(0 0) ${eyebrow.left}`} style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
-        <rect x={94} y={54} width={18} height={5} rx={2.5} fill={palette.hairDark} transform={`translate(0 0) ${eyebrow.right}`} style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
+          {/* 눈썹 */}
+          <rect x={48} y={54} width={18} height={5} rx={2.5} fill={palette.hairDark} transform={`translate(0 0) ${eyebrow.left}`} style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
+          <rect x={94} y={54} width={18} height={5} rx={2.5} fill={palette.hairDark} transform={`translate(0 0) ${eyebrow.right}`} style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
 
-        {/* 눈 (흰자 + 눈동자) */}
-        <circle cx={60} cy={72} r={10} fill="#ffffff" />
-        <circle cx={100} cy={72} r={10} fill="#ffffff" />
-        <circle cx={61} cy={73} r={5} fill="#2a2a33" />
-        <circle cx={101} cy={73} r={5} fill="#2a2a33" />
-        {staticLidHeight > 0 && (
-          <>
-            <rect x={50} y={62} width={20} height={staticLidHeight} fill={palette.skin} />
-            <rect x={90} y={62} width={20} height={staticLidHeight} fill={palette.skin} />
-          </>
-        )}
-        {/* 깜빡임 눈꺼풀 (CSS 애니메이션으로 주기적으로 덮임) */}
-        <rect className="grow-sprite-eyelid grow-sprite-eyelid-left" x={48} y={62} width={24} height={20} fill={palette.skin} />
-        <rect className="grow-sprite-eyelid grow-sprite-eyelid-right" x={88} y={62} width={24} height={20} fill={palette.skin} />
+          {/* 눈 (흰자 + 눈동자) */}
+          <circle cx={60} cy={72} r={10} fill="#ffffff" />
+          <circle cx={100} cy={72} r={10} fill="#ffffff" />
+          <circle cx={61} cy={73} r={5} fill="#2a2a33" />
+          <circle cx={101} cy={73} r={5} fill="#2a2a33" />
+          {staticLidHeight > 0 && (
+            <>
+              <rect x={50} y={62} width={20} height={staticLidHeight} fill={palette.skin} />
+              <rect x={90} y={62} width={20} height={staticLidHeight} fill={palette.skin} />
+            </>
+          )}
+          {/* 깜빡임 눈꺼풀 (CSS 애니메이션으로 주기적으로 덮임) */}
+          <rect className="grow-sprite-eyelid grow-sprite-eyelid-left" x={48} y={62} width={24} height={20} fill={palette.skin} />
+          <rect className="grow-sprite-eyelid grow-sprite-eyelid-right" x={88} y={62} width={24} height={20} fill={palette.skin} />
 
-        {/* 입 */}
-        <g className="grow-sprite-mouth-group">
-          <path d={MOUTH_PATH[pose]} stroke={palette.accent} strokeWidth={3.5} strokeLinecap="round" fill="none" />
+          {/* 입 */}
+          <g className="grow-sprite-mouth-group">
+            <path d={MOUTH_PATH[pose]} stroke={palette.accent} strokeWidth={3.5} strokeLinecap="round" fill="none" />
+          </g>
+
+          {/* tier='student' 전용: 작은 안경 — 레벨 3 이상부터 보임 */}
+          {tier === 'student' && (
+            <g data-testid="appearance-accessory-student" stroke={palette.hairDark} strokeWidth={2.5} fill="none">
+              <circle cx={60} cy={73} r={11} />
+              <circle cx={100} cy={73} r={11} />
+              <line x1={71} y1={73} x2={89} y2={73} />
+            </g>
+          )}
+
+          {/* ageTier==='veteran_40s' 전용: 금테 안경 — 눈 좌표를 그대로
+              따라가야 해서 머리 그룹 안으로 옮겼다. */}
+          {ageTier === 'veteran_40s' && (
+            <g data-testid="age-badge-veteran-40s" stroke="#d4af37" strokeWidth={2.5} fill="none">
+              <circle cx={60} cy={73} r={11} />
+              <circle cx={100} cy={73} r={11} />
+              <line x1={71} y1={73} x2={89} y2={73} />
+            </g>
+          )}
         </g>
-
-        {/* tier='student' 전용: 작은 안경 — 레벨 3 이상부터 보임 */}
-        {tier === 'student' && (
-          <g data-testid="appearance-accessory-student" stroke={palette.hairDark} strokeWidth={2.5} fill="none">
-            <circle cx={60} cy={73} r={11} />
-            <circle cx={100} cy={73} r={11} />
-            <line x1={71} y1={73} x2={89} y2={73} />
-          </g>
-        )}
-
-        {/* tier='expert' 전용: 작은 전문가 배지 — 레벨 6 이상부터 보임 */}
-        {tier === 'expert' && (
-          <g data-testid="appearance-accessory-expert">
-            <circle cx={104} cy={136} r={7} fill="#ffd54a" stroke={palette.outfitDark} strokeWidth={1.5} />
-            <path d="M 104 132 l 2 4 l 4 0.5 l -3 3 l 0.7 4 l -3.7 -2 l -3.7 2 l 0.7 -4 l -3 -3 l 4 -0.5 Z" fill={palette.accent} />
-          </g>
-        )}
 
         {/* PR #52: 6단계 연령대 배지 — 아직 전용 일러스트는 없어서(요청
             범위대로), 머리 위에 작은 장식 하나로 지금 어느 연령대인지
@@ -315,14 +378,6 @@ export default function CharacterSprite({
             {/* 작은 서류가방 — 커리어 확장기 */}
             <rect x={-10} y={-4} width={20} height={13} rx={2} fill={palette.accent} />
             <rect x={-5} y={-8} width={10} height={5} rx={1.5} fill="none" stroke={palette.accent} strokeWidth={2} />
-          </g>
-        )}
-        {ageTier === 'veteran_40s' && (
-          <g data-testid="age-badge-veteran-40s" stroke="#d4af37" strokeWidth={2.5} fill="none">
-            {/* 금테 안경 — 베테랑/시니어 느낌(student 안경과 같은 자리, 금색) */}
-            <circle cx={60} cy={73} r={11} />
-            <circle cx={100} cy={73} r={11} />
-            <line x1={71} y1={73} x2={89} y2={73} />
           </g>
         )}
         {ageTier === 'master_50s' && (
