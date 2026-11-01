@@ -1,13 +1,20 @@
 name: CI
 
-# Runs on every PR targeting main (open, new commits, reopen) and on
-# direct pushes to main, so a change is checked both before and after it
-# lands. No repository secrets are required — every external call (Gemini,
-# Resend) a test exercises is mocked in tests/*.test.cjs, and api/*.ts
-# itself only needs real env vars (AUTH_SECRET, GEMINI_API_KEY, Postgres)
-# at actual runtime on Vercel, never at type-check/build/test time here.
+# Runs on every PR targeting main (open, new commits, reopen, and base
+# branch changed) and on direct pushes to main, so a change is checked
+# both before and after it lands. `edited` is included because GitHub's
+# default pull_request types (opened/synchronize/reopened) do NOT include
+# a base-branch retarget — a PR whose base is switched to main (e.g. one
+# that was stacked on another branch and is now rebased onto main via the
+# API) would otherwise never get a check run at all, even though its diff
+# against the new base is exactly what needs checking. No repository
+# secrets are required — every external call (Gemini, Resend) a test
+# exercises is mocked in tests/*.test.cjs, and api/*.ts itself only needs
+# real env vars (AUTH_SECRET, GEMINI_API_KEY, Postgres) at actual runtime
+# on Vercel, never at type-check/build/test time here.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
   push:
     branches: [main]
