@@ -504,6 +504,29 @@ test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of t
   await expect(page.getByTestId('age-stage-label')).toContainText('마스터')
 })
 
+// PR #52 후속 4차: 기본 로비(일러스트 모드)는 PR #50의 고정된 한 장짜리
+// 그림이라 배지/테두리만으로는 "캐릭터 자체가 바뀐다"는 느낌이 약했다
+// — 유저가 실제 화면에서 연령대가 안 바뀐다고 재차 확인해준 뒤,
+// 실제 연령대 초상화를 캐릭터 영역 위에 카드로 띄우도록 고쳤다.
+// 레벨이 바뀌면(토들러→마스터) 이 카드의 그림 자체가 바뀌는지 검증한다.
+test('the default (illustrated) lobby also shows the real age-tier portrait over the character, and swaps when the tier changes', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  const portrait = page.getByTestId('illustrated-age-portrait-nuri')
+  await expect(portrait).toBeVisible()
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
+  await page.reload()
+
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-master_50s/)
+})
+
 // CSS 모드(마켓 배경)에서는 캐릭터 자체의 크기가 연령대에 따라 실제로
 // 달라진다 — toddler는 더 작게, master는 더 크게 그려진다.
 test('in a CSS-mode (purchased) background, the character visibly scales with its age tier', async ({ page }) => {

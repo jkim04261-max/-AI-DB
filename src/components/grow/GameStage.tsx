@@ -194,7 +194,13 @@ export default function GameStage({
 
         {/* 지금 선택된 캐릭터 영역 — role=img/aria-label은 기존 CharacterSprite와
             동일한 포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로
-            "지금 이 캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐). */}
+            "지금 이 캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐).
+            PR #52 후속 4차: 그림 속에 원래 그려진 누리·두리는 고정된
+            모습이라 연령대가 바뀌어도 그대로다 — 그래서 실제 연령대
+            초상화를 이 영역 가운데에 카드 형태로 띄워, 기본 로비
+            화면에서도 "지금 몇 살 단계인지"가 실제로 다른 그림으로
+            보이게 한다(badge/ring 테두리만으로는 부족하다는 반복된
+            피드백에 대한 대응). */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -207,7 +213,7 @@ export default function GameStage({
             }
           }}
           tabIndex={0}
-          className="absolute cursor-pointer rounded-2xl transition-shadow duration-200"
+          className="absolute cursor-pointer overflow-visible rounded-2xl transition-shadow duration-200"
           style={{
             left: region.left,
             top: region.top,
@@ -217,7 +223,17 @@ export default function GameStage({
               ? 'inset 0 0 0 3px rgba(212, 175, 55, 0.9), 0 0 16px 2px rgba(212, 175, 55, 0.5)'
               : 'inset 0 0 0 2px rgba(212, 175, 55, 0.5)',
           }}
-        />
+        >
+          {portraitSrc && (
+            <img
+              data-testid={`illustrated-age-portrait-${companionType}`}
+              src={portraitSrc}
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-1/2 h-auto w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-2xl object-cover shadow-xl ring-2 ring-amber-100/80 transition-transform duration-300"
+            />
+          )}
+        </div>
       </div>
     )
   }
