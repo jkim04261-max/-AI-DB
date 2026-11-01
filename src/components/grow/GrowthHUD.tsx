@@ -19,12 +19,15 @@ export default function GrowthHUD({
   profession,
   exp,
   recentLine,
+  ageStageLabel,
 }: {
   name: string
   stage: 'child' | 'adult'
   profession: ProfessionId | null
   exp: number
   recentLine: string | null
+  // PR #52: 6단계 연령대 중 지금 단계의 짧은 이름(예: "왕초보 유아").
+  ageStageLabel?: string
 }) {
   const { level, expIntoLevel, expForNextLevel } = levelProgress(exp)
   const progressPct = expForNextLevel > 0 ? Math.min(100, Math.round((expIntoLevel / expForNextLevel) * 100)) : 0
@@ -35,6 +38,7 @@ export default function GrowthHUD({
         <div className="flex items-center gap-2">
           <p className="text-sm font-bold text-amber-50">{name}</p>
           <span className="text-[11px] text-amber-200/70">{STAGE_LABEL[stage]}</span>
+          {ageStageLabel && <span data-testid="age-stage-label" className="text-[11px] text-amber-200/70">· {ageStageLabel}</span>}
         </div>
         <div data-testid="profession-badge" className="flex items-center gap-1 rounded-full bg-amber-50/15 px-2.5 py-1 text-[11px] font-medium text-amber-100">
           <Briefcase size={11} />

@@ -33,6 +33,7 @@ async function mockCharacterApi(
     onQuiz?: (route: Route) => Promise<void>
     onQuizSubmit?: (route: Route) => Promise<void>
     onUsage?: (route: Route) => Promise<void>
+    onSetProfession?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -82,6 +83,24 @@ async function mockCharacterApi(
     }
     if (method === 'GET' && !action) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: options.characters ?? [] }) })
+      return
+    }
+    // PR #52: 직업 저장(PATCH) — 고른 직업을 그대로 반영한 캐릭터를
+    // 돌려준다(기존 목록의 해당 캐릭터를 찾아 profession만 덮어씀).
+    if (method === 'PATCH') {
+      if (options.onSetProfession) {
+        await options.onSetProfession(route)
+        return
+      }
+      const body = route.request().postDataJSON() as { companionType?: string; profession?: string }
+      const base = (options.characters ?? []).find(
+        (c): c is Record<string, unknown> => typeof c === 'object' && c !== null && (c as Record<string, unknown>).companion_type === body.companionType,
+      )
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ character: { ...base, profession: body.profession } }),
+      })
       return
     }
     await route.fallback()
@@ -439,6 +458,53 @@ test('the top resource bar shows real points and energy, not fabricated numbers'
   await expect(page.getByTestId('resource-bar')).toBeVisible()
   await expect(page.getByTestId('resource-points')).toHaveText('40')
   await expect(page.getByTestId('resource-energy')).toHaveText('9/13')
+})
+
+// PR #52: 캐릭터 6단계 연령대 — character.level에서 그때그때 계산하는
+// 표시용 값(DB 변경 없음). Lv.1인 NURI_SINGER는 toddler(2~3살) 단계다.
+test('the HUD shows the character\'s current 6-stage age tier, derived from level', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-stage-label')).toContainText('왕초보 유아')
+})
+
+// PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
+// 인사 + "직업을 선택해 주세요!" 안내를 보여준다 — 기존 PR #48의 "캐릭터가
+// 먼저 말을 거는" 메커니즘을 그대로 탄다(새 모달이 아니라 이미 검증된
+// 퀘스트 배너/말풍선 흐름).
+test('a brand-new character greets the user and asks them to pick a profession', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByText('안녕하세요! 저는 아직 아무것도 모르는 아기예요. 직업을 선택해 주세요!')).toBeVisible()
+})
+
+// PR #52 요청 2번: 처음 직업을 고르면("요가강사" 등) 그 직업에 맞는
+// 아동 말투 대사("나 OO 되고 싶어요! ...")가 바로 뜬다 — 나중에 레벨이
+// 올라간 뒤 "직업 변경"을 할 때는 이 유아 대사를 보여주지 않는다
+// (applyProfession의 isFirstPick 조건).
+test('picking a profession for the first time shows a toddler-voiced line about that job', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] }) // level: 1 → toddler, 처음 선택
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '직업 선택' }).click()
+
+  const dialog = page.getByRole('dialog', { name: '직업 선택' })
+  await dialog.getByRole('button', { name: '회계사' }).click()
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('나 회계사 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!')
 })
 
 // PR #49에서 만든 50개 직업 카테고리형 팝업 셀렉터. PR #51(직업 선택

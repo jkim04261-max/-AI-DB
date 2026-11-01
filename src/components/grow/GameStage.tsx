@@ -6,6 +6,7 @@ import type { CompanionType } from '../../context/GrowthContext'
 import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
+import type { AgeTier } from '../../data/characterAge'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -22,6 +23,18 @@ const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
   happy: '✨',
   sad: '💧',
   studying: '📖',
+}
+
+// PR #52: 일러스트 모드에서 쓰는 연령대 배지 — CharacterSprite(CSS 모드)
+// 의 SVG 배지와 같은 의도를 이모지로 표현한다(실일러스트는 통짜 이미지라
+// 레이어 분리가 안 됨 — PR #50과 같은 한계). junior_20s는 기존
+// "기본 모습"과 같은 뜻이라 배지를 붙이지 않는다.
+const AGE_TIER_EMOJI: Partial<Record<AgeTier, string>> = {
+  toddler: '🍼',
+  teen: '📘',
+  career_30s: '💼',
+  veteran_40s: '👓',
+  master_50s: '🏆',
 }
 
 // PR #46: the "room" the character stands in. 두 가지 렌더링 모드가 있다:
@@ -43,6 +56,7 @@ export default function GameStage({
   tier = 'rookie',
   outfitId,
   backgroundOverride,
+  ageTier,
 }: {
   companionType: CompanionType
   profession: ProfessionId | null
@@ -58,6 +72,9 @@ export default function GameStage({
   // PR #50: 마켓에서 구매해 장착한 배경(BACKGROUND_SCENES) — 지정하면
   // 기존 직업 기반 배경(sceneForProfession) 대신 이걸 그린다.
   backgroundOverride?: SceneTheme
+  // PR #52: 6단계 연령대 — 지정하지 않으면 배지를 아예 그리지 않는다
+  // (기존 화면과 100% 동일).
+  ageTier?: AgeTier
 }) {
   const scene = backgroundOverride ?? sceneForProfession(profession)
   const [tapped, setTapped] = useState(false)
@@ -126,6 +143,16 @@ export default function GameStage({
             style={{ left: region.anchorLeft }}
           >
             🏅
+          </span>
+        )}
+        {ageTier && AGE_TIER_EMOJI[ageTier] && (
+          <span
+            data-testid={`age-badge-${ageTier.replace(/_/g, '-')}`}
+            aria-hidden
+            className="pointer-events-none absolute top-[20%] -translate-x-1/2 text-base drop-shadow"
+            style={{ left: region.anchorLeft }}
+          >
+            {AGE_TIER_EMOJI[ageTier]}
           </span>
         )}
 
@@ -250,7 +277,7 @@ export default function GameStage({
             className={`cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             <span className="mx-auto block w-[150px] [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]">
-              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} />
+              <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
             </span>
           </div>
         </div>

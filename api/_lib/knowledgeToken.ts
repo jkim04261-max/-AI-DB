@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { KnowledgeVerificationStatus } from './gemini'
+import type { AgeTier } from './characterAge'
 
 // How long a verify-knowledge result stays saveable. Long enough for a user
 // to read the result and decide, short enough to keep any leaked/replayed
@@ -8,6 +9,7 @@ const TOKEN_TTL_MS = 30 * 60 * 1000
 
 const VERIFICATION_STATUSES = new Set<string>(['appropriate', 'needs_revision', 'unverifiable'])
 const KNOWLEDGE_SOURCES = new Set<string>(['user_taught', 'ai_generated'])
+const AGE_TIER_VALUES = new Set<string>(['toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'])
 
 export type KnowledgeSource = 'user_taught' | 'ai_generated'
 
@@ -28,6 +30,10 @@ export interface KnowledgeVerificationTokenPayload {
   // other field here, so save-knowledge never has to trust a client claim
   // about where a knowledge entry came from either.
   source: KnowledgeSource
+  // PR #52: Gemini가 이 지식에 매긴 "필요한 최소 연령대" — 서명해 두면
+  // save-knowledge가 저장 시점의 캐릭터 레벨과 다시 비교해 연령 게이트를
+  // 우회할 수 없게 한다(토큰의 status만 바꿔서는 안 되는 것과 동일한 이유).
+  requiredAgeTier: AgeTier
 }
 
 function getAuthSecret(): string {
@@ -96,6 +102,8 @@ export function verifyKnowledgeVerificationToken(token: unknown): KnowledgeVerif
       typeof parsed.suggestion !== 'string' ||
       typeof parsed.source !== 'string' ||
       !KNOWLEDGE_SOURCES.has(parsed.source) ||
+      typeof parsed.requiredAgeTier !== 'string' ||
+      !AGE_TIER_VALUES.has(parsed.requiredAgeTier) ||
       typeof parsed.exp !== 'number'
     ) {
       return null
@@ -114,6 +122,7 @@ export function verifyKnowledgeVerificationToken(token: unknown): KnowledgeVerif
       issues: parsed.issues,
       suggestion: parsed.suggestion,
       source: parsed.source as KnowledgeSource,
+      requiredAgeTier: parsed.requiredAgeTier as AgeTier,
     }
   } catch {
     return null

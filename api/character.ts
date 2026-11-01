@@ -23,6 +23,7 @@ import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_
 import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
 import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOLD, levelForExp } from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
+import { ageTierForLevel, meetsAgeTier, AGE_TIER_LABEL, ageBlockedMessage } from './_lib/characterAge'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #51(직업 선택 제한 해제, 2026-11-01): 처음엔 회계사·가수 2개만
@@ -444,10 +445,20 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       return
     }
 
+    // PR #52: 캐릭터의 "지금" 연령대와, Gemini가 이 지식에 매긴 "필요한
+    // 최소 연령대"를 비교한다. 내용 자체는 적합(appropriate)해도 캐릭터가
+    // 아직 너무 어리면 저장을 막는다 — character.level에서 그때그때
+    // 계산하므로 DB 변경이 전혀 없다(api/_lib/characterAge.ts).
+    const characterAgeTier = ageTierForLevel(character.level)
+    const ageBlocked = verification.status === 'appropriate' && !meetsAgeTier(characterAgeTier, verification.requiredAgeTier)
+
     // Signed server-side, over the exact (user, character, title, content)
     // just graded — save-knowledge below requires this token instead of
     // trusting a client-resent verification object, so neither the status
     // nor the content can be altered between verifying and saving.
+    // requiredAgeTier도 함께 서명해서, handleSaveKnowledge가 저장 시점의
+    // 최신 캐릭터 레벨과 다시 비교할 수 있게 한다(토큰을 그대로 재전송해
+    // 연령 게이트를 우회할 수 없다).
     const verificationToken = signKnowledgeVerification({
       userId,
       characterId: character.id,
@@ -460,6 +471,7 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       issues: verification.issues,
       suggestion: verification.suggestion,
       source: 'user_taught',
+      requiredAgeTier: verification.requiredAgeTier,
     })
 
     // PR #45 checkpoint 3.6: this exchange is persisted to character_messages
@@ -469,7 +481,9 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
     // must survive a refresh. The character's reply text is built here
     // (server-side), not trusted from the client, so what's persisted is
     // exactly what the server actually decided to say.
-    const characterReply = buildTeachReply(verification)
+    // 나이 제한에 막혔으면 기존 buildTeachReply(적합/수정 필요/검증 불가
+    // 문구)를 쓰지 않고, 요청하신 아동 말투의 거절 메시지를 보여준다.
+    const characterReply = ageBlocked ? ageBlockedMessage(AGE_TIER_LABEL[verification.requiredAgeTier]) : buildTeachReply(verification)
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -499,6 +513,9 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       characterReply,
       remaining: reserved.remaining,
       dailyTeachLimit: DAILY_TEACH_LIMIT,
+      ageBlocked,
+      characterAgeTier,
+      requiredAgeTier: verification.requiredAgeTier,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on verify-knowledge', err)
@@ -565,6 +582,12 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       return
     }
 
+    // PR #52: 스스로 공부하기도 같은 연령 게이트를 적용한다 — 캐릭터가
+    // 아직 어린데 스스로 전문 자격증 수준 지식을 만들어 저장하는 건
+    // 일관성이 없다고 판단했다(handleVerifyKnowledge와 동일한 로직).
+    const characterAgeTier = ageTierForLevel(character.level)
+    const ageBlocked = study.status === 'appropriate' && !meetsAgeTier(characterAgeTier, study.requiredAgeTier)
+
     const verificationToken = signKnowledgeVerification({
       userId,
       characterId: character.id,
@@ -577,6 +600,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       issues: study.issues,
       suggestion: study.suggestion,
       source: 'ai_generated',
+      requiredAgeTier: study.requiredAgeTier,
     })
 
     // PR #45 checkpoint 3.6: only one line here (no "user" line — the user
@@ -584,7 +608,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
     // the same rule applies: persisted regardless of status, refunded on
     // log failure so a result the client can't later reload is never
     // presented as if it happened.
-    const characterReply = buildStudyReply(study.title, study)
+    const characterReply = ageBlocked ? ageBlockedMessage(AGE_TIER_LABEL[study.requiredAgeTier]) : buildStudyReply(study.title, study)
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -611,6 +635,9 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       characterReply,
       remaining: reserved.remaining,
       dailyStudyLimit: DAILY_STUDY_LIMIT,
+      ageBlocked,
+      characterAgeTier,
+      requiredAgeTier: study.requiredAgeTier,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on study-generate', err)
@@ -679,6 +706,14 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     }
     if (!character.profession) {
       res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    // PR #52: verify-knowledge에서 이미 한 번 막았어도, 서명된 토큰만으로
+    // 저장을 직접 시도하는 우회를 막기 위해 저장 시점에도 다시 검사한다
+    // (캐릭터의 "현재" 레벨 기준 — verify 이후 레벨이 바뀌었을 수도 있다).
+    if (!meetsAgeTier(ageTierForLevel(character.level), tokenPayload.requiredAgeTier)) {
+      res.status(400).json({ error: ageBlockedMessage(AGE_TIER_LABEL[tokenPayload.requiredAgeTier]) })
       return
     }
 

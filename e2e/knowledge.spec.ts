@@ -109,6 +109,44 @@ test('a character with no profession shows guidance instead of a teach form', as
   await expect(page.getByRole('button', { name: '가르치기' })).toBeDisabled()
 })
 
+// PR #52: 연령 제한 지식 흡수 — 내용은 적합해도 캐릭터가 아직 너무 어리면
+// (ageBlocked) 저장 버튼이 비활성화되고, 아동 말투의 거절 안내가 뜬다.
+test('teaching a knowledge item too advanced for the character\'s current age tier shows a rejection notice and disables saving', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'fake-token',
+          characterReply: '아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~',
+          remaining: 9,
+          dailyTeachLimit: 10,
+          ageBlocked: true,
+          characterAgeTier: 'toddler',
+          requiredAgeTier: 'junior_20s',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await page.getByPlaceholder('지식 제목').fill('공인회계사 자격증 취득 절차')
+  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('시험 과목과 응시 자격을 포함한 절차.')
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+
+  await expect(page.getByText('아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~')).toBeVisible()
+  await expect(page.getByTestId('age-blocked-notice')).toBeVisible()
+  await expect(page.getByRole('button', { name: '저장' })).toBeDisabled()
+})
+
 test('verifying appropriate knowledge shows the result and enables 저장, which is not sent until clicked', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })

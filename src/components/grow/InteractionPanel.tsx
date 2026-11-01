@@ -8,6 +8,7 @@ import {
   type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
+import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
 import type { CharacterPose } from './CharacterSprite'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -117,6 +118,10 @@ export default function InteractionPanel({
   // user_taught or ai_generated), not the `verification` object above
   // (display only).
   const [verificationToken, setVerificationToken] = useState<string | null>(null)
+  // PR #52: 내용은 적합해도 캐릭터가 아직 어려서 막힌 경우 — 저장 버튼을
+  // 숨기고, 몇 살이 되면 다시 가르칠 수 있는지 안내한다.
+  const [ageBlocked, setAgeBlocked] = useState(false)
+  const [requiredAgeTier, setRequiredAgeTier] = useState<AgeTier | null>(null)
   const [teachRemaining, setTeachRemaining] = useState<{ remaining: number; limit: number } | null>(null)
   const [studyRemaining, setStudyRemaining] = useState<{ remaining: number; limit: number } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -143,11 +148,13 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title, content })
       setVerificationToken(result.verificationToken)
       setTeachRemaining({ remaining: result.remaining, limit: result.dailyTeachLimit })
+      setAgeBlocked(result.ageBlocked)
+      setRequiredAgeTier(result.requiredAgeTier)
       // characterReply is server-generated and already persisted
       // server-side (character_messages) — display exactly that text, not
       // a locally invented one.
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
+      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
     } catch (err) {
       setVerification(null)
       setVerifiedSnapshot(null)
@@ -171,8 +178,10 @@ export default function InteractionPanel({
       setVerifiedSnapshot({ title: result.knowledge.title, content: result.knowledge.content })
       setVerificationToken(result.verificationToken)
       setStudyRemaining({ remaining: result.remaining, limit: result.dailyStudyLimit })
+      setAgeBlocked(result.ageBlocked)
+      setRequiredAgeTier(result.requiredAgeTier)
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' ? 'happy' : 'sad', 2500)
+      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '스스로 공부하는 중 오류가 발생했어요.')
       flashPose('sad', 2500)
@@ -189,7 +198,7 @@ export default function InteractionPanel({
   }
 
   const handleSave = async () => {
-    if (!verification || isStale || verification.status !== 'appropriate' || !verifiedSnapshot || !verificationToken) return
+    if (!verification || isStale || verification.status !== 'appropriate' || ageBlocked || !verifiedSnapshot || !verificationToken) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -200,6 +209,8 @@ export default function InteractionPanel({
       setVerification(null)
       setVerifiedSnapshot(null)
       setVerificationToken(null)
+      setAgeBlocked(false)
+      setRequiredAgeTier(null)
       if (recordsOpen) {
         await loadRecords()
       }
@@ -316,6 +327,11 @@ export default function InteractionPanel({
           >
             {VERIFICATION_LABEL[verification.status]}
           </span>
+          {ageBlocked && requiredAgeTier && (
+            <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-600">
+              🔒 {AGE_TIER_LABEL[requiredAgeTier]}부터 배울 수 있는 지식이에요 — 아직은 저장할 수 없어요.
+            </p>
+          )}
           {verification.explanation && <p className="text-xs text-slate-600">설명: {verification.explanation}</p>}
           {verification.relevance && <p className="text-xs text-slate-600">관련성: {verification.relevance}</p>}
           {verification.issues && <p className="text-xs text-red-500">문제점: {verification.issues}</p>}
@@ -347,7 +363,7 @@ export default function InteractionPanel({
 
           <button
             onClick={() => void handleSave()}
-            disabled={saving || isStale || verification.status !== 'appropriate'}
+            disabled={saving || isStale || verification.status !== 'appropriate' || ageBlocked}
             className="self-start rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
           >
             {saving ? '저장 중...' : '저장'}

@@ -1,6 +1,7 @@
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
+import type { AgeTier } from '../../data/characterAge'
 
 // Independent from GrowthContext's CharacterPose-less status types — this
 // is purely a *visual* state, driven today only by the existing
@@ -94,6 +95,7 @@ export default function CharacterSprite({
   size = 96,
   tier = 'rookie',
   outfitId,
+  ageTier,
 }: {
   companionType: CompanionType
   pose?: CharacterPose
@@ -106,6 +108,10 @@ export default function CharacterSprite({
   // 또는 매핑이 없으면 기존 기본 PALETTE 그대로 — 과거 호출부/테스트는
   // 전혀 안 바뀐다.
   outfitId?: OutfitId
+  // PR #52: 6단계 연령대(아직 실제 전용 일러스트는 없음 — 요청하신
+  // 범위대로, 기존 SVG에 작은 장식 배지만 연령대별로 다르게 얹는다).
+  // 지정하지 않으면 기존 모습과 100% 동일(배지 없음).
+  ageTier?: AgeTier
 }) {
   const palette = (outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId]) || PALETTE[companionType]
   const isHanbok = outfitId === 'hanbok_blouse'
@@ -283,6 +289,49 @@ export default function CharacterSprite({
           <g data-testid="appearance-accessory-expert">
             <circle cx={104} cy={136} r={7} fill="#ffd54a" stroke={palette.outfitDark} strokeWidth={1.5} />
             <path d="M 104 132 l 2 4 l 4 0.5 l -3 3 l 0.7 4 l -3.7 -2 l -3.7 2 l 0.7 -4 l -3 -3 l 4 -0.5 Z" fill={palette.accent} />
+          </g>
+        )}
+
+        {/* PR #52: 6단계 연령대 배지 — 아직 전용 일러스트는 없어서(요청
+            범위대로), 머리 위에 작은 장식 하나로 지금 어느 연령대인지
+            표시한다. ageTier가 없으면(undefined) 기존 모습과 완전히
+            동일 — 과거 호출부/테스트는 전혀 영향받지 않는다. */}
+        {ageTier === 'toddler' && (
+          <g data-testid="age-badge-toddler" transform="translate(80 26)">
+            {/* 아기 고무젖꼭지 */}
+            <circle cx={0} cy={0} r={7} fill="#ffd1dc" stroke="#ffffff" strokeWidth={1.5} />
+            <rect x={-3} y={6} width={6} height={5} rx={2} fill="#ffffff" />
+          </g>
+        )}
+        {ageTier === 'teen' && (
+          <g data-testid="age-badge-teen" transform="translate(80 22)">
+            {/* 작은 책 — 학생 느낌 */}
+            <rect x={-9} y={-6} width={18} height={13} rx={1.5} fill="#7cc3ff" stroke="#ffffff" strokeWidth={1.2} />
+            <line x1={0} y1={-6} x2={0} y2={7} stroke="#ffffff" strokeWidth={1.2} />
+          </g>
+        )}
+        {ageTier === 'career_30s' && (
+          <g data-testid="age-badge-career-30s" transform="translate(80 24)">
+            {/* 작은 서류가방 — 커리어 확장기 */}
+            <rect x={-10} y={-4} width={20} height={13} rx={2} fill={palette.accent} />
+            <rect x={-5} y={-8} width={10} height={5} rx={1.5} fill="none" stroke={palette.accent} strokeWidth={2} />
+          </g>
+        )}
+        {ageTier === 'veteran_40s' && (
+          <g data-testid="age-badge-veteran-40s" stroke="#d4af37" strokeWidth={2.5} fill="none">
+            {/* 금테 안경 — 베테랑/시니어 느낌(student 안경과 같은 자리, 금색) */}
+            <circle cx={60} cy={73} r={11} />
+            <circle cx={100} cy={73} r={11} />
+            <line x1={71} y1={73} x2={89} y2={73} />
+          </g>
+        )}
+        {ageTier === 'master_50s' && (
+          <g data-testid="age-badge-master-50s" transform="translate(80 24)">
+            {/* 장인증서 리본 배지 — 요청 1번의 "장인증서 수여 및 최종 완결
+                단계"를 시각적으로 표시하는 가장 중요한 배지 */}
+            <path d="M -5 2 L -8 14 L 0 9 L 8 14 L 5 2 Z" fill="#b5293f" />
+            <circle cx={0} cy={0} r={9} fill="#ffd54a" stroke="#d4af37" strokeWidth={2} />
+            <path d="M 0 -4 l 2 4 l 4 0.5 l -3 3 l 0.7 4 l -3.7 -2 l -3.7 2 l 0.7 -4 l -3 -3 l 4 -0.5 Z" fill="#b5293f" />
           </g>
         )}
       </g>

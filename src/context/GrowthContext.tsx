@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import type { ProfessionId } from '../data/characterProfessions'
+import type { AgeTier } from '../data/characterAge'
 
 export type CompanionType = 'nuri' | 'duri'
 
@@ -122,6 +123,12 @@ interface GrowthContextValue {
     characterReply: string
     remaining: number
     dailyTeachLimit: number
+    // PR #52: 내용은 적합해도 캐릭터가 아직 이 지식에 필요한 연령대보다
+    // 어리면 true — 저장은 서버(save-knowledge)에서도 다시 막히지만,
+    // 화면에서 "저장" 버튼을 미리 숨기는 데 쓴다.
+    ageBlocked: boolean
+    characterAgeTier: AgeTier
+    requiredAgeTier: AgeTier
   }>
   studyGenerate: (companionType: CompanionType) => Promise<{
     knowledge: { title: string; content: string }
@@ -130,6 +137,9 @@ interface GrowthContextValue {
     characterReply: string
     remaining: number
     dailyStudyLimit: number
+    ageBlocked: boolean
+    characterAgeTier: AgeTier
+    requiredAgeTier: AgeTier
   }>
   saveKnowledge: (
     companionType: CompanionType,
@@ -297,6 +307,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterReply?: string
       remaining?: number
       dailyTeachLimit?: number
+      ageBlocked?: boolean
+      characterAgeTier?: AgeTier
+      requiredAgeTier?: AgeTier
       error?: string
     }
     if (!res.ok || !data.verification || !data.verificationToken || !data.characterReply) {
@@ -308,6 +321,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterReply: data.characterReply,
       remaining: data.remaining ?? 0,
       dailyTeachLimit: data.dailyTeachLimit ?? 0,
+      ageBlocked: data.ageBlocked ?? false,
+      characterAgeTier: data.characterAgeTier ?? 'toddler',
+      requiredAgeTier: data.requiredAgeTier ?? 'toddler',
     }
   }, [])
 
@@ -328,6 +344,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterReply?: string
       remaining?: number
       dailyStudyLimit?: number
+      ageBlocked?: boolean
+      characterAgeTier?: AgeTier
+      requiredAgeTier?: AgeTier
       error?: string
     }
     if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken || !data.characterReply) {
@@ -340,6 +359,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterReply: data.characterReply,
       remaining: data.remaining ?? 0,
       dailyStudyLimit: data.dailyStudyLimit ?? 0,
+      ageBlocked: data.ageBlocked ?? false,
+      characterAgeTier: data.characterAgeTier ?? 'toddler',
+      requiredAgeTier: data.requiredAgeTier ?? 'toddler',
     }
   }, [])
 

@@ -21,6 +21,7 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
+import { ageTierForLevel, AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -263,11 +264,18 @@ export default function GrowPage() {
 
   const applyProfession = async (profession: ProfessionId) => {
     if (!character) return
+    // PR #52 요청 2번: 처음 직업을 고르는 순간(이전까지 직업이 없었고,
+    // 아직 2~3살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
+    // "직업 변경"으로 바꿀 때는 이미 성장한 캐릭터라 이 대사가 어색하다.
+    const isFirstPick = !character.profession && ageTier === 'toddler'
     setSavingProfession(true)
     setError(null)
     try {
       await setProfession(character.companionType, profession)
       setPendingChange(null)
+      if (isFirstPick) {
+        showBubble(toddlerProfessionGreeting(PROFESSION_LABEL[profession]))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '직업을 저장하는 중 오류가 발생했어요.')
     } finally {
@@ -352,6 +360,9 @@ export default function GrowPage() {
       })
     : null
   const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
+  // PR #52: 6단계 연령대 — character.level에서 그때그때 계산하는
+  // 표시용 파생값(DB 변경 없음, characterAppearance.ts의 tier와 같은 원칙).
+  const ageTier = character ? ageTierForLevel(character.level) : 'toddler'
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (
@@ -399,6 +410,7 @@ export default function GrowPage() {
                 onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
                 onPropClick={handlePropClick}
                 tier={tier}
+                ageTier={ageTier}
                 outfitId={inventory.equippedOutfit[character.companionType]}
                 // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
                 // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
@@ -429,6 +441,7 @@ export default function GrowPage() {
                 profession={character.profession}
                 exp={character.exp}
                 recentLine={recentLine}
+                ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
               />
               {statGauges && <StatGaugesPanel values={statGauges} />}
               <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
