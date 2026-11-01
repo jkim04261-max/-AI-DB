@@ -69,9 +69,11 @@ export interface StatMeta {
   colorClassName: string
 }
 
+// PR #49: 보석톤 팔레트로 교체 — 따뜻한 카드 배경(크림/목재) 위에서도
+// 각 스탯이 또렷이 구분되도록 했다(계산 로직은 변경 없음).
 export const STAT_META: StatMeta[] = [
-  { key: 'knowledge', label: '지식', colorClassName: 'from-indigo-400 to-blue-400' },
-  { key: 'work', label: '업무', colorClassName: 'from-emerald-400 to-teal-400' },
-  { key: 'communication', label: '소통', colorClassName: 'from-amber-400 to-orange-400' },
-  { key: 'creativity', label: '창의', colorClassName: 'from-pink-400 to-rose-400' },
+  { key: 'knowledge', label: '지식', colorClassName: 'from-amber-500 to-yellow-400' },
+  { key: 'work', label: '업무', colorClassName: 'from-emerald-500 to-teal-400' },
+  { key: 'communication', label: '소통', colorClassName: 'from-sky-500 to-blue-400' },
+  { key: 'creativity', label: '창의', colorClassName: 'from-rose-500 to-fuchsia-400' },
 ]

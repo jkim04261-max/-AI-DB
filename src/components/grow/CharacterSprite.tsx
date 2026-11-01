@@ -103,6 +103,9 @@ export default function CharacterSprite({
       role="img"
       aria-label={`${name} 캐릭터, ${POSE_LABEL[pose]}`}
       className={`grow-sprite-pose-${pose}`}
+      // PR #49: 2.5D 입체감을 위한 부드러운 드롭섀도 — 포즈/라벨/구조는
+      // 전혀 바꾸지 않는 순수 시각 효과.
+      style={{ filter: 'drop-shadow(0 6px 6px rgba(120, 72, 24, 0.22))' }}
     >
       <g className="grow-sprite-body">
         {/* 뒤쪽 팔 (studying 시 노트를 받치는 왼팔, 몸보다 먼저 그려 뒤에 깔림) */}

@@ -41,7 +41,7 @@ export default function GameStage({
   }
 
   return (
-    <div className="relative h-56 w-full overflow-hidden rounded-2xl sm:h-64">
+    <div className="relative h-56 w-full overflow-hidden rounded-2xl ring-4 ring-amber-800/80 ring-inset sm:h-64">
       {/* 배경 레이어 (뒤->앞), 아주 약한 패럴랙스 오프셋만 — 스크롤 리스너 없이 CSS만 사용 */}
       {scene.layers.map((layer, i) => (
         <div
@@ -52,8 +52,15 @@ export default function GameStage({
         />
       ))}
 
-      {/* 창문 느낌의 둥근 사각형 + 소품(이모지) — 실제 에셋 전까지의 임시 표현 */}
-      <div aria-hidden className="absolute right-4 top-3 h-12 w-16 rounded-lg bg-white/50 ring-1 ring-white/70 sm:h-14 sm:w-20" />
+      {/* PR #49: 목재 액자 느낌의 창문 — 이중 테두리로 프레임감을 준다
+          (실제 에셋 전까지의 임시 표현, 구조는 PR #46과 동일). */}
+      <div aria-hidden className="absolute right-4 top-3 h-12 w-16 rounded-lg border-2 border-amber-700/70 bg-sky-100/60 ring-2 ring-amber-900/40 ring-offset-1 ring-offset-amber-50/60 sm:h-14 sm:w-20" />
+      {/* PR #49: 상단 비네트 — 방 안쪽으로 시선이 모이는 아늑한 느낌 */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{ boxShadow: 'inset 0 18px 24px -18px rgba(120, 72, 24, 0.35), inset 0 -10px 16px -10px rgba(120, 72, 24, 0.25)' }}
+      />
       {scene.props.map((emoji, i) => (
         <span
           key={emoji + i}
@@ -69,8 +76,18 @@ export default function GameStage({
         </span>
       ))}
 
-      {/* 바닥 */}
+      {/* 바닥 + PR #49: 목재 마루 느낌의 가로 결(반복 그라디언트) 오버레이 —
+          색은 scene.floorClassName(Tailwind 그라디언트)이 그대로 맡고,
+          결 무늬는 별도 레이어로 얹어 인라인 style과 충돌하지 않게 했다. */}
       <div aria-hidden className={`absolute inset-x-0 bottom-0 h-16 ${scene.floorClassName}`} />
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-16"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(0deg, rgba(120, 72, 24, 0.12) 0px, rgba(120, 72, 24, 0.12) 2px, transparent 2px, transparent 16px)',
+        }}
+      />
 
       {/* 캐릭터 + 그림자 + 말풍선 */}
       <div className="absolute inset-x-0 bottom-2 flex flex-col items-center">

@@ -6,14 +6,14 @@ import { STAT_META, type StatGauges } from '../../data/characterStats'
 // 내려주며, 이 컴포넌트는 그 숫자를 그려주기만 한다(새 API 호출 없음).
 export default function StatGaugesPanel({ values }: { values: StatGauges }) {
   return (
-    <div data-testid="stat-gauges" className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+    <div data-testid="stat-gauges" className="grid grid-cols-2 gap-2 rounded-2xl border border-amber-200 bg-amber-50/70 p-3 shadow-sm">
       {STAT_META.map((meta) => (
         <div key={meta.key} className="flex flex-col gap-1">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-amber-800">
             <span>{meta.label}</span>
-            <span className="text-slate-400">{values[meta.key]}</span>
+            <span className="text-amber-700/60">{values[meta.key]}</span>
           </div>
-          <span className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <span className="h-1.5 overflow-hidden rounded-full bg-amber-900/10">
             <span
               data-testid={`stat-gauge-${meta.key}`}
               className={`block h-full rounded-full bg-gradient-to-r ${meta.colorClassName} transition-[width] duration-500`}

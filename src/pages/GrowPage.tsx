@@ -231,12 +231,12 @@ export default function GrowPage() {
   if (!authLoading && !user) {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6 px-4 py-8">
-        <h1 className="text-xl font-bold text-slate-900">AI 키우기</h1>
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white p-8 text-center">
-          <p className="text-sm text-slate-500">로그인하면 누리·두리를 키울 수 있어요.</p>
+        <h1 className="text-xl font-bold text-amber-900">AI 키우기</h1>
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-8 text-center">
+          <p className="text-sm text-amber-700/80">로그인하면 누리·두리를 키울 수 있어요.</p>
           <button
             onClick={() => navigate('/login')}
-            className="mt-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 px-4 py-2.5 text-sm font-semibold text-white"
+            className="mt-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-semibold text-white"
           >
             로그인
           </button>
@@ -267,17 +267,17 @@ export default function GrowPage() {
   const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-3 px-3 py-4 sm:px-4">
+    <div className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-slate-900">AI 키우기</h1>
+        <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
         {characters.length > 0 && (
-          <div className="flex gap-1 rounded-full bg-slate-100 p-1">
+          <div className="flex gap-1 rounded-full bg-amber-100 p-1">
             {characters.map((c) => (
               <button
                 key={c.companionType}
                 onClick={() => setSelected(c.companionType)}
                 className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  selected === c.companionType ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'
+                  selected === c.companionType ? 'bg-white text-amber-700 shadow-sm' : 'text-amber-500/70'
                 }`}
               >
                 {COMPANION_LABEL[c.companionType]}
@@ -331,21 +331,21 @@ export default function GrowPage() {
             <button
               onClick={() => setChangingProfession((v) => !v)}
               disabled={savingProfession}
-              className="text-xs font-semibold text-indigo-500 hover:text-indigo-600 disabled:opacity-50"
+              className="text-xs font-semibold text-amber-600 hover:text-amber-700 disabled:opacity-50"
             >
               {character.profession ? '직업 변경' : '직업 선택'}
             </button>
           </div>
 
           {changingProfession && (
-            <div className="flex flex-col gap-2 rounded-xl border border-dashed border-slate-300 p-3">
+            <div className="flex flex-col gap-2 rounded-xl border border-dashed border-amber-300 p-3">
               <div className="flex gap-2">
                 {otherProfessions.map((p) => (
                   <button
                     key={p.id}
                     onClick={() => (character.profession === null ? void applyProfession(p.id) : setPendingChange(p.id))}
                     disabled={savingProfession}
-                    className="flex-1 rounded-xl border border-slate-200 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    className="flex-1 rounded-xl border border-amber-200 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
                   >
                     {savingProfession ? '저장 중...' : p.label}
                   </button>
@@ -354,7 +354,7 @@ export default function GrowPage() {
               <button
                 onClick={() => setChangingProfession(false)}
                 disabled={savingProfession}
-                className="self-start text-xs text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                className="self-start text-xs text-amber-500 hover:text-amber-700 disabled:opacity-50"
               >
                 취소
               </button>
@@ -362,19 +362,19 @@ export default function GrowPage() {
           )}
 
           <GameMenu disabled={!character.profession} onSelect={handleMenuSelect} />
-          {!character.profession && <p className="text-center text-xs text-slate-400">직업을 선택하면 게임 메뉴를 쓸 수 있어요.</p>}
+          {!character.profession && <p className="text-center text-xs text-amber-600/70">직업을 선택하면 게임 메뉴를 쓸 수 있어요.</p>}
         </div>
       )}
 
       {!loading && (!hasNuri || !hasDuri) && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-5">
-          <p className="text-sm font-semibold text-slate-700">새 캐릭터 만들기</p>
+        <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 p-5">
+          <p className="text-sm font-semibold text-amber-900">새 캐릭터 만들기</p>
           <div className="flex gap-3">
             {!hasNuri && (
               <button
                 onClick={() => handleCreate('nuri')}
                 disabled={creating !== null}
-                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
                 {creating === 'nuri' ? '만드는 중...' : '누리 만들기 (남)'}
               </button>
@@ -383,7 +383,7 @@ export default function GrowPage() {
               <button
                 onClick={() => handleCreate('duri')}
                 disabled={creating !== null}
-                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
                 {creating === 'duri' ? '만드는 중...' : '두리 만들기 (여)'}
               </button>
@@ -394,11 +394,11 @@ export default function GrowPage() {
 
       {pendingChange && character && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-            <h2 className="text-base font-bold text-slate-900">직업을 변경할까요?</h2>
-            <p className="mt-1.5 text-sm text-slate-500">
+          <div className="w-full max-w-sm rounded-2xl bg-amber-50 p-5 shadow-xl">
+            <h2 className="text-base font-bold text-amber-900">직업을 변경할까요?</h2>
+            <p className="mt-1.5 text-sm text-amber-700/80">
               {COMPANION_LABEL[character.companionType]}의 직업을{' '}
-              <span className="font-semibold text-slate-700">{PROFESSION_LABEL[pendingChange]}</span>
+              <span className="font-semibold text-amber-900">{PROFESSION_LABEL[pendingChange]}</span>
               로 변경해요. 캐릭터 자체는 삭제되지 않아요.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -406,7 +406,7 @@ export default function GrowPage() {
                 type="button"
                 onClick={() => setPendingChange(null)}
                 disabled={savingProfession}
-                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                className="rounded-full px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
               >
                 취소
               </button>
@@ -414,7 +414,7 @@ export default function GrowPage() {
                 type="button"
                 onClick={() => void applyProfession(pendingChange)}
                 disabled={savingProfession}
-                className="rounded-full bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 disabled:opacity-50"
+                className="rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-sm font-semibold text-white hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50"
               >
                 {savingProfession ? '변경 중...' : '변경'}
               </button>

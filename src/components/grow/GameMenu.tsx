@@ -36,9 +36,9 @@ export default function GameMenu({
           onClick={() => onSelect(action)}
           disabled={disabled}
           // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄)
-          className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white py-2.5 text-[11px] font-semibold text-slate-600 active:scale-95 disabled:opacity-40 disabled:active:scale-100"
+          className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50/70 py-2.5 text-[11px] font-semibold text-amber-900 shadow-sm active:scale-95 disabled:opacity-40 disabled:active:scale-100"
         >
-          <Icon size={18} className="text-indigo-500" />
+          <Icon size={18} className="text-amber-600" />
           {label}
         </button>
       ))}

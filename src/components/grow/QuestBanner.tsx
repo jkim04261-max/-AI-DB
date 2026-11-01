@@ -16,15 +16,15 @@ export default function QuestBanner({
   onAction: (action: GameMenuAction) => void
 }) {
   return (
-    <div data-testid="quest-banner" className="flex items-center justify-between gap-2 rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-2.5">
-      <div className="flex items-center gap-2 text-sm font-semibold text-indigo-700">
-        <Sparkles size={15} className="shrink-0 text-indigo-500" />
+    <div data-testid="quest-banner" className="flex items-center justify-between gap-2 rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-100 to-yellow-50 px-3 py-2.5 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+        <Sparkles size={15} className="shrink-0 text-amber-600" />
         <span>{text}</span>
       </div>
       {action && (
         <button
           onClick={() => onAction(action)}
-          className="shrink-0 rounded-full bg-indigo-500 px-3 py-1.5 text-xs font-bold text-white active:scale-95"
+          className="shrink-0 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-3 py-1.5 text-xs font-bold text-white shadow active:scale-95"
         >
           바로가기
         </button>
