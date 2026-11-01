@@ -234,10 +234,19 @@ export default function GrowPage() {
     if (!character) return
     if (questBubbleShownRef.current.has(character.companionType)) return
     if (character.profession && examPassed === null) return
-    questBubbleShownRef.current.add(character.companionType)
+    // "이미 보여줬다"는 예약 시점이 아니라 실제로 뜬 시점에 표시한다 —
+    // examPassed/quest.text가 서로 다른 타이밍에 차례로 들어오면(시험
+    // 결과 먼저, 지식 개수 나중 등) 이 effect가 여러 번 다시 실행되는데,
+    // 예약 시점에 바로 "표시함"으로 마크해버리면 재실행 때마다 걸리는
+    // 취소(cleanup)만 일어나고 다시 예약은 안 되어 말풍선이 영영 안
+    // 뜨는 문제가 있었다(CI에서 재현됨). 매번 최신 quest.text로 다시
+    // 예약하고, 실제로 발동할 때만 "표시함"으로 마크한다.
+    const companionType = character.companionType
+    const text = quest.text
     questBubbleTimeoutRef.current = setTimeout(() => {
       questBubbleTimeoutRef.current = null
-      showBubble(quest.text)
+      questBubbleShownRef.current.add(companionType)
+      showBubble(text)
     }, 900)
     return () => {
       if (questBubbleTimeoutRef.current) {
