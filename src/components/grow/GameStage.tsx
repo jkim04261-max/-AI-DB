@@ -135,6 +135,8 @@ export default function GameStage({
 
   if (scene.backgroundImageSrc) {
     const region = ILLUSTRATED_REGION[companionType]
+    const otherCompanionType: CompanionType = companionType === 'nuri' ? 'duri' : 'nuri'
+    const otherRegion = ILLUSTRATED_REGION[otherCompanionType]
 
     return (
       <div className={frameClassName}>
@@ -150,6 +152,25 @@ export default function GameStage({
           aria-hidden
           className="absolute inset-0 z-0"
           style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
+        />
+        {/* PR #53: "누리·두리가 같이 나오는 복잡한 그림" 피드백 — 그림
+            자체(두 캐릭터가 함께 그려진 한 장)는 지울 수 없지만, 지금
+            보고 있지 않은 쪽을 어둡게 가려서 시선이 자연스럽게 활성
+            캐릭터(초상화 카드) 쪽으로만 모이게 한다. Tailwind의
+            bg-slate-950/55(oklab 기반 색)가 이 환경에서 거의 안 보일
+            정도로 흐리게 렌더링되는 문제가 있어(스크린샷으로 직접
+            확인), 일반 sRGB rgba()를 인라인으로 직접 써서 피했다. */}
+        <div
+          data-testid="illustrated-inactive-dim"
+          aria-hidden
+          className="absolute z-[5] rounded-2xl transition-opacity duration-300"
+          style={{
+            left: otherRegion.left,
+            top: otherRegion.top,
+            width: otherRegion.width,
+            height: otherRegion.height,
+            backgroundColor: 'rgba(2, 6, 23, 0.6)',
+          }}
         />
 
         {/* 지금 선택된 캐릭터 영역 — role=img/aria-label은 기존 CharacterSprite와

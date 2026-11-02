@@ -7,7 +7,7 @@ import AIProviders from '../components/AIProviders'
 
 export default function HomePage() {
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-8 lg:py-14">
+    <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-8 lg:max-w-none lg:py-14 xl:px-10">
       <div className="flex flex-col items-center gap-4 text-center">
         <span className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white shadow-lg shadow-indigo-100">
           <Sparkles size={26} fill="currentColor" />

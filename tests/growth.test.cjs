@@ -314,11 +314,19 @@ async function run() {
   t.assert(daveSaveAgain.body.expAwarded === 0, '중복 제출로는 XP가 추가 지급되지 않는다')
   t.assert(daveSaveAgain.body.exp === 10, 'XP가 여전히 10이다(중복으로 늘지 않음)')
 
-  // --- 6: 레벨업 — 10번 더 지식을 저장하면(총 11회, 110XP) Lv.2로 올라간다.
+  // --- 6: 레벨업 — 10번 더 지식을 저장한다.
   // 기존 지식 검증 하루 10회 제한(knowledgeLimit.ts)과는 별개 테스트이므로,
   // 날짜를 넘겨 dave의 하루 검증 횟수를 리셋한다(이 루프 자체가 10회를
   // 쓰므로, 바로 앞의 req-growth-1 검증 1회와 합치면 11회가 되어 제한에
   // 걸리기 때문).
+  //
+  // PR #53 요청 3번(8~9살 단계에서 지식 '적합' 5회 누적 시 청소년기로
+  // 자동 진화) 때문에, 순수 XP 곡선만으로 Lv.2까지 오르는 옛 시나리오는
+  // 더 이상 성립하지 않는다 — dave의 두리는 req-growth-1(1번째)에 이어
+  // 이 루프의 i=0~2(2~4번째)까지 토들러인 채로 쌓이다가, i=3에서 누적
+  // 5번째 저장이 되어 일반 XP 가산(40+10=50) 직후 곧장 Lv.5(청소년기)로
+  // 진화한다. 그 뒤(i=4~9)는 이미 teen이라 진화 로직이 다시 발동하지
+  // 않고, 평범하게 10XP씩만 쌓인다(Lv.5→6 임계값 500XP에는 한참 못 미침).
   mock.setFakeDate('2026-02-01')
   for (let i = 0; i < 10; i++) {
     const v = mockRes()
@@ -339,19 +347,15 @@ async function run() {
       }),
       s,
     )
-    // dave의 두리는 req-growth-1(10XP)로 이미 10XP를 가진 상태에서 시작 —
-    // 이 루프에서 i번째(0-indexed) 저장 후 누적 XP는 10 + (i+1)*10.
-    // i=8에서 정확히 100XP에 도달해 Lv.2로 레벨업한다.
-    if (i === 8) {
-      t.assert(s.body.exp === 100, '정확히 100XP에 도달한 저장에서')
-      t.assert(s.body.level === 2, '레벨업 임계값(100XP)에 도달하면 Lv.2가 된다')
-      t.assert(s.body.leveledUp === true, '이번 저장에서 실제로 레벨업이 일어났다고 응답한다')
-      t.assert(s.body.savedReply.includes('레벨업'), '레벨업 시 캐릭터 대사에 레벨업 사실이 포함된다')
+    if (i === 3) {
+      t.assert(s.body.level === 5, '누적 5번째 적합 저장(req-growth-1 + i=0~3)에서 청소년기(Lv.5)로 진화한다')
+      t.assert(s.body.exp >= 1000, '진화 시 exp도 Lv.5 임계값(누적 1000) 이상으로 올라간다')
+      t.assert(s.body.leveledUp === true, '진화도 레벨업으로 취급된다')
+      t.assert(s.body.savedReply.includes('청소년기로 진화했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
     }
     if (i === 9) {
-      t.assert(s.body.exp === 110, '그다음 저장에서는 누적 XP가 110으로 늘어난다')
-      t.assert(s.body.level === 2, '이미 Lv.2이므로 레벨은 그대로다')
-      t.assert(s.body.leveledUp === false, '이미 레벨업한 뒤의 저장은 다시 레벨업으로 보고되지 않는다')
+      t.assert(s.body.level === 5, '진화 이후에는 10XP씩만 쌓이므로(Lv.5→6은 500XP 필요) 루프가 끝나도 여전히 Lv.5다')
+      t.assert(s.body.leveledUp === false, '진화 이후의 저장들은 평범한 저장이라 레벨업으로 보고되지 않는다')
     }
   }
 
@@ -361,7 +365,7 @@ async function run() {
     const res = mockRes()
     await characterHandler(daveReq({ method: 'GET' }), res)
     const duri = res.body.characters.find((c) => c.companion_type === 'duri')
-    t.assert(duri.level === 2 && duri.exp === 110, '캐릭터 목록 조회에도 최신 level/exp가 반영된다')
+    t.assert(duri.level === 5 && duri.exp === 1060, '캐릭터 목록 조회에도 최신 level/exp가 반영된다(진화 이후 누적값 기준)')
   }
 
   // checkpoint 5: 동시 중복 제출 — 같은 문제/같은 시험을 거의 동시에 두 번

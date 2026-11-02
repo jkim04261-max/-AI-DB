@@ -769,6 +769,96 @@ async function run() {
     )
   }
 
+  // --- PR #53 요청 3번: 8~9살(toddler) 단계에서 지식 '적합' 판정이 5회
+  // 쌓이면 일반 XP 곡선과 별개로 곧장 청소년기(teen, Lv.5)로 "진화"한다.
+  // 5번째 저장에서만 진화가 발동하고(4번째까지는 Lv.1 그대로), savedReply
+  // 에도 일반 레벨업과 다른 진화 전용 문구가 담긴다.
+  {
+    mock.seedUser(11, { email: 'kate@test.com' })
+    const kateCookie = cookieHeaderFor(auth, 11, 0, 'kate@test.com')
+    const kateReq = (overrides = {}) => ({ headers: { cookie: kateCookie }, query: {}, ...overrides })
+    await characterHandler(kateReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(kateReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+
+    const teachOnce = async (n) => {
+      geminiBehavior = {
+        kind: 'json',
+        result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+      }
+      const verifyRes = mockRes()
+      await characterHandler(
+        kateReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: `쉬운 지식 ${n}`, content: `초등 저학년도 알 수 있는 내용 ${n}` } }),
+        verifyRes,
+      )
+      const saveRes = mockRes()
+      await characterHandler(
+        kateReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: `쉬운 지식 ${n}`,
+            originalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            finalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            verificationToken: verifyRes.body.verificationToken,
+            requestId: `req-evolve-${n}`,
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+
+    for (let n = 1; n <= 4; n++) {
+      const res = await teachOnce(n)
+      t.assert(res.statusCode === 201, `${n}번째 적합 지식 저장이 성공한다`)
+      t.assert(res.body.level === 1, `${n}번째 저장까지는 아직 Lv.1(toddler)이다 — 진화는 5번째에만 발동`)
+    }
+
+    const fifth = await teachOnce(5)
+    t.assert(fifth.statusCode === 201, '5번째 적합 지식 저장이 성공한다')
+    t.assert(fifth.body.level === 5, '5번째 적합 판정으로 Lv.5(청소년기 시작)로 진화한다')
+    t.assert(fifth.body.leveledUp === true, '진화도 레벨업으로 취급되어 leveledUp이 true다')
+    t.assert(
+      fifth.body.savedReply?.includes('청소년기로 진화했어요'),
+      '진화 시 응답 문구에 일반 레벨업과 다른 "청소년기로 진화" 안내가 포함된다',
+    )
+
+    const kateNuri = mock.state.characters.find((c) => c.user_id === 11 && c.companion_type === 'nuri')
+    t.assert(kateNuri.exp >= 1000, 'DB에 저장된 exp도 Lv.5 임계값(누적 1000) 이상으로 올라가 있다 — 다음 저장에서 다시 역산돼도 toddler로 안 돌아간다')
+
+    // 6번째부터는 이미 teen이라 다시 진화 로직이 발동하지 않아야 한다
+    // (requiredAgeTier를 junior_20s로 바꿔 ageBlocked 없이 통과시키고,
+    // 평범한 레벨업 문구인지만 확인한다).
+    geminiBehavior = {
+      kind: 'json',
+      result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+    }
+    const sixthVerify = mockRes()
+    await characterHandler(
+      kateReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '쉬운 지식 6', content: '여섯 번째 내용' } }),
+      sixthVerify,
+    )
+    const sixthSave = mockRes()
+    await characterHandler(
+      kateReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'nuri',
+          title: '쉬운 지식 6',
+          originalContent: '여섯 번째 내용',
+          finalContent: '여섯 번째 내용',
+          verificationToken: sixthVerify.body.verificationToken,
+          requestId: 'req-evolve-6',
+        },
+      }),
+      sixthSave,
+    )
+    t.assert(sixthSave.statusCode === 201, '진화 이후의 저장도 정상 동작한다')
+    t.assert(!sixthSave.body.savedReply?.includes('청소년기로 진화했어요'), '이미 teen이 된 뒤에는 진화 문구가 다시 뜨지 않는다')
+  }
+
   return t.summary()
 }
 

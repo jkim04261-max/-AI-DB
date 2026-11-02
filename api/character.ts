@@ -21,7 +21,14 @@ import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
-import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOLD, levelForExp } from './_lib/characterGrowth'
+import {
+  KNOWLEDGE_SAVE_EXP,
+  QUIZ_CORRECT_EXP,
+  EXAM_PASS_EXP,
+  EXAM_PASS_THRESHOLD,
+  levelForExp,
+  cumulativeExpForLevel,
+} from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
 import { ageTierForLevel, meetsAgeTier, AGE_TIER_LABEL, ageBlockedMessage } from './_lib/characterAge'
 
@@ -111,6 +118,13 @@ function isExamSupportedProfession(profession: string): profession is 'accountan
 
 const MAX_TITLE_LENGTH = 100
 const MAX_CONTENT_LENGTH = 2000
+// PR #53 요청 3번: 8~9살(toddler) 단계에서 지식 '적합' 판정이 이 횟수만큼
+// 쌓이면, 일반 XP 곡선(Lv.5까지 누적 1000XP 필요 — 5회 저장(50XP)로는
+// 턱없이 부족)과 별개로 곧장 청소년기(teen, Lv.5)로 "진화"시킨다.
+// characterAge.ts의 ageTierForLevel이 정의하는 teen 시작 레벨(5)과
+// 반드시 같은 값이어야 한다.
+const TEEN_EVOLUTION_KNOWLEDGE_COUNT = 5
+const TEEN_EVOLUTION_LEVEL = 5
 const DEFAULT_LIST_LIMIT = 20
 const MAX_LIST_LIMIT = 50
 // 대화 기록(character_messages)은 학습 기록보다 훨씬 자주 쌓이는
@@ -789,7 +803,34 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // requestId already returned earlier, before ever reaching here). No
     // separate dedup table needed: the existing client_request_id unique
     // index is what makes the INSERT above itself happen at most once.
-    const expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+    let expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+
+    // PR #53 요청 3번: 8~9살 단계에서 지식 '적합'이 쌓인 개수를 세어 5개가
+    // 되면 청소년기로 "진화"시킨다 — 방금 저장한 이 항목도 포함해서 세야
+    // 하므로 INSERT 이후(entry 확보 후)에 COUNT한다. 이미 toddler를
+    // 벗어났다면(지난 저장에서 이미 진화했거나 다른 경로로 레벨업했다면)
+    // 다시 발동하지 않는다.
+    let evolvedToTeen = false
+    if (ageTierForLevel(expResult.newLevel) === 'toddler') {
+      const countResult = await sql<{ count: number }>`
+        SELECT COUNT(*)::int AS count FROM character_knowledge_entries WHERE character_id = ${character.id} AND user_id = ${userId}
+      `
+      const totalSaved = countResult.rows[0]?.count ?? 0
+      if (totalSaved >= TEEN_EVOLUTION_KNOWLEDGE_COUNT) {
+        const evolvedExp = cumulativeExpForLevel(TEEN_EVOLUTION_LEVEL)
+        const bumped = await sql<{ exp: number; level: number }>`
+          UPDATE characters
+          SET exp = GREATEST(exp, ${evolvedExp}), level = GREATEST(level, ${TEEN_EVOLUTION_LEVEL})
+          WHERE id = ${character.id} AND user_id = ${userId}
+          RETURNING exp, level
+        `
+        const row = bumped.rows[0]
+        if (row) {
+          evolvedToTeen = true
+          expResult = { exp: row.exp, oldLevel: expResult.oldLevel, newLevel: row.level, leveledUp: row.level > expResult.oldLevel }
+        }
+      }
+    }
 
     // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
     // knowledge entry above is the thing that matters and it has already
@@ -798,7 +839,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // on failure, log server-side and still return 201 with the real
     // entry, rather than failing (or refunding anything) for a save that
     // actually worked.
-    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel)
+    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel, evolvedToTeen)
     try {
       await ensureCharacterMessagesTable()
       await sql`

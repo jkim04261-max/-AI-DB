@@ -398,7 +398,10 @@ export default function GrowPage() {
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4">
+    <div
+      data-testid="grow-page-container"
+      className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-4xl xl:max-w-5xl"
+    >
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
         {characters.length > 0 && (
@@ -585,6 +588,7 @@ export default function GrowPage() {
             <CustomizationRoom
               companionType={character.companionType}
               tier={tier}
+              ageTier={ageTier}
               inventory={inventory}
               onOpenMarket={() => setOpenSheet('market')}
             />

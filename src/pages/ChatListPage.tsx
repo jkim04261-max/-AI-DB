@@ -13,7 +13,7 @@ export default function ChatListPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 lg:max-w-none xl:px-10">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-900">대화</h1>
         <button

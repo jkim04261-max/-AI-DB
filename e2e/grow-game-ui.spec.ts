@@ -769,3 +769,61 @@ test('buying an outfit in the item market deducts gold and lets you equip it', a
   await dialog.getByRole('button', { name: '장착하기' }).click()
   await expect(dialog.getByText('장착 중')).toBeVisible()
 })
+
+// PR #53 요청 2번: 기본 로비는 누리·두리가 함께 그려진 고정 일러스트라
+// "복잡하다"는 피드백을 받아, 지금 보고 있지 않은 쪽(여기선 두리)을
+// 어둡게 가려서 활성 캐릭터(초상화 카드) 쪽으로 시선이 모이게 했다.
+test('the inactive companion\'s side of the shared illustration is dimmed, so the active character stands out', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('illustrated-scene-background')).toBeVisible()
+  const dimOverlay = page.getByTestId('illustrated-inactive-dim')
+  await expect(dimOverlay).toBeVisible()
+  const box = await dimOverlay.boundingBox()
+  const frame = await page.getByTestId('illustrated-scene-background').boundingBox()
+  // 두리 쪽(오른쪽 절반)에 떠야 한다 — 활성 캐릭터인 누리 쪽(왼쪽)은 아니다.
+  expect(box.x).toBeGreaterThanOrEqual(frame.x + frame.width / 2)
+})
+
+// PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제
+// 연령대별 캐릭터 이미지로 교체했다(기본 의상일 때만 — 한복처럼 그림에
+// 색이 반영되는 옷을 입었을 때는 옷 갈아입히기 미리보기를 지키기 위해
+// 계속 SVG를 쓴다).
+test('the customization room shows the real character portrait instead of the SVG shape, for the default outfit', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] }) // level: 1 → toddler
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '커스터마이징' }).click()
+
+  const portrait = page.getByTestId('customization-age-portrait')
+  await expect(portrait).toBeVisible()
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+  await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
+})
+
+// PR #53 요청 1번: PC 화면에서 중앙에 좁게 모인 "모바일 프레임" 레이아웃을
+// 해제하고 브라우저 가로폭에 맞춰 넓게 확장한다 — 기존 max-w-xl(576px)
+// 캡이 더 이상 데스크톱 너비를 그대로 좁히지 않는지 확인한다.
+test('the grow page uses a fluid full-width layout on a wide desktop viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  const container = page.getByTestId('grow-page-container')
+  const box = await container.boundingBox()
+  // 기존 max-w-xl 캡(576px)이면 콘텐츠 폭이 그보다 좁았다 — 이제는
+  // 사이드바를 뺀 나머지 폭을 거의 다 쓰므로 훨씬 넓어야 한다.
+  expect(box.width).toBeGreaterThan(900)
+})
