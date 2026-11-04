@@ -351,7 +351,7 @@ async function run() {
       t.assert(s.body.level === 5, '누적 5번째 적합 저장(req-growth-1 + i=0~3)에서 청소년기(Lv.5)로 진화한다')
       t.assert(s.body.exp >= 1000, '진화 시 exp도 Lv.5 임계값(누적 1000) 이상으로 올라간다')
       t.assert(s.body.leveledUp === true, '진화도 레벨업으로 취급된다')
-      t.assert(s.body.savedReply.includes('청소년기로 진화했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
+      t.assert(s.body.savedReply.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
     }
     if (i === 9) {
       t.assert(s.body.level === 5, '진화 이후에는 10XP씩만 쌓이므로(Lv.5→6은 500XP 필요) 루프가 끝나도 여전히 Lv.5다')

@@ -35,12 +35,24 @@ export const AGE_TIER_STAGE_LABEL: Record<AgeTier, string> = {
   master_50s: '마스터',
 }
 
+// 각 연령대가 시작되는 최소 레벨 — ageTierForLevel이 바로 이 값들로
+// 판정한다(백엔드 api/_lib/characterAge.ts의 같은 이름의 표와 반드시
+// 같아야 한다 — 특히 진화 로직이 이 표를 기준으로 다음 단계의 레벨을
+// 계산한다).
+export const AGE_TIER_MIN_LEVEL: Record<AgeTier, number> = {
+  toddler: 1,
+  teen: 5,
+  junior_20s: 10,
+  career_30s: 20,
+  veteran_40s: 30,
+  master_50s: 40,
+}
+
 export function ageTierForLevel(level: number): AgeTier {
-  if (level >= 40) return 'master_50s'
-  if (level >= 30) return 'veteran_40s'
-  if (level >= 20) return 'career_30s'
-  if (level >= 10) return 'junior_20s'
-  if (level >= 5) return 'teen'
+  for (let i = AGE_TIER_ORDER.length - 1; i >= 0; i--) {
+    const tier = AGE_TIER_ORDER[i]
+    if (level >= AGE_TIER_MIN_LEVEL[tier]) return tier
+  }
   return 'toddler'
 }
 

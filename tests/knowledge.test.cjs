@@ -820,8 +820,8 @@ async function run() {
     t.assert(fifth.body.level === 5, '5번째 적합 판정으로 Lv.5(청소년기 시작)로 진화한다')
     t.assert(fifth.body.leveledUp === true, '진화도 레벨업으로 취급되어 leveledUp이 true다')
     t.assert(
-      fifth.body.savedReply?.includes('청소년기로 진화했어요'),
-      '진화 시 응답 문구에 일반 레벨업과 다른 "청소년기로 진화" 안내가 포함된다',
+      fifth.body.savedReply?.includes('청소년 단계로 성장했어요'),
+      '진화 시 응답 문구에 일반 레벨업과 다른 "청소년 단계로 성장" 안내가 포함된다',
     )
 
     const kateNuri = mock.state.characters.find((c) => c.user_id === 11 && c.companion_type === 'nuri')
@@ -856,7 +856,33 @@ async function run() {
       sixthSave,
     )
     t.assert(sixthSave.statusCode === 201, '진화 이후의 저장도 정상 동작한다')
-    t.assert(!sixthSave.body.savedReply?.includes('청소년기로 진화했어요'), '이미 teen이 된 뒤에는 진화 문구가 다시 뜨지 않는다')
+    t.assert(!sixthSave.body.savedReply?.includes('청소년 단계로 성장했어요'), '이미 teen이 된 뒤에는 진화 문구가 다시 뜨지 않는다')
+
+    // --- 요청 3번 "향후 10대 10회, 20대 20회 등 확장 가능한 구조" 검증 —
+    // teen 단계의 요구치(10회)는 "이번 단계부터 새로 10개"가 아니라
+    // "누적 총합이 toddler(5) + teen(10) = 15개"가 되는 시점에 발동한다
+    // (character_knowledge_entries를 단계별로 따로 세지 않고 캐릭터
+    // 전체 누적 개수로 판정하는 설계이기 때문). 7~14번째는 teen을
+    // 유지하다가 15번째에 junior_20s(Lv.10)로 진화해야, 같은 로직이
+    // toddler 말고 다른 단계에서도 그대로 동작한다는 걸 보여준다.
+    // 하루 지식 검증 10회 제한(knowledgeLimit.ts)과는 별개 테스트이므로,
+    // 날짜를 넘겨 kate의 하루 검증 횟수를 리셋한다(1~6번째로 이미 6회를
+    // 썼고, 이 구간만 8회를 더 쓰므로 그대로는 제한에 걸린다).
+    mock.setFakeDate('2026-03-01')
+    let lastSave
+    for (let n = 7; n <= 14; n++) {
+      lastSave = await teachOnce(n)
+      t.assert(lastSave.statusCode === 201, `${n}번째 적합 지식 저장이 성공한다`)
+      t.assert(lastSave.body.level === 5, `${n}번째 저장까지는 teen(Lv.5)을 유지한다 — 누적 15개가 되는 15번째에만 다음 진화 발동`)
+    }
+
+    const fifteenth = await teachOnce(15)
+    t.assert(fifteenth.statusCode === 201, '15번째 적합 지식 저장이 성공한다')
+    t.assert(fifteenth.body.level === 10, '누적 15개(toddler 5 + teen 10)에서 junior_20s(Lv.10)로 진화한다 — teen 단계에서도 같은 일반화된 로직이 동작한다')
+    t.assert(
+      fifteenth.body.savedReply?.includes('청년 단계로 성장했어요'),
+      'junior_20s로 진화할 때는 그 단계의 스테이지 라벨("청년")이 그대로 문구에 쓰인다 — 단계마다 문구를 새로 코딩할 필요가 없다',
+    )
   }
 
   return t.summary()
