@@ -1,5 +1,5 @@
 import type { ProfessionId } from './characterProfessions'
-import conceptLobbyImg from '../assets/grow/concept-lobby.webp'
+import fantasyLabBgImg from '../assets/grow/fantasy-lab-bg.webp'
 
 // PR #46: purely a visual theme lookup (profession -> room dressing). No
 // DB/API involved — this never decides what profession a character has,
@@ -37,12 +37,20 @@ export interface SceneTheme {
 // (PR #46~#49)보다 압도적으로 품질이 높아서, 직업과 무관하게 "기본
 // 방"의 대표 모습으로 승격했다. 다른 직업 전용 아트가 생기기 전까지는
 // 모든 직업이 이 공통 일러스트를 공유한다.
+// PR #57: 사용자가 제공한 '누리AI 키우리 성장 판타지 랩' 이미지로
+// 기본 배경을 교체했다(기존 concept-lobby.webp는 더 이상 쓰이지 않아
+// 삭제). 이 이미지에는 자체 타이틀/가짜 메뉴 버튼/나이대 선택 UI가
+// 그려져 있어 그대로 쓰면 실제 화면의 타이틀·메뉴와 중복·충돌하므로,
+// GameStage의 일러스트 모드가 이미 하는 블러+암전 처리(PR #56에서
+// "두리 명패가 겹쳐 보이는" 같은 문제를 없애려고 추가한 바로 그
+// 로직)를 그대로 타서 순수 색감/반짝임 질감으로만 쓰인다 — 새 코드
+// 없이 배경 이미지 하나만 바꾸면 되는 이유.
 export const DEFAULT_SCENE: SceneTheme = {
-  label: '누리·두리의 방',
+  label: '성장 판타지 랩',
   layers: [],
   props: [],
   floorClassName: '',
-  backgroundImageSrc: conceptLobbyImg,
+  backgroundImageSrc: fantasyLabBgImg,
 }
 
 // PR #50: 마켓에서 구매하는 9개 장소 중 "로비"도 이 일러스트를 그대로
