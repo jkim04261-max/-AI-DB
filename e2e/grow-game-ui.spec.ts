@@ -828,6 +828,32 @@ test('the ambient background illustration is blurred, not just dimmed, so the em
   expect(filter).toMatch(/blur\(/)
 })
 
+// PR #60: "원본처럼 선명하게" 요청과 "가짜 UI를 가려야 한다"는 요구를
+// 동시에 만족시키려고, 같은 그림을 선명한 바탕 레이어 + 블러 레이어
+// (가운데는 CSS mask로 투명 처리해 바탕이 비쳐 보임) 두 장으로
+// 분리했다. 블러 레이어 자체는 여전히 blur()가 걸려 있어야 하고
+// (위 테스트), 동시에 mask-image로 가운데가 뚫려 있어야 한다 — 둘 중
+// 하나라도 없으면 "가짜 UI 노출" 또는 "전체가 다시 흐릿함" 회귀다.
+test('the background blur layer is masked so the center (behind the character) is revealed sharp, while the edges stay blurred', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  const bg = page.getByTestId('illustrated-scene-background-blur')
+  await expect(bg).toBeVisible()
+  const mask = await bg.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return cs.maskImage || (cs as unknown as { webkitMaskImage: string }).webkitMaskImage
+  })
+  expect(mask).toMatch(/gradient/)
+  // 브라우저가 계산한 값은 'transparent' 키워드 대신 rgba(0, 0, 0, 0)로
+  // 정규화된다.
+  expect(mask).toMatch(/rgba\(0,\s*0,\s*0,\s*0\)/)
+})
+
 // PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제 캐릭터
 // 이미지로 교체했다(기본 의상일 때만 — 한복처럼 그림에 색이 반영되는
 // 옷을 입었을 때는 옷 갈아입히기 미리보기를 지키기 위해 계속 SVG를
