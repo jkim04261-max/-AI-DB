@@ -824,9 +824,12 @@ test('the customization room shows the real character portrait instead of the SV
 })
 
 // PR #53 요청 1번: PC 화면에서 중앙에 좁게 모인 "모바일 프레임" 레이아웃을
-// 해제하고 브라우저 가로폭에 맞춰 넓게 확장한다 — 기존 max-w-xl(576px)
-// 캡이 더 이상 데스크톱 너비를 그대로 좁히지 않는지 확인한다.
-test('the grow page uses a fluid full-width layout on a wide desktop viewport', async ({ page }) => {
+// 해제하고 브라우저 가로폭에 맞춰 넓게 확장한다. PR #54(max-w-6xl)도
+// 여전히 "박스에 갇혀 있다"는 피드백을 받아, PR #55에서 캡 자체를 아예
+// 없앴다(lg:max-w-none) — 왼쪽 네비게이션(고정 256px, Sidebar.tsx)을
+// 뺀 나머지 뷰포트 폭을 거의 그대로 다 쓰는지(남는 여백이 아주 작은지)
+// 확인한다.
+test('the grow page uses a true fluid full-width layout (no max-width cap) on a wide desktop viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -837,9 +840,18 @@ test('the grow page uses a fluid full-width layout on a wide desktop viewport', 
 
   const container = page.getByTestId('grow-page-container')
   const box = await container.boundingBox()
-  // 기존 max-w-xl 캡(576px)이면 콘텐츠 폭이 그보다 좁았다 — 이제는
-  // 사이드바를 뺀 나머지 폭을 거의 다 쓰므로 훨씬 넓어야 한다.
-  expect(box.width).toBeGreaterThan(900)
+  const SIDEBAR_WIDTH = 256
+  const availableWidth = 1600 - SIDEBAR_WIDTH
+  // 예전처럼 max-w 캡으로 중앙에 좁게 갇혀 있다면 이 폭에 한참 못
+  // 미쳤을 것이다 — 이제는 남는 뷰포트 폭(사이드바 제외)의 90% 이상을
+  // 그대로 써야 한다(스크롤바 등 아주 작은 오차만 허용).
+  expect(box.width).toBeGreaterThan(availableWidth * 0.9)
+
+  // 게임 화면(목재 프레임)도 카드처럼 둥글게 떠 있지 않고 가장자리까지
+  // 꽉 차야 한다 — PR #55 요청 2번("카드 형태를 없애라").
+  const woodFrame = page.getByTestId('illustrated-scene-background')
+  const frameBox = await woodFrame.boundingBox()
+  expect(frameBox.width).toBeGreaterThan(availableWidth * 0.5)
 })
 
 // PR #54 요청 3번: 하단에 빽빽하던 액션 버튼들을 PC(lg+)에서는 스테이지
