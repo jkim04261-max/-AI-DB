@@ -177,14 +177,23 @@ export default function GameStage({
             가독성 때문에 블러를 키운 건 맞는 방향이었지만, 밝기/채도를
             텍스트 가독성과 무관하게 과하게 깎은 게 문제였다). 블러는
             오히려 16px로 더 키워 글자 안전 마진을 넉넉히 확보하고,
-            밝기·채도는 되살려서 색감 자체는 또렷하게 드러나게 했다. */}
+            밝기·채도는 되살려서 색감 자체는 또렷하게 드러나게 했다.
+            PR #59: "여전히 어둡다, 원본 선명도 90~100%로"라는 요청에
+            맞춰 밝기·채도를 한계까지 끌어올렸다(0.68→0.94,
+            0.95→1.05 — 거의 원본 그대로). 다만 블러(글자를 읽을 수
+            없게 만드는 유일한 장치)는 22px로 오히려 더 키웠다 — 이
+            배경 원본에는 실제로 쓰지 않는 가짜 메뉴 버튼(학습하기/
+            경험하기 등)과 중복 타이틀("누리AI 키우리")이 그려져
+            있어서(PR #57 PR 설명 참고), 블러까지 없애면 클릭해도
+            반응 없는 가짜 버튼이 다시 또렷하게 보이는 회귀가
+            생긴다 — 밝기는 원본에 가깝게, 텍스트만은 계속 못 읽게. */}
         <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
           <img
             data-testid="illustrated-scene-background-blur"
             src={scene.backgroundImageSrc}
             alt=""
             className="h-full w-full scale-110 object-cover"
-            style={{ filter: 'blur(16px) brightness(0.68) saturate(0.95)' }}
+            style={{ filter: 'blur(22px) brightness(0.94) saturate(1.05)' }}
           />
         </div>
         {/* 다른 테스트/레이어가 "프레임 자체"의 기준으로 삼는 testid —
@@ -205,12 +214,16 @@ export default function GameStage({
             PR #58: 위 블러 레이어의 brightness/saturate를 되살린 것과
             맞춰, 이 암전 레이어도 45% → 28%로 낮췄다 — 두 레이어를
             합친 전체 어둡기가 "성장 판타지 랩" 배경의 색감을 완전히
-            지워버리지 않을 정도로만 가라앉힌다. */}
+            지워버리지 않을 정도로만 가라앉힌다.
+            PR #59: 배경 밝기를 거의 원본 수준으로 올리면서, 이 암전도
+            28% → 12%로 더 낮췄다 — 이제는 거의 비네트 수준의 아주
+            옅은 그림자일 뿐이고, 밝기는 전부 위 blur 레이어의
+            brightness(0.94)가 담당한다. */}
         <div
           data-testid="illustrated-ambient-dim"
           aria-hidden
           className="absolute inset-0 z-[5] transition-opacity duration-300"
-          style={{ backgroundColor: 'rgba(2, 6, 23, 0.28)' }}
+          style={{ backgroundColor: 'rgba(2, 6, 23, 0.12)' }}
         />
 
         {/* 지금 선택된 캐릭터의 전신 일러스트 — 프레임 정중앙에 하나만
