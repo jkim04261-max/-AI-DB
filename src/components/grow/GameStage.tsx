@@ -134,7 +134,11 @@ export default function GameStage({
   // 실제 전신 에셋은 없지만(220x220 정사각 흉상 컷뿐, PR #52 5차에서
   // 확인), 카드 자체를 세로로 더 크게 보여줘서 "전신처럼 꽉 찬" 느낌에
   // 최대한 가깝게 만든다.
-  const frameClassName = `relative h-96 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-[28rem] lg:h-[32rem] transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
+  // PR #55 긴급 패치: GrowPage의 풀스크린 캡을 완전히 제거(lg:max-w-none)
+  // 했더니 스테이지 가로폭이 훨씬 넓어졌다 — 세로도 한 번 더 키워서
+  // (32rem→42rem) 넓어진 가로폭에 맞는 비율을 유지하고, 캐릭터 영역이
+  // 화면에서 실제로 더 크고 길게 느껴지도록 했다.
+  const frameClassName = `relative h-96 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-[28rem] lg:h-[42rem] transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
 
   // PR #52 후속 3차: CSS 모드(마켓 구매 배경 8곳)에서 그동안 손그림 SVG
   // (파란 도형)만 쓰던 캐릭터를, 연령대를 알 때는 실제로 제공받은
@@ -368,7 +372,7 @@ export default function GameStage({
               // 살렸다 — 비율/스케일 로직은 그대로.
               <span
                 data-testid="age-scale-wrapper"
-                className="mx-auto block w-[190px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[230px] lg:w-[260px]"
+                className="mx-auto block w-[190px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[230px] lg:w-[320px]"
                 style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
               >
                 <img src={portraitSrc} alt="" aria-hidden className="h-auto w-full object-cover" />
@@ -376,7 +380,7 @@ export default function GameStage({
             ) : (
               <span
                 data-testid="age-scale-wrapper"
-                className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[230px] lg:w-[260px]"
+                className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[230px] lg:w-[320px]"
                 style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
               >
                 <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />

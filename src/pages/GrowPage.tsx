@@ -400,11 +400,13 @@ export default function GrowPage() {
   return (
     <div
       data-testid="grow-page-container"
-      // PR #54 요청 1번: "여전히 좁은 박스에 갇혀 있다"는 피드백에 따라
-      // PR #53의 max-w-4xl/5xl보다 한 단계 더 넓혔다 — 사이드 액션
-      // 패널(요청 3번)까지 옆으로 나란히 놓고도 여유가 남도록 max-w-6xl
-      // (1152px)까지 확장한다.
-      className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-6xl"
+      // PR #55 긴급 패치: PR #54의 lg:max-w-6xl(1152px)도 여전히 "박스에
+      // 갇혀 있다"는 피드백을 받았다 — 더 넓은 캡이 아니라 캡 자체를
+      // 완전히 없앤다. 다른 페이지들(HomePage 등, PR #53)이 이미 쓰는
+      // lg:max-w-none 패턴과 동일하게 맞춰서, <main>(App.tsx, 자체
+      // max-width 없음)이 주는 가로폭을 그대로 다 쓴다. lg부터는 둥근
+      // 모서리도 없애 페이지 가장자리까지 꽉 찬 느낌을 유지한다.
+      className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-none lg:rounded-none xl:px-10"
     >
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
@@ -444,9 +446,17 @@ export default function GrowPage() {
               쌓임)에서 lg:flex-row(옆으로 나란히)로만 바꾸면 DOM 순서가
               그대로 "스테이지 먼저(위/왼쪽) → 메뉴 다음(아래/오른쪽)"을
               유지해, 모바일 레이아웃은 전혀 안 건드리고 PC에서만 메뉴가
-              옆으로 옮겨간다. */}
-          <div className="overflow-hidden rounded-3xl bg-amber-950 shadow-lg">
-            <div className="flex flex-col lg:flex-row lg:items-start">
+              옆으로 옮겨간다.
+              PR #55 긴급 패치: "카드 형태를 없애라"는 피드백에 따라
+              lg부터는 이 목재 프레임 자체의 둥근 모서리·그림자를 없애서
+              — 위 grow-page-container가 이미 가장자리까지 꽉 찬
+              상태이므로 — 이 블록이 카드처럼 "떠 있는" 느낌 없이 화면에
+              그대로 박혀 있는 듯 보이게 한다. lg:items-stretch로 바꿔
+              오른쪽 사이드 패널의 테두리선이 왼쪽 스테이지 높이만큼
+              끝까지 이어지게 했다(기존 items-start는 메뉴가 짧으면
+              구분선이 중간에서 끊겨 보였다). */}
+          <div className="overflow-hidden rounded-3xl bg-amber-950 shadow-lg lg:rounded-none lg:shadow-none">
+            <div className="flex flex-col lg:flex-row lg:items-stretch">
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="relative">
                   <GameStage
