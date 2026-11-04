@@ -774,14 +774,14 @@ test('buying an outfit in the item market deducts gold and lets you equip it', a
   await expect(dialog.getByText('장착 중')).toBeVisible()
 })
 
-// PR #54 요청 2번: 기본 로비는 누리·두리가 함께 그려진 고정 일러스트라
-// "복잡하다"는 피드백을 받아, PR #53에서는 안 보고 있는 쪽 절반만
-// 어둡게 가렸었다 — 그런데 그 방식은 안 보고 있는 쪽 화면이 여전히
-// 선명하게 남아 있어 "여러 일러스트/두리 화면이 중복으로 겹쳐 보인다"는
-// 버그로 이어졌다. 이제는 양쪽 다 똑같이 어둡게 가라앉혀 배경 전체가
-// 순수 분위기(ambient)로만 쓰이고, 화면에서 분명하게 보이는 캐릭터
-// 그림은 중앙의 초상화 카드 하나뿐임을 검증한다.
-test('the whole shared illustration (both companions) is dimmed into ambiance, so only the centered portrait card reads as "the character"', async ({ page }) => {
+// PR #54~60: 그때까지 쓰던 배경(사용자가 제공한 포스터 이미지)에는
+// 캐릭터·타이틀·가짜 메뉴 버튼이 합성돼 있어서, 블러+암전으로 형체를
+// 알아볼 수 없게 가려야만 실제 화면의 캐릭터·UI와 안 겹쳤다.
+// PR #61: 사용자가 캐릭터·글자·버튼이 전혀 없는 순수 배경(마법진
+// 도서관)을 새로 제공해 그 블러/암전이 전부 필요 없어졌다 — 배경이
+// 블러·암전 없이 선명하게 보이면서도, 전신 캐릭터 카드가 여전히
+// 프레임 정중앙에 또렷하게 뜨는지 확인한다.
+test('the background illustration renders crisp (no blur/dim overlay), with the full-body character card centered on top of it', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -789,43 +789,20 @@ test('the whole shared illustration (both companions) is dimmed into ambiance, s
 
   await page.goto('/grow')
 
-  await expect(page.getByTestId('illustrated-scene-background')).toBeVisible()
-  const dimOverlay = page.getByTestId('illustrated-ambient-dim')
-  await expect(dimOverlay).toBeVisible()
-  const box = await dimOverlay.boundingBox()
-  const frame = await page.getByTestId('illustrated-scene-background').boundingBox()
-  // 더 이상 반쪽만이 아니라 프레임 전체를 덮어야 한다(두리 쪽 화면이
-  // 따로 선명하게 남아있지 않다는 뜻).
-  expect(box.width).toBeGreaterThanOrEqual(frame.width - 1)
-  expect(box.height).toBeGreaterThanOrEqual(frame.height - 1)
+  const bg = page.getByTestId('illustrated-scene-background')
+  await expect(bg).toBeVisible()
+  const filter = await bg.evaluate((el) => getComputedStyle(el).filter)
+  expect(filter).toBe('none')
+  await expect(page.getByTestId('illustrated-ambient-dim')).toHaveCount(0)
 
   // 초상화 카드는 정중앙에, 눈에 띄게 크게 떠야 한다.
   const portrait = page.getByTestId('illustrated-age-portrait-nuri')
   await expect(portrait).toBeVisible()
   const portraitBox = await portrait.boundingBox()
+  const frame = await bg.boundingBox()
   const frameCenterX = frame.x + frame.width / 2
   expect(portraitBox.x + portraitBox.width / 2).toBeGreaterThan(frameCenterX - 20)
   expect(portraitBox.x + portraitBox.width / 2).toBeLessThan(frameCenterX + 20)
-})
-
-// PR #56: 진짜 전신 원화를 켜보니, PR #54의 58% 암전 정도로는 배경 그림
-// 속에 박힌 "누리"/"두리" 명패와 인물 윤곽이 여전히 또렷하게 읽혀서
-// 전신 원화와 겹쳐 보이는 중복 버그가 재현됐다(스크린샷으로 확인) —
-// 블러(blur)를 더해 형체를 알아볼 수 없는 색감 질감으로만 남기도록
-// 고쳤다. 배경 이미지에 blur 필터가 실제로 걸려 있는지 확인해 이
-// 회귀를 막는다.
-test('the ambient background illustration is blurred, not just dimmed, so the embedded name plates/figures are unrecognizable', async ({ page }) => {
-  await failUnmockedApiCalls(page)
-  await mockMe(page, { user: USER })
-  await mockEmptyConversations(page)
-  await mockCharacterApi(page, { characters: [NURI_SINGER] })
-
-  await page.goto('/grow')
-
-  const bg = page.getByTestId('illustrated-scene-background-blur')
-  await expect(bg).toBeVisible()
-  const filter = await bg.evaluate((el) => getComputedStyle(el).filter)
-  expect(filter).toMatch(/blur\(/)
 })
 
 // PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제 캐릭터

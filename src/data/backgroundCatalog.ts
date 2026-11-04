@@ -15,10 +15,10 @@ export interface BackgroundItem {
 }
 
 export const BACKGROUND_CATALOG: BackgroundItem[] = [
-  // PR #57: growthScenes.ts의 DEFAULT_SCENE 라벨 변경과 맞춰 이름도
-  // "성장 판타지 랩"으로 통일했다 — 같은 장소를 마켓 목록과 실제
-  // 화면에서 다르게 부르면 혼란스럽다.
-  { id: 'lobby', label: '성장 판타지 랩(기본)', priceGold: 0, icon: '🏠' },
+  // PR #57, #61: growthScenes.ts의 DEFAULT_SCENE 라벨 변경과 맞춰
+  // 이름도 함께 바꿨다 — 같은 장소를 마켓 목록과 실제 화면에서
+  // 다르게 부르면 혼란스럽다.
+  { id: 'lobby', label: '마법진 도서관(기본)', priceGold: 0, icon: '🏠' },
   { id: 'office', label: '사무실', priceGold: 150, icon: '🏢' },
   { id: 'kitchen', label: '주방', priceGold: 150, icon: '🍳' },
   { id: 'aesthetic', label: '피부샵', priceGold: 150, icon: '💆' },

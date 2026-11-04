@@ -1,5 +1,5 @@
 import type { ProfessionId } from './characterProfessions'
-import fantasyLabBgImg from '../assets/grow/fantasy-lab-bg.webp'
+import fantasyLibraryBgImg from '../assets/grow/fantasy-library-bg.webp'
 
 // PR #46: purely a visual theme lookup (profession -> room dressing). No
 // DB/API involved — this never decides what profession a character has,
@@ -37,20 +37,20 @@ export interface SceneTheme {
 // (PR #46~#49)보다 압도적으로 품질이 높아서, 직업과 무관하게 "기본
 // 방"의 대표 모습으로 승격했다. 다른 직업 전용 아트가 생기기 전까지는
 // 모든 직업이 이 공통 일러스트를 공유한다.
-// PR #57: 사용자가 제공한 '누리AI 키우리 성장 판타지 랩' 이미지로
-// 기본 배경을 교체했다(기존 concept-lobby.webp는 더 이상 쓰이지 않아
-// 삭제). 이 이미지에는 자체 타이틀/가짜 메뉴 버튼/나이대 선택 UI가
-// 그려져 있어 그대로 쓰면 실제 화면의 타이틀·메뉴와 중복·충돌하므로,
-// GameStage의 일러스트 모드가 이미 하는 블러+암전 처리(PR #56에서
-// "두리 명패가 겹쳐 보이는" 같은 문제를 없애려고 추가한 바로 그
-// 로직)를 그대로 타서 순수 색감/반짝임 질감으로만 쓰인다 — 새 코드
-// 없이 배경 이미지 하나만 바꾸면 되는 이유.
+// PR #57~60: 사용자가 처음 제공한 '누리AI 키우리 성장 판타지 랩'
+// 이미지는 자체 타이틀/가짜 메뉴 버튼/나이대 선택 UI가 캐릭터와 한
+// 장에 합성된 포스터라, 그대로 쓰면 실제 화면의 타이틀·메뉴와
+// 중복·충돌해서 블러+마스크 처리가 필요했다(PR #60).
+// PR #61: 사용자가 캐릭터·UI 없이 순수 배경(마법진 도서관)만 있는
+// 새 이미지를 제공해, 그 블러/마스크 처리가 더 이상 필요 없어졌다 —
+// 가릴 가짜 UI 자체가 없으므로 원본 그대로 선명하게 쓴다(GameStage
+// 참고).
 export const DEFAULT_SCENE: SceneTheme = {
-  label: '성장 판타지 랩',
+  label: '마법진 도서관',
   layers: [],
   props: [],
   floorClassName: '',
-  backgroundImageSrc: fantasyLabBgImg,
+  backgroundImageSrc: fantasyLibraryBgImg,
 }
 
 // PR #50: 마켓에서 구매하는 9개 장소 중 "로비"도 이 일러스트를 그대로
