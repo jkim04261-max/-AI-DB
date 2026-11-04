@@ -168,14 +168,23 @@ export default function GameStage({
             프레임 밖으로 밀려나는 동시에 이 img 자신의 측정 가능한
             bounding box는 프레임 그대로 유지되게 했다(다른 테스트들이
             이 testid를 "프레임 자체"의 기준점으로 쓰고 있어, img에
-            직접 transform을 주면 그 기준이 틀어진다). */}
+            직접 transform을 주면 그 기준이 틀어진다).
+            PR #58: brightness(0.4)+45% 암전을 그대로 '성장 판타지 랩'
+            배경(PR #57)에 적용해보니, 화면이 너무 어두워져서 그 배경
+            고유의 분홍 벚꽃·보라빛 마법진·금색 글로우 색감이 거의
+            안 보이는 무채색에 가까운 어두운 얼룩으로 뭉개졌다 —
+            "배경이 안 바뀐 것 같다"는 피드백의 실제 원인이었다(글자
+            가독성 때문에 블러를 키운 건 맞는 방향이었지만, 밝기/채도를
+            텍스트 가독성과 무관하게 과하게 깎은 게 문제였다). 블러는
+            오히려 16px로 더 키워 글자 안전 마진을 넉넉히 확보하고,
+            밝기·채도는 되살려서 색감 자체는 또렷하게 드러나게 했다. */}
         <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
           <img
             data-testid="illustrated-scene-background-blur"
             src={scene.backgroundImageSrc}
             alt=""
             className="h-full w-full scale-110 object-cover"
-            style={{ filter: 'blur(14px) brightness(0.4) saturate(0.75)' }}
+            style={{ filter: 'blur(16px) brightness(0.68) saturate(0.95)' }}
           />
         </div>
         {/* 다른 테스트/레이어가 "프레임 자체"의 기준으로 삼는 testid —
@@ -192,12 +201,16 @@ export default function GameStage({
             bg-slate-950/55(oklab 기반 색)가 이 환경에서 거의 안 보일
             정도로 흐리게 렌더링되는 문제가 있어(스크린샷으로 직접
             확인), 일반 sRGB rgba()를 인라인으로 직접 써서 피했다(PR
-            #53에서 확인된 환경 버그, 그대로 유지). */}
+            #53에서 확인된 환경 버그, 그대로 유지).
+            PR #58: 위 블러 레이어의 brightness/saturate를 되살린 것과
+            맞춰, 이 암전 레이어도 45% → 28%로 낮췄다 — 두 레이어를
+            합친 전체 어둡기가 "성장 판타지 랩" 배경의 색감을 완전히
+            지워버리지 않을 정도로만 가라앉힌다. */}
         <div
           data-testid="illustrated-ambient-dim"
           aria-hidden
           className="absolute inset-0 z-[5] transition-opacity duration-300"
-          style={{ backgroundColor: 'rgba(2, 6, 23, 0.45)' }}
+          style={{ backgroundColor: 'rgba(2, 6, 23, 0.28)' }}
         />
 
         {/* 지금 선택된 캐릭터의 전신 일러스트 — 프레임 정중앙에 하나만
