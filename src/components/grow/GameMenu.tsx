@@ -42,7 +42,12 @@ export default function GameMenu({
     // PR #49: 스테이지 하단에 얹히는 반투명 목재 액션 바 — 흰 카드 그리드
     // 목록에서, 게임 화면 하단에 붙은 RPG형 액션 바 느낌으로 바꿨다.
     // 버튼 텍스트/role은 그대로라 기존 e2e 셀렉터가 그대로 통한다.
-    <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-amber-900/40 bg-amber-950/75 p-1.5 backdrop-blur-sm sm:gap-2">
+    // PR #54 요청 3번: PC(lg+)에서는 더 이상 4열 그리드가 아니라 세로
+    // 한 줄 사이드 패널 목록으로 보여준다 — GrowPage가 바깥에서 이
+    // 메뉴를 하단 대신 옆면 패널에 배치하고(flex-row), 이 컴포넌트는
+    // lg:grid-cols-1로 한 칸씩 쌓이게만 바꾸면 된다(별도 prop 없이
+    // 반응형 클래스만으로 처리 — 로직/접근성 계약은 100% 동일).
+    <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-amber-900/40 bg-amber-950/75 p-1.5 backdrop-blur-sm sm:gap-2 lg:grid-cols-1 lg:gap-1.5 lg:border-none lg:bg-transparent lg:p-0">
       {ITEMS.map(({ action, label, icon: Icon, alwaysEnabled }) => {
         const quizBlocked = action === 'quiz' && !examSupported
         return (
@@ -51,8 +56,9 @@ export default function GameMenu({
             type="button"
             onClick={() => onSelect(action)}
             disabled={(!alwaysEnabled && disabled) || quizBlocked}
-            // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄)
-            className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-semibold text-amber-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100"
+            // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄). lg+에서는
+            // 세로 목록이라 아이콘+글자를 가로로 나란히 배치한다.
+            className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-semibold text-amber-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100 lg:min-h-[48px] lg:flex-row lg:justify-start lg:gap-2.5 lg:rounded-xl lg:px-3 lg:text-xs lg:hover:bg-amber-900/40"
           >
             <Icon size={17} className="text-amber-300" />
             {label}

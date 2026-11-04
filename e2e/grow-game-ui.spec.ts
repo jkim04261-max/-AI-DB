@@ -770,10 +770,14 @@ test('buying an outfit in the item market deducts gold and lets you equip it', a
   await expect(dialog.getByText('장착 중')).toBeVisible()
 })
 
-// PR #53 요청 2번: 기본 로비는 누리·두리가 함께 그려진 고정 일러스트라
-// "복잡하다"는 피드백을 받아, 지금 보고 있지 않은 쪽(여기선 두리)을
-// 어둡게 가려서 활성 캐릭터(초상화 카드) 쪽으로 시선이 모이게 했다.
-test('the inactive companion\'s side of the shared illustration is dimmed, so the active character stands out', async ({ page }) => {
+// PR #54 요청 2번: 기본 로비는 누리·두리가 함께 그려진 고정 일러스트라
+// "복잡하다"는 피드백을 받아, PR #53에서는 안 보고 있는 쪽 절반만
+// 어둡게 가렸었다 — 그런데 그 방식은 안 보고 있는 쪽 화면이 여전히
+// 선명하게 남아 있어 "여러 일러스트/두리 화면이 중복으로 겹쳐 보인다"는
+// 버그로 이어졌다. 이제는 양쪽 다 똑같이 어둡게 가라앉혀 배경 전체가
+// 순수 분위기(ambient)로만 쓰이고, 화면에서 분명하게 보이는 캐릭터
+// 그림은 중앙의 초상화 카드 하나뿐임을 검증한다.
+test('the whole shared illustration (both companions) is dimmed into ambiance, so only the centered portrait card reads as "the character"', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -782,12 +786,22 @@ test('the inactive companion\'s side of the shared illustration is dimmed, so th
   await page.goto('/grow')
 
   await expect(page.getByTestId('illustrated-scene-background')).toBeVisible()
-  const dimOverlay = page.getByTestId('illustrated-inactive-dim')
+  const dimOverlay = page.getByTestId('illustrated-ambient-dim')
   await expect(dimOverlay).toBeVisible()
   const box = await dimOverlay.boundingBox()
   const frame = await page.getByTestId('illustrated-scene-background').boundingBox()
-  // 두리 쪽(오른쪽 절반)에 떠야 한다 — 활성 캐릭터인 누리 쪽(왼쪽)은 아니다.
-  expect(box.x).toBeGreaterThanOrEqual(frame.x + frame.width / 2)
+  // 더 이상 반쪽만이 아니라 프레임 전체를 덮어야 한다(두리 쪽 화면이
+  // 따로 선명하게 남아있지 않다는 뜻).
+  expect(box.width).toBeGreaterThanOrEqual(frame.width - 1)
+  expect(box.height).toBeGreaterThanOrEqual(frame.height - 1)
+
+  // 초상화 카드는 정중앙에, 눈에 띄게 크게 떠야 한다.
+  const portrait = page.getByTestId('illustrated-age-portrait-nuri')
+  await expect(portrait).toBeVisible()
+  const portraitBox = await portrait.boundingBox()
+  const frameCenterX = frame.x + frame.width / 2
+  expect(portraitBox.x + portraitBox.width / 2).toBeGreaterThan(frameCenterX - 20)
+  expect(portraitBox.x + portraitBox.width / 2).toBeLessThan(frameCenterX + 20)
 })
 
 // PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제
@@ -826,4 +840,48 @@ test('the grow page uses a fluid full-width layout on a wide desktop viewport', 
   // 기존 max-w-xl 캡(576px)이면 콘텐츠 폭이 그보다 좁았다 — 이제는
   // 사이드바를 뺀 나머지 폭을 거의 다 쓰므로 훨씬 넓어야 한다.
   expect(box.width).toBeGreaterThan(900)
+})
+
+// PR #54 요청 3번: 하단에 빽빽하던 액션 버튼들을 PC(lg+)에서는 스테이지
+// 오른쪽 사이드 패널로 옮긴다 — 버튼이 스테이지 "아래"가 아니라
+// "옆"(오른쪽, 같은 높이대)에 있는지 좌표로 확인한다.
+test('on a wide desktop viewport, the action menu moves beside the stage into a side panel instead of a bottom grid', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  const stageBox = await page.getByTestId('illustrated-scene-background').boundingBox()
+  const teachButton = page.getByRole('button', { name: '가르치기' })
+  await expect(teachButton).toBeVisible()
+  const menuBox = await teachButton.boundingBox()
+
+  // 메뉴가 스테이지 오른쪽에 있어야 한다(아래가 아니라).
+  expect(menuBox.x).toBeGreaterThanOrEqual(stageBox.x + stageBox.width - 1)
+  // 메뉴 버튼이 스테이지와 거의 같은 높이대에서 시작해야 한다(한참 아래로
+  // 밀려 내려간 하단 그리드가 아니라는 뜻).
+  expect(menuBox.y).toBeLessThan(stageBox.y + stageBox.height)
+})
+
+// 모바일 폭에서는 PR #53까지와 동일하게 메뉴가 스테이지 "아래"에 그대로
+// 쌓여야 한다 — 사이드 패널 변경이 모바일 레이아웃을 건드리지 않았는지
+// 확인한다.
+test('on a mobile viewport, the action menu still stacks below the stage as a grid', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  const stageBox = await page.getByTestId('illustrated-scene-background').boundingBox()
+  const teachButton = page.getByRole('button', { name: '가르치기' })
+  await expect(teachButton).toBeVisible()
+  const menuBox = await teachButton.boundingBox()
+
+  expect(menuBox.y).toBeGreaterThanOrEqual(stageBox.y + stageBox.height - 1)
 })

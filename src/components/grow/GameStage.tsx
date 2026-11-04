@@ -11,14 +11,18 @@ import { AGE_PORTRAIT_SRC } from '../../data/characterAgePortraits'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
-// PR #50 긴급 재작업: 제공받은 실제 일러스트 속 누리·두리 대략적인
-// 위치(퍼센트 좌표) — 캐릭터별 탭 타깃·말풍선·기분 이모지를 그 위에
-// 겹쳐 그린다. 그림 자체는 통째로 하나라 두 사람을 따로 자르지 않고
-// 같이 보여주고, "지금 선택된 쪽"만 금색 테두리로 강조한다.
-const ILLUSTRATED_REGION: Record<CompanionType, { left: string; top: string; width: string; height: string; anchorLeft: string }> = {
-  nuri: { left: '2%', top: '3%', width: '48%', height: '94%', anchorLeft: '26%' },
-  duri: { left: '50%', top: '3%', width: '48%', height: '94%', anchorLeft: '72%' },
-}
+// PR #54 요청 2번: PR #50~53까지는 "누리·두리가 함께 그려진 고정 배경
+// 일러스트" 위에 지금 선택된 쪽의 연령대 초상화 카드를 겹쳐 올리고, 안
+// 보고 있는 쪽 절반만 어둡게 가리는 방식이었다 — 그런데 이게 바로
+// "상단 캐릭터 영역에 여러 일러스트가 중복으로 겹쳐 보인다"는 버그의
+// 원인이었다: 같은 캐릭터가 (1) 배경 그림 속에 고정으로 한 번,
+// (2) 그 위의 초상화 카드로 또 한 번, 총 두 장 겹쳐 보였고, 안 보고
+// 있는 쪽도 어둡게만 가려질 뿐 '두리 화면' 자체는 여전히 그대로 떠
+// 있었다. 이제는 배경 그림 전체(양쪽 다)를 똑같이 어둡게 가라앉혀
+// 순수 분위기(ambient)용으로만 쓰고, 지금 선택된 캐릭터의 초상화
+// 카드 하나만 프레임 정중앙에 크게 띄운다 — 화면에 "분명하게 보이는
+// 캐릭터 그림"은 항상 딱 하나뿐이다.
+const ILLUSTRATED_PORTRAIT_ANCHOR = '50%'
 
 const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
   happy: '✨',
@@ -120,7 +124,17 @@ export default function GameStage({
     window.setTimeout(() => setTapped(false), 320)
   }
 
-  const frameClassName = `relative h-80 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-96 transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
+  // PR #54 요청 1·2번: 기존엔 h-80/sm:h-96(320/384px) 고정 높이라, PC에서
+  // 화면 가로폭이 넓어질수록(요청 1의 풀스크린 확장과 맞물려) 세로는
+  // 그대로인데 가로만 늘어나 배경 그림이 object-cover로 과도하게
+  // 눌려 잘리는 문제가 있었다(캐릭터 하반신이 통째로 잘려나가 거의
+  // 얼굴만 남는 클로즈업처럼 보임 — 요청 2번 "얼굴만 나오는 클로즈업"
+  // 피드백의 실제 원인). 가로폭과 무관하게 세로를 지금보다 눈에 띄게
+  // 키워서(모바일도 더 커짐) 초상화가 훨씬 크고 길게 보이도록 했다 —
+  // 실제 전신 에셋은 없지만(220x220 정사각 흉상 컷뿐, PR #52 5차에서
+  // 확인), 카드 자체를 세로로 더 크게 보여줘서 "전신처럼 꽉 찬" 느낌에
+  // 최대한 가깝게 만든다.
+  const frameClassName = `relative h-96 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-[28rem] lg:h-[32rem] transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
 
   // PR #52 후속 3차: CSS 모드(마켓 구매 배경 8곳)에서 그동안 손그림 SVG
   // (파란 도형)만 쓰던 캐릭터를, 연령대를 알 때는 실제로 제공받은
@@ -134,10 +148,6 @@ export default function GameStage({
   const moodIcon = MOOD_ICON[pose]
 
   if (scene.backgroundImageSrc) {
-    const region = ILLUSTRATED_REGION[companionType]
-    const otherCompanionType: CompanionType = companionType === 'nuri' ? 'duri' : 'nuri'
-    const otherRegion = ILLUSTRATED_REGION[otherCompanionType]
-
     return (
       <div className={frameClassName}>
         <img
@@ -153,39 +163,30 @@ export default function GameStage({
           className="absolute inset-0 z-0"
           style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
         />
-        {/* PR #53: "누리·두리가 같이 나오는 복잡한 그림" 피드백 — 그림
-            자체(두 캐릭터가 함께 그려진 한 장)는 지울 수 없지만, 지금
-            보고 있지 않은 쪽을 어둡게 가려서 시선이 자연스럽게 활성
-            캐릭터(초상화 카드) 쪽으로만 모이게 한다. Tailwind의
-            bg-slate-950/55(oklab 기반 색)가 이 환경에서 거의 안 보일
-            정도로 흐리게 렌더링되는 문제가 있어(스크린샷으로 직접
-            확인), 일반 sRGB rgba()를 인라인으로 직접 써서 피했다. */}
+        {/* PR #54 요청 2번: 배경 그림 전체(누리·두리 양쪽 다)를 똑같이
+            가라앉혀 순수 분위기(ambient)로만 쓴다 — "지금 안 보고 있는
+            쪽만 가린다"던 PR #53 방식은 그 쪽 화면이 여전히 선명하게
+            남아있어 '두리 화면이 중복으로 떠 있다'는 버그로 보였다.
+            이제는 어느 쪽을 보고 있어도 배경 속 두 사람 모두 똑같이
+            어두워지고, 화면에서 분명하게 보이는 캐릭터 그림은 아래의
+            중앙 초상화 카드 하나뿐이다. Tailwind의 bg-slate-950/55
+            (oklab 기반 색)가 이 환경에서 거의 안 보일 정도로 흐리게
+            렌더링되는 문제가 있어(스크린샷으로 직접 확인), 일반 sRGB
+            rgba()를 인라인으로 직접 써서 피했다(PR #53에서 확인된 환경
+            버그, 그대로 유지). */}
         <div
-          data-testid="illustrated-inactive-dim"
+          data-testid="illustrated-ambient-dim"
           aria-hidden
-          className="absolute z-[5] rounded-2xl transition-opacity duration-300"
-          style={{
-            left: otherRegion.left,
-            top: otherRegion.top,
-            width: otherRegion.width,
-            height: otherRegion.height,
-            backgroundColor: 'rgba(2, 6, 23, 0.6)',
-          }}
+          className="absolute inset-0 z-[5] transition-opacity duration-300"
+          style={{ backgroundColor: 'rgba(2, 6, 23, 0.58)' }}
         />
 
-        {/* 지금 선택된 캐릭터 영역 — role=img/aria-label은 기존 CharacterSprite와
-            동일한 포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로
-            "지금 이 캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐).
-            PR #52 후속 4차: 그림 속에 원래 그려진 누리·두리는 고정된
-            모습이라 연령대가 바뀌어도 그대로다 — 그래서 실제 연령대
-            초상화를 이 영역 가운데에 카드 형태로 띄워, 기본 로비
-            화면에서도 "지금 몇 살 단계인지"가 실제로 다른 그림으로
-            보이게 한다(badge/ring 테두리만으로는 부족하다는 반복된
-            피드백에 대한 대응). PR #52 후속 5차: 말풍선/뱃지류를 전부
-            이 영역 "뒤"가 아니라 "다음"(z-index 더 높게)에 그려서,
-            카드에 가려 안 보이던 겹침 문제를 없앴다 — z-0(배경) <
-            z-10(초상화 카드) < z-20(말풍선·뱃지)로 레이어를 명시적으로
-            분리했다. */}
+        {/* 지금 선택된 캐릭터의 연령대 초상화 카드 — 프레임 정중앙에 하나만
+            크게 띄운다. role=img/aria-label은 기존 CharacterSprite와 동일한
+            포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로 "지금 이
+            캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐).
+            z-0(배경+ambient dim) < z-10(초상화 카드) < z-20(말풍선·뱃지)로
+            레이어를 명시적으로 분리해 서로 가리는 일이 없게 했다. */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -198,16 +199,7 @@ export default function GameStage({
             }
           }}
           tabIndex={0}
-          className="absolute z-10 cursor-pointer overflow-visible rounded-2xl transition-shadow duration-200"
-          style={{
-            left: region.left,
-            top: region.top,
-            width: region.width,
-            height: region.height,
-            boxShadow: tapped
-              ? 'inset 0 0 0 3px rgba(212, 175, 55, 0.9), 0 0 16px 2px rgba(212, 175, 55, 0.5)'
-              : 'inset 0 0 0 2px rgba(212, 175, 55, 0.5)',
-          }}
+          className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center overflow-visible"
         >
           {portraitSrc && (
             <img
@@ -215,13 +207,18 @@ export default function GameStage({
               src={portraitSrc}
               alt=""
               aria-hidden
-              className="pointer-events-none absolute left-1/2 top-1/2 h-auto w-[82%] -translate-x-1/2 -translate-y-1/2 rounded-2xl object-cover shadow-xl ring-2 ring-amber-100/80 transition-transform duration-300"
+              className="pointer-events-none h-[88%] w-auto rounded-2xl object-cover transition-shadow duration-200"
+              style={{
+                boxShadow: tapped
+                  ? 'inset 0 0 0 3px rgba(212, 175, 55, 0.9), 0 0 16px 2px rgba(212, 175, 55, 0.5)'
+                  : 'inset 0 0 0 2px rgba(212, 175, 55, 0.5)',
+              }}
             />
           )}
         </div>
 
         {bubbleText && (
-          <div className="absolute top-[4%] z-20 -translate-x-1/2" style={{ left: region.anchorLeft }}>
+          <div className="absolute top-[4%] z-20 -translate-x-1/2" style={{ left: ILLUSTRATED_PORTRAIT_ANCHOR }}>
             <SpeechBubble text={bubbleText} />
           </div>
         )}
@@ -229,14 +226,14 @@ export default function GameStage({
           <span
             aria-hidden
             className="motion-safe:animate-[grow-bubble-pop_0.25s_ease-out] pointer-events-none absolute top-0 z-20 -translate-x-1/2 text-2xl drop-shadow"
-            style={{ left: region.anchorLeft }}
+            style={{ left: ILLUSTRATED_PORTRAIT_ANCHOR }}
           >
             {moodIcon}
           </span>
         )}
         <div
-          className="pointer-events-none absolute top-[12%] z-20 flex -translate-x-1/2 items-center gap-1"
-          style={{ left: region.anchorLeft }}
+          className="pointer-events-none absolute top-[6%] z-20 flex -translate-x-1/2 items-center gap-1"
+          style={{ left: ILLUSTRATED_PORTRAIT_ANCHOR }}
         >
           {tier === 'student' && (
             <span data-testid="appearance-accessory-student" aria-hidden className="text-lg drop-shadow">
@@ -366,9 +363,12 @@ export default function GameStage({
             className={`relative z-10 cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             {portraitSrc ? (
+              // PR #54 요청 2번: 프레임 자체가 더 커졌으니(위 frameClassName
+              // 참고) 카드도 같이 키워서 "더 꽉 차고 눈에 잘 들어오는" 느낌을
+              // 살렸다 — 비율/스케일 로직은 그대로.
               <span
                 data-testid="age-scale-wrapper"
-                className="mx-auto block w-[150px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[180px]"
+                className="mx-auto block w-[190px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[230px] lg:w-[260px]"
                 style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
               >
                 <img src={portraitSrc} alt="" aria-hidden className="h-auto w-full object-cover" />
@@ -376,7 +376,7 @@ export default function GameStage({
             ) : (
               <span
                 data-testid="age-scale-wrapper"
-                className="mx-auto block w-[150px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[180px]"
+                className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 [&>svg]:h-auto [&>svg]:w-full sm:w-[230px] lg:w-[260px]"
                 style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
               >
                 <CharacterSprite companionType={companionType} pose={pose} size={220} tier={tier} outfitId={outfitId} ageTier={ageTier} />
