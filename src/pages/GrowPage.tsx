@@ -400,7 +400,11 @@ export default function GrowPage() {
   return (
     <div
       data-testid="grow-page-container"
-      className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-4xl xl:max-w-5xl"
+      // PR #54 요청 1번: "여전히 좁은 박스에 갇혀 있다"는 피드백에 따라
+      // PR #53의 max-w-4xl/5xl보다 한 단계 더 넓혔다 — 사이드 액션
+      // 패널(요청 3번)까지 옆으로 나란히 놓고도 여유가 남도록 max-w-6xl
+      // (1152px)까지 확장한다.
+      className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-6xl"
     >
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
@@ -434,57 +438,67 @@ export default function GrowPage() {
 
           {/* PR #49: 스테이지+HUD+스탯+퀘스트+메뉴를 하나의 목재
               프레임으로 묶었다 — 더 이상 흰 카드들이 줄줄이 쌓인
-              목록이 아니라, 하나의 게임 화면이다. */}
+              목록이 아니라, 하나의 게임 화면이다.
+              PR #54 요청 3번: PC(lg+)에서는 메뉴를 하단이 아니라 옆면
+              (오른쪽) 사이드 패널로 옮긴다 — flex-col(모바일, 위아래로
+              쌓임)에서 lg:flex-row(옆으로 나란히)로만 바꾸면 DOM 순서가
+              그대로 "스테이지 먼저(위/왼쪽) → 메뉴 다음(아래/오른쪽)"을
+              유지해, 모바일 레이아웃은 전혀 안 건드리고 PC에서만 메뉴가
+              옆으로 옮겨간다. */}
           <div className="overflow-hidden rounded-3xl bg-amber-950 shadow-lg">
-            <div className="relative">
-              <GameStage
-                companionType={character.companionType}
-                profession={character.profession}
-                pose={pose}
-                bubbleText={bubbleText}
-                onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
-                onPropClick={handlePropClick}
-                tier={tier}
-                ageTier={ageTier}
-                ageNumber={ageNumber}
-                outfitId={inventory.equippedOutfit[character.companionType]}
-                // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
-                // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
-                // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
-                // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
-                backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
-              />
-              {xpPopup !== null && (
-                <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-300 drop-shadow">
-                  +{xpPopup} XP
-                </span>
-              )}
-              {leveledUpTo !== null && (
-                <span
-                  data-testid="level-up-banner"
-                  className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-2xl font-extrabold text-amber-300 drop-shadow-lg"
-                >
-                  🎉 Lv.{leveledUpTo} 레벨업!
-                </span>
-              )}
-              {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}
-            </div>
+            <div className="flex flex-col lg:flex-row lg:items-start">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="relative">
+                  <GameStage
+                    companionType={character.companionType}
+                    profession={character.profession}
+                    pose={pose}
+                    bubbleText={bubbleText}
+                    onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
+                    onPropClick={handlePropClick}
+                    tier={tier}
+                    ageTier={ageTier}
+                    ageNumber={ageNumber}
+                    outfitId={inventory.equippedOutfit[character.companionType]}
+                    // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
+                    // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
+                    // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
+                    // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
+                    backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
+                  />
+                  {xpPopup !== null && (
+                    <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-300 drop-shadow">
+                      +{xpPopup} XP
+                    </span>
+                  )}
+                  {leveledUpTo !== null && (
+                    <span
+                      data-testid="level-up-banner"
+                      className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-2xl font-extrabold text-amber-300 drop-shadow-lg"
+                    >
+                      🎉 Lv.{leveledUpTo} 레벨업!
+                    </span>
+                  )}
+                  {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}
+                </div>
 
-            <div className="flex flex-col gap-2 bg-gradient-to-b from-amber-900 to-amber-950 p-3">
-              <GrowthHUD
-                name={COMPANION_LABEL[character.companionType]}
-                stage={character.stage}
-                profession={character.profession}
-                exp={character.exp}
-                recentLine={recentLine}
-                ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
-              />
-              {statGauges && <StatGaugesPanel values={statGauges} />}
-              <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
-            </div>
+                <div className="flex flex-col gap-2 bg-gradient-to-b from-amber-900 to-amber-950 p-3">
+                  <GrowthHUD
+                    name={COMPANION_LABEL[character.companionType]}
+                    stage={character.stage}
+                    profession={character.profession}
+                    exp={character.exp}
+                    recentLine={recentLine}
+                    ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
+                  />
+                  {statGauges && <StatGaugesPanel values={statGauges} />}
+                  <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
+                </div>
+              </div>
 
-            <div className="p-2 pt-0">
-              <GameMenu disabled={!character.profession} examSupported={examSupported} onSelect={handleMenuSelect} />
+              <div className="border-t border-amber-900/40 p-2 pt-2 lg:w-60 lg:shrink-0 lg:border-l lg:border-t-0 lg:p-3">
+                <GameMenu disabled={!character.profession} examSupported={examSupported} onSelect={handleMenuSelect} />
+              </div>
             </div>
           </div>
 
