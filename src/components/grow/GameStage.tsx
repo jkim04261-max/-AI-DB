@@ -186,14 +186,40 @@ export default function GameStage({
             경험하기 등)과 중복 타이틀("누리AI 키우리")이 그려져
             있어서(PR #57 PR 설명 참고), 블러까지 없애면 클릭해도
             반응 없는 가짜 버튼이 다시 또렷하게 보이는 회귀가
-            생긴다 — 밝기는 원본에 가깝게, 텍스트만은 계속 못 읽게. */}
+            생긴다 — 밝기는 원본에 가깝게, 텍스트만은 계속 못 읽게.
+            PR #60: "블러/암전을 완전히 근절하라"는 요청을 그대로
+            따르면(실제로 filter를 꺼서 확인해봄) 왼쪽 나이대 선택
+            목업·오른쪽 가짜 메뉴 목업·상단 타이틀이 전부 다시 또렷하게
+            드러난다(스크린샷으로 재현) — 그래서 전면 제거 대신, 같은
+            그림을 두 장 겹쳐서 "가운데(캐릭터·성·마법진)는 원본
+            그대로 선명하게, 가짜 UI가 있는 가장자리(상단 타이틀·좌우
+            패널)만 블러"로 분리했다. 아래 선명한 바탕 레이어가 전체를
+            깔고, 그 위에 블러 레이어를 CSS mask-image(가운데가 투명해
+            바탕이 그대로 비쳐 보이고, 가장자리로 갈수록 불투명해지는
+            타원형 그라디언트)로 가장자리에만 입힌다 — 두 레이어 모두
+            동일한 scale-110/object-cover라 이음매 없이 겹친다. */}
         <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
+          {/* 선명한 바탕 레이어 — 요청대로 원본 밝기 그대로. */}
+          <img
+            src={scene.backgroundImageSrc}
+            alt=""
+            className="h-full w-full scale-110 object-cover"
+            style={{ filter: 'saturate(1.05)' }}
+          />
+          {/* 가장자리(가짜 UI)만 가리는 블러 레이어 — 중앙은 마스크로
+              투명 처리해 바탕의 선명한 그림이 그대로 비친다. */}
           <img
             data-testid="illustrated-scene-background-blur"
             src={scene.backgroundImageSrc}
             alt=""
-            className="h-full w-full scale-110 object-cover"
-            style={{ filter: 'blur(22px) brightness(0.94) saturate(1.05)' }}
+            className="absolute inset-0 h-full w-full scale-110 object-cover"
+            style={{
+              filter: 'blur(22px) brightness(0.82) saturate(1)',
+              maskImage:
+                'radial-gradient(ellipse closest-side at 50% 44%, transparent 0%, transparent 26%, black 55%, black 100%)',
+              WebkitMaskImage:
+                'radial-gradient(ellipse closest-side at 50% 44%, transparent 0%, transparent 26%, black 55%, black 100%)',
+            }}
           />
         </div>
         {/* 다른 테스트/레이어가 "프레임 자체"의 기준으로 삼는 testid —
