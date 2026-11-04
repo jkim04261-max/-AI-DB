@@ -7,7 +7,7 @@ import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
 import type { AgeTier } from '../../data/characterAge'
-import { AGE_PORTRAIT_SRC } from '../../data/characterAgePortraits'
+import { FULL_BODY_PORTRAIT_SRC } from '../../data/characterFullBody'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -140,57 +140,79 @@ export default function GameStage({
   // 화면에서 실제로 더 크고 길게 느껴지도록 했다.
   const frameClassName = `relative h-96 w-full overflow-hidden rounded-2xl ring-4 ring-inset sm:h-[28rem] lg:h-[42rem] transition-[--tw-ring-color] duration-300 ${ageTier ? AGE_TIER_RING_CLASS[ageTier] : 'ring-amber-800/80'}`
 
-  // PR #52 후속 3차: CSS 모드(마켓 구매 배경 8곳)에서 그동안 손그림 SVG
-  // (파란 도형)만 쓰던 캐릭터를, 연령대를 알 때는 실제로 제공받은
-  // 초상화로 바꿔 그린다. 단, 한복처럼 그림에 실제로 색이 반영되는
-  // 옷(OUTFIT_PALETTE_OVERRIDE에 있는 outfitId)을 장착한 경우에는
-  // 커스터마이징이 눈에 안 보이게 되므로 계속 SVG를 쓴다 — 정적
-  // 초상화 한 장으로는 옷 갈아입히기를 반영할 수 없기 때문이다.
+  // PR #52 후속 3차(배경: CSS 모드에서 SVG 대신 실제 초상화를 쓰기
+  // 시작) → PR #56(사용자가 제공한 실제 전신 일러스트로 교체): 한복처럼
+  // 그림에 실제로 색이 반영되는 옷(OUTFIT_PALETTE_OVERRIDE에 있는
+  // outfitId)을 장착한 경우에는 커스터마이징이 눈에 안 보이게 되므로
+  // 계속 SVG를 쓴다 — 정적 그림 한 장으로는 옷 갈아입히기를 반영할 수
+  // 없기 때문이다. PR #56: 연령대별 전신 원화는 아직 없어서(캐릭터당
+  // 한 장뿐, characterFullBody.ts 참고) 더 이상 ageTier로 이미지 자체를
+  // 고르지 않는다 — 연령대 구분은 기존처럼 AGE_TIER_SCALE(크기)과
+  // 나이 배지로만 표현한다.
   const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
-  const portraitSrc = ageTier && !outfitHasVisualOverride ? AGE_PORTRAIT_SRC[companionType][ageTier] : null
+  const portraitSrc = outfitHasVisualOverride ? null : FULL_BODY_PORTRAIT_SRC[companionType]
   const name = COMPANION_NAME[companionType]
   const moodIcon = MOOD_ICON[pose]
 
   if (scene.backgroundImageSrc) {
     return (
       <div className={frameClassName}>
-        <img
-          data-testid="illustrated-scene-background"
-          src={scene.backgroundImageSrc}
-          alt=""
-          aria-hidden
-          className="absolute inset-0 z-0 h-full w-full object-cover"
-        />
+        {/* PR #56: 배경 그림 속에는 "누리"/"두리" 명패까지 박힌 고정
+            등신대 일러스트가 들어있다 — PR #54의 58% 암전+새 전신
+            원화를 같이 켜보니, 그 정도 어둡기로는 명패와 캐릭터 윤곽이
+            여전히 또렷하게 읽혀서 전신 원화와 겹쳐 보이는 중복 문제가
+            그대로 재현됐다(스크린샷으로 확인). 이제는 블러까지 더해
+            형체를 알아볼 수 없는 순수 색감 질감으로만 남긴다. 블러를
+            이 img가 아니라 부모(overflow-hidden인 프레임) 안의 별도
+            래퍼에 주고 래퍼만 살짝 확대해서, 블러 가장자리의 흐린 띠가
+            프레임 밖으로 밀려나는 동시에 이 img 자신의 측정 가능한
+            bounding box는 프레임 그대로 유지되게 했다(다른 테스트들이
+            이 testid를 "프레임 자체"의 기준점으로 쓰고 있어, img에
+            직접 transform을 주면 그 기준이 틀어진다). */}
+        <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
+          <img
+            data-testid="illustrated-scene-background-blur"
+            src={scene.backgroundImageSrc}
+            alt=""
+            className="h-full w-full scale-110 object-cover"
+            style={{ filter: 'blur(14px) brightness(0.4) saturate(0.75)' }}
+          />
+        </div>
+        {/* 다른 테스트/레이어가 "프레임 자체"의 기준으로 삼는 testid —
+            실제 흐려진 그림은 위의 비가시 래퍼가 그린다. */}
+        <div data-testid="illustrated-scene-background" aria-hidden className="absolute inset-0 z-0" />
         {/* 아늑한 느낌의 상/하단 비네트 — 실제 일러스트 위에도 자연스럽게 얹힌다 */}
         <div
           aria-hidden
           className="absolute inset-0 z-0"
           style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
         />
-        {/* PR #54 요청 2번: 배경 그림 전체(누리·두리 양쪽 다)를 똑같이
-            가라앉혀 순수 분위기(ambient)로만 쓴다 — "지금 안 보고 있는
-            쪽만 가린다"던 PR #53 방식은 그 쪽 화면이 여전히 선명하게
-            남아있어 '두리 화면이 중복으로 떠 있다'는 버그로 보였다.
-            이제는 어느 쪽을 보고 있어도 배경 속 두 사람 모두 똑같이
-            어두워지고, 화면에서 분명하게 보이는 캐릭터 그림은 아래의
-            중앙 초상화 카드 하나뿐이다. Tailwind의 bg-slate-950/55
-            (oklab 기반 색)가 이 환경에서 거의 안 보일 정도로 흐리게
-            렌더링되는 문제가 있어(스크린샷으로 직접 확인), 일반 sRGB
-            rgba()를 인라인으로 직접 써서 피했다(PR #53에서 확인된 환경
-            버그, 그대로 유지). */}
+        {/* PR #54 요청 2번 → PR #56: 배경 그림 전체(누리·두리 양쪽 다)를
+            똑같이 가라앉혀 순수 분위기(ambient)로만 쓴다. Tailwind의
+            bg-slate-950/55(oklab 기반 색)가 이 환경에서 거의 안 보일
+            정도로 흐리게 렌더링되는 문제가 있어(스크린샷으로 직접
+            확인), 일반 sRGB rgba()를 인라인으로 직접 써서 피했다(PR
+            #53에서 확인된 환경 버그, 그대로 유지). */}
         <div
           data-testid="illustrated-ambient-dim"
           aria-hidden
           className="absolute inset-0 z-[5] transition-opacity duration-300"
-          style={{ backgroundColor: 'rgba(2, 6, 23, 0.58)' }}
+          style={{ backgroundColor: 'rgba(2, 6, 23, 0.45)' }}
         />
 
-        {/* 지금 선택된 캐릭터의 연령대 초상화 카드 — 프레임 정중앙에 하나만
+        {/* 지금 선택된 캐릭터의 전신 일러스트 — 프레임 정중앙에 하나만
             크게 띄운다. role=img/aria-label은 기존 CharacterSprite와 동일한
-            포맷이라 포즈 검증 e2e가 그대로 통한다. 금색 테두리로 "지금 이
-            캐릭터를 보고 있다"를 표시한다(탭하면 살짝 더 밝아짐).
-            z-0(배경+ambient dim) < z-10(초상화 카드) < z-20(말풍선·뱃지)로
-            레이어를 명시적으로 분리해 서로 가리는 일이 없게 했다. */}
+            포맷이라 포즈 검증 e2e가 그대로 통한다.
+            z-0(배경+ambient dim) < z-10(전신 일러스트) < z-20(말풍선·뱃지)로
+            레이어를 명시적으로 분리해 서로 가리는 일이 없게 했다.
+            PR #56: 전신 원화는 배경을 제거한 투명 PNG라, PR #54까지
+            쓰던 사각형 카드 테두리(rounded-2xl + boxShadow)를 그대로
+            두면 캐릭터 주위에 빈 네모 테두리만 둥둥 떠 보인다("카드
+            형태를 없애라"는 PR #55 피드백과도 정면으로 어긋난다) —
+            그래서 테두리 없이 그림만 두고, 탭 피드백도 사각 박스가
+            아니라 실루엣 모양을 그대로 따라가는 drop-shadow 글로우로
+            바꿨다(box-shadow와 달리 drop-shadow는 투명 영역을 무시하고
+            알파 채널 윤곽만 따라간다). */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -211,11 +233,11 @@ export default function GameStage({
               src={portraitSrc}
               alt=""
               aria-hidden
-              className="pointer-events-none h-[88%] w-auto rounded-2xl object-cover transition-shadow duration-200"
+              className="pointer-events-none h-[92%] w-auto object-contain transition-[filter] duration-200"
               style={{
-                boxShadow: tapped
-                  ? 'inset 0 0 0 3px rgba(212, 175, 55, 0.9), 0 0 16px 2px rgba(212, 175, 55, 0.5)'
-                  : 'inset 0 0 0 2px rgba(212, 175, 55, 0.5)',
+                filter: tapped
+                  ? 'drop-shadow(0 0 20px rgba(212, 175, 55, 0.85)) drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35))'
+                  : 'drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35))',
               }}
             />
           )}
@@ -338,8 +360,18 @@ export default function GameStage({
         }}
       />
 
-      {/* 캐릭터 + 그림자 + 말풍선 */}
-      <div className="absolute inset-x-0 bottom-2 flex flex-col items-center">
+      {/* 캐릭터 + 그림자 + 말풍선.
+          PR #56: 전신 원화는 이전 손그림 SVG/흉상 컷보다 훨씬 커서(세로
+          길이가 크게 늘어남), 가운데 정렬을 위해 inset-x-0(프레임 전체
+          가로폭)로 깔아둔 이 바깥 래퍼의 세로 높이도 같이 커졌다 —
+          그러면 캐릭터가 실제로 없는 위쪽 빈 공간까지 "보이지 않는
+          히트박스"로 프레임 전체 가로폭을 덮게 돼서, 그 위쪽에 따로
+          떠 있는 소품(💻 등) 클릭을 가로채 버리는 버그가 생겼다
+          (element.elementFromPoint로 직접 확인). 이 래퍼 자체는 아무
+          onClick도 없는 순수 레이아웃용이라 pointer-events-none으로
+          클릭을 그냥 통과시키고, 실제로 클릭을 받아야 하는 캐릭터
+          탭 타깃에만 pointer-events-auto로 다시 켜준다. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-2 flex flex-col items-center">
         <div className="relative">
           {bubbleText && <SpeechBubble text={bubbleText} />}
           {/* 일부러 role="button"을 주지 않는다 — button/role="button" 같은
@@ -364,18 +396,28 @@ export default function GameStage({
               }
             }}
             tabIndex={0}
-            className={`relative z-10 cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
+            className={`pointer-events-auto relative z-10 cursor-pointer rounded-full transition-transform duration-200 ${tapped ? 'scale-110' : 'scale-100'} active:scale-95`}
           >
             {portraitSrc ? (
               // PR #54 요청 2번: 프레임 자체가 더 커졌으니(위 frameClassName
               // 참고) 카드도 같이 키워서 "더 꽉 차고 눈에 잘 들어오는" 느낌을
               // 살렸다 — 비율/스케일 로직은 그대로.
+              // PR #56: 전신 원화는 배경을 제거한 투명 PNG라 더 이상 사각형
+              // 카드(overflow-hidden rounded-2xl + ring + shadow)로 감싸지
+              // 않는다 — 일러스트 모드와 같은 이유로 "카드 형태"를 없애고
+              // drop-shadow로만 바닥에 그림자를 살짝 준다.
               <span
                 data-testid="age-scale-wrapper"
-                className="mx-auto block w-[190px] origin-bottom overflow-hidden rounded-2xl shadow-lg ring-2 ring-amber-900/30 transition-transform duration-300 sm:w-[230px] lg:w-[320px]"
+                className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 sm:w-[230px] lg:w-[320px]"
                 style={{ transform: `scale(${ageTier ? AGE_TIER_SCALE[ageTier] : 1})` }}
               >
-                <img src={portraitSrc} alt="" aria-hidden className="h-auto w-full object-cover" />
+                <img
+                  src={portraitSrc}
+                  alt=""
+                  aria-hidden
+                  className="h-auto w-full object-contain"
+                  style={{ filter: 'drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35))' }}
+                />
               </span>
             ) : (
               <span
