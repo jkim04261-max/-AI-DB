@@ -522,9 +522,12 @@ test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of t
 // PR #52 후속 4차: 기본 로비(일러스트 모드)는 PR #50의 고정된 한 장짜리
 // 그림이라 배지/테두리만으로는 "캐릭터 자체가 바뀐다"는 느낌이 약했다
 // — 유저가 실제 화면에서 연령대가 안 바뀐다고 재차 확인해준 뒤,
-// 실제 연령대 초상화를 캐릭터 영역 위에 카드로 띄우도록 고쳤다.
-// 레벨이 바뀌면(토들러→마스터) 이 카드의 그림 자체가 바뀌는지 검증한다.
-test('the default (illustrated) lobby also shows the real age-tier portrait over the character, and swaps when the tier changes', async ({ page }) => {
+// 실제 초상화를 캐릭터 영역 위에 띄우도록 고쳤다.
+// PR #56: 사용자가 제공한 실제 전신 원화(누리/두리 각 한 장)로 교체—
+// 연령대별로 별도 원화는 아직 없어서(characterFullBody.ts 참고) 레벨이
+// 바뀌어도 이미지 자체는 같다(배지/숫자가 바뀌는 건 다른 테스트에서
+// 검증). 같은 전신 원화가 모든 연령대에서 그대로 보이는지 확인한다.
+test('the default (illustrated) lobby shows the real full-body character art, the same image across age tiers (no separate art per tier yet)', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -534,12 +537,12 @@ test('the default (illustrated) lobby also shows the real age-tier portrait over
 
   const portrait = page.getByTestId('illustrated-age-portrait-nuri')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+  await expect(portrait).toHaveAttribute('src', /nuri-full/)
 
   await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
   await page.reload()
 
-  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-master_50s/)
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-full/)
 })
 
 // CSS 모드(마켓 배경)에서는 캐릭터 자체의 크기가 연령대에 따라 실제로
@@ -563,10 +566,11 @@ test('in a CSS-mode (purchased) background, the character visibly scales with it
   await expect(wrapper).toHaveCSS('transform', /matrix\(1\.08/)
 })
 
-// PR #52 후속 3차: 사용자가 제공한 연령대별 일러스트로 CSS 모드(마켓
-// 구매 배경)의 손그림 SVG(파란 도형)를 실제 이미지로 교체했다 — 이
-// 테스트가 "더 이상 도형이 아니라 진짜 그림이 뜬다"를 직접 검증한다.
-test('in a CSS-mode (purchased) background, the character shows the real age-tier portrait image, not the SVG shape', async ({ page }) => {
+// PR #52 후속 3차: CSS 모드(마켓 구매 배경)의 손그림 SVG(파란 도형)를
+// 실제 이미지로 교체했다 — PR #56에서 그 실제 이미지가 사용자가 제공한
+// 전신 원화로 바뀌었다. 이 테스트는 "더 이상 도형이 아니라 진짜 그림이
+// 뜬다"를 직접 검증한다.
+test('in a CSS-mode (purchased) background, the character shows the real full-body portrait image, not the SVG shape', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -585,7 +589,7 @@ test('in a CSS-mode (purchased) background, the character shows the real age-tie
   await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
   const portrait = page.getByTestId('age-scale-wrapper').locator('img')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+  await expect(portrait).toHaveAttribute('src', /nuri-full/)
 })
 
 // PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
@@ -804,10 +808,30 @@ test('the whole shared illustration (both companions) is dimmed into ambiance, s
   expect(portraitBox.x + portraitBox.width / 2).toBeLessThan(frameCenterX + 20)
 })
 
-// PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제
-// 연령대별 캐릭터 이미지로 교체했다(기본 의상일 때만 — 한복처럼 그림에
-// 색이 반영되는 옷을 입었을 때는 옷 갈아입히기 미리보기를 지키기 위해
-// 계속 SVG를 쓴다).
+// PR #56: 진짜 전신 원화를 켜보니, PR #54의 58% 암전 정도로는 배경 그림
+// 속에 박힌 "누리"/"두리" 명패와 인물 윤곽이 여전히 또렷하게 읽혀서
+// 전신 원화와 겹쳐 보이는 중복 버그가 재현됐다(스크린샷으로 확인) —
+// 블러(blur)를 더해 형체를 알아볼 수 없는 색감 질감으로만 남기도록
+// 고쳤다. 배경 이미지에 blur 필터가 실제로 걸려 있는지 확인해 이
+// 회귀를 막는다.
+test('the ambient background illustration is blurred, not just dimmed, so the embedded name plates/figures are unrecognizable', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+
+  const bg = page.getByTestId('illustrated-scene-background-blur')
+  await expect(bg).toBeVisible()
+  const filter = await bg.evaluate((el) => getComputedStyle(el).filter)
+  expect(filter).toMatch(/blur\(/)
+})
+
+// PR #53 요청 5번: 커스터마이징 룸의 파란 도형 SVG 프리뷰를 실제 캐릭터
+// 이미지로 교체했다(기본 의상일 때만 — 한복처럼 그림에 색이 반영되는
+// 옷을 입었을 때는 옷 갈아입히기 미리보기를 지키기 위해 계속 SVG를
+// 쓴다). PR #56: 그 실제 이미지가 사용자가 제공한 전신 원화로 바뀌었다.
 test('the customization room shows the real character portrait instead of the SVG shape, for the default outfit', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -819,7 +843,7 @@ test('the customization room shows the real character portrait instead of the SV
 
   const portrait = page.getByTestId('customization-age-portrait')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+  await expect(portrait).toHaveAttribute('src', /nuri-full/)
   await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
 })
 

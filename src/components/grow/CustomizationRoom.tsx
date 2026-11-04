@@ -4,7 +4,7 @@ import CharacterSprite, { OUTFIT_PALETTE_OVERRIDE } from './CharacterSprite'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { AgeTier } from '../../data/characterAge'
-import { AGE_PORTRAIT_SRC } from '../../data/characterAgePortraits'
+import { FULL_BODY_PORTRAIT_SRC } from '../../data/characterFullBody'
 import {
   CUSTOMIZATION_CATALOG,
   CATEGORY_LABEL,
@@ -46,7 +46,10 @@ export default function CustomizationRoom({
   // 계속 SVG를 쓴다(GameStage.tsx와 같은 조건 — 정적 사진으로는 옷을
   // 갈아입혀도 반영할 수 없다).
   const outfitHasVisualOverride = Boolean(equippedOutfitId && OUTFIT_PALETTE_OVERRIDE[equippedOutfitId as OutfitId])
-  const portraitSrc = ageTier && !outfitHasVisualOverride ? AGE_PORTRAIT_SRC[companionType][ageTier] : null
+  // PR #56: 연령대별 전신 원화는 아직 없어서(characterFullBody.ts 참고)
+  // ageTier는 더 이상 이미지 자체를 고르지 않는다 — "지정됐는지"만
+  // 기존처럼 실제 그림 vs SVG 전환 게이트로 쓴다.
+  const portraitSrc = ageTier && !outfitHasVisualOverride ? FULL_BODY_PORTRAIT_SRC[companionType] : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -63,11 +66,16 @@ export default function CustomizationRoom({
 
       <div className="flex justify-center rounded-2xl bg-amber-950 p-4">
         {portraitSrc ? (
+          // PR #56: 전신 원화는 배경을 제거한 투명 PNG라 object-contain으로
+          // 통째로 보여준다(예전 220x220 정사각 흉상 컷의 object-cover와
+          // 달리, 전신이 잘리면 안 되므로) — 사각 카드 테두리도 다른
+          // 화면들과 같은 이유로 없애고 drop-shadow만 남겼다.
           <img
             data-testid="customization-age-portrait"
             src={portraitSrc}
             alt={`${companionType === 'nuri' ? '누리' : '두리'} 캐릭터`}
-            className="h-[140px] w-[140px] rounded-2xl object-cover shadow-lg ring-2 ring-amber-700/50"
+            className="h-[140px] w-[140px] object-contain"
+            style={{ filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4))' }}
           />
         ) : (
           <CharacterSprite companionType={companionType} pose="idle" size={140} tier={tier} outfitId={equippedOutfitId as OutfitId} />
