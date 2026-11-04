@@ -157,73 +157,29 @@ export default function GameStage({
   if (scene.backgroundImageSrc) {
     return (
       <div className={frameClassName}>
-        {/* PR #56: 배경 그림 속에는 "누리"/"두리" 명패까지 박힌 고정
-            등신대 일러스트가 들어있다 — PR #54의 58% 암전+새 전신
-            원화를 같이 켜보니, 그 정도 어둡기로는 명패와 캐릭터 윤곽이
-            여전히 또렷하게 읽혀서 전신 원화와 겹쳐 보이는 중복 문제가
-            그대로 재현됐다(스크린샷으로 확인). 이제는 블러까지 더해
-            형체를 알아볼 수 없는 순수 색감 질감으로만 남긴다. 블러를
-            이 img가 아니라 부모(overflow-hidden인 프레임) 안의 별도
-            래퍼에 주고 래퍼만 살짝 확대해서, 블러 가장자리의 흐린 띠가
-            프레임 밖으로 밀려나는 동시에 이 img 자신의 측정 가능한
-            bounding box는 프레임 그대로 유지되게 했다(다른 테스트들이
-            이 testid를 "프레임 자체"의 기준점으로 쓰고 있어, img에
-            직접 transform을 주면 그 기준이 틀어진다).
-            PR #58: brightness(0.4)+45% 암전을 그대로 '성장 판타지 랩'
-            배경(PR #57)에 적용해보니, 화면이 너무 어두워져서 그 배경
-            고유의 분홍 벚꽃·보라빛 마법진·금색 글로우 색감이 거의
-            안 보이는 무채색에 가까운 어두운 얼룩으로 뭉개졌다 —
-            "배경이 안 바뀐 것 같다"는 피드백의 실제 원인이었다(글자
-            가독성 때문에 블러를 키운 건 맞는 방향이었지만, 밝기/채도를
-            텍스트 가독성과 무관하게 과하게 깎은 게 문제였다). 블러는
-            오히려 16px로 더 키워 글자 안전 마진을 넉넉히 확보하고,
-            밝기·채도는 되살려서 색감 자체는 또렷하게 드러나게 했다.
-            PR #59: "여전히 어둡다, 원본 선명도 90~100%로"라는 요청에
-            맞춰 밝기·채도를 한계까지 끌어올렸다(0.68→0.94,
-            0.95→1.05 — 거의 원본 그대로). 다만 블러(글자를 읽을 수
-            없게 만드는 유일한 장치)는 22px로 오히려 더 키웠다 — 이
-            배경 원본에는 실제로 쓰지 않는 가짜 메뉴 버튼(학습하기/
-            경험하기 등)과 중복 타이틀("누리AI 키우리")이 그려져
-            있어서(PR #57 PR 설명 참고), 블러까지 없애면 클릭해도
-            반응 없는 가짜 버튼이 다시 또렷하게 보이는 회귀가
-            생긴다 — 밝기는 원본에 가깝게, 텍스트만은 계속 못 읽게. */}
-        <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
-          <img
-            data-testid="illustrated-scene-background-blur"
-            src={scene.backgroundImageSrc}
-            alt=""
-            className="h-full w-full scale-110 object-cover"
-            style={{ filter: 'blur(22px) brightness(0.94) saturate(1.05)' }}
-          />
-        </div>
-        {/* 다른 테스트/레이어가 "프레임 자체"의 기준으로 삼는 testid —
-            실제 흐려진 그림은 위의 비가시 래퍼가 그린다. */}
-        <div data-testid="illustrated-scene-background" aria-hidden className="absolute inset-0 z-0" />
-        {/* 아늑한 느낌의 상/하단 비네트 — 실제 일러스트 위에도 자연스럽게 얹힌다 */}
+        {/* PR #56~60: 그때까지 쓰던 배경(사용자가 제공한 '성장 판타지
+            랩' 포스터)에는 캐릭터·타이틀·가짜 메뉴 버튼이 한 장에
+            합성돼 있어서, 그대로 쓰면 실제 화면의 캐릭터·UI와 중복
+            되거나 클릭해도 반응 없는 가짜 버튼이 보이는 문제가 있었다
+            — 그래서 블러+암전으로 형체를 알아볼 수 없게 가려야 했다.
+            PR #61: 사용자가 캐릭터·글자·버튼이 전혀 없는 순수 배경
+            이미지(마법진 도서관)를 새로 제공해, 가릴 대상 자체가
+            없어졌다 — 블러·마스크·암전 오버레이를 전부 걷어내고
+            원본 그대로 선명하게 쓴다. */}
+        <img
+          data-testid="illustrated-scene-background"
+          src={scene.backgroundImageSrc}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 z-0 h-full w-full object-cover"
+        />
+        {/* 아늑한 느낌의 상/하단 비네트 — 실제 일러스트 위에도 자연스럽게 얹힌다.
+            opacity 조정이 아니라 테두리 쪽에만 살짝 그림자를 주는
+            인셋 박스셰도우라, 중앙 색감·선명도에는 영향이 없다. */}
         <div
           aria-hidden
           className="absolute inset-0 z-0"
           style={{ boxShadow: 'inset 0 18px 24px -18px rgba(40, 24, 8, 0.45), inset 0 -10px 16px -10px rgba(40, 24, 8, 0.3)' }}
-        />
-        {/* PR #54 요청 2번 → PR #56: 배경 그림 전체(누리·두리 양쪽 다)를
-            똑같이 가라앉혀 순수 분위기(ambient)로만 쓴다. Tailwind의
-            bg-slate-950/55(oklab 기반 색)가 이 환경에서 거의 안 보일
-            정도로 흐리게 렌더링되는 문제가 있어(스크린샷으로 직접
-            확인), 일반 sRGB rgba()를 인라인으로 직접 써서 피했다(PR
-            #53에서 확인된 환경 버그, 그대로 유지).
-            PR #58: 위 블러 레이어의 brightness/saturate를 되살린 것과
-            맞춰, 이 암전 레이어도 45% → 28%로 낮췄다 — 두 레이어를
-            합친 전체 어둡기가 "성장 판타지 랩" 배경의 색감을 완전히
-            지워버리지 않을 정도로만 가라앉힌다.
-            PR #59: 배경 밝기를 거의 원본 수준으로 올리면서, 이 암전도
-            28% → 12%로 더 낮췄다 — 이제는 거의 비네트 수준의 아주
-            옅은 그림자일 뿐이고, 밝기는 전부 위 blur 레이어의
-            brightness(0.94)가 담당한다. */}
-        <div
-          data-testid="illustrated-ambient-dim"
-          aria-hidden
-          className="absolute inset-0 z-[5] transition-opacity duration-300"
-          style={{ backgroundColor: 'rgba(2, 6, 23, 0.12)' }}
         />
 
         {/* 지금 선택된 캐릭터의 전신 일러스트 — 프레임 정중앙에 하나만
