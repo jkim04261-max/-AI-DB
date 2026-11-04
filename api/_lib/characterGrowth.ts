@@ -30,6 +30,16 @@ export function levelForExp(exp: number): number {
   return level
 }
 
+// PR #53 요청 3번: 레벨 L에 "도달"하는 데 필요한 누적 exp(= 레벨 1부터
+// L-1까지 각 구간의 expThresholdForLevel 합) — 8~9살(toddler) 단계에서
+// 지식 '적합' 판정이 5회 쌓이면 일반 XP 곡선을 건너뛰고 곧장 Lv.5(청소년기
+// 시작)로 "진화"시킬 때, 그 Lv.5에 해당하는 exp 값을 구하는 데 쓴다.
+export function cumulativeExpForLevel(level: number): number {
+  let total = 0
+  for (let l = 1; l < level; l++) total += expThresholdForLevel(l)
+  return total
+}
+
 export interface LevelProgress {
   level: number
   // 현재 레벨 안에서 이미 쌓은 exp (0 이상, expForNextLevel 미만)

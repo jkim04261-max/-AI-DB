@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Lock, Check } from 'lucide-react'
-import CharacterSprite from './CharacterSprite'
+import CharacterSprite, { OUTFIT_PALETTE_OVERRIDE } from './CharacterSprite'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
+import type { AgeTier } from '../../data/characterAge'
+import { AGE_PORTRAIT_SRC } from '../../data/characterAgePortraits'
 import {
   CUSTOMIZATION_CATALOG,
   CATEGORY_LABEL,
@@ -21,11 +23,15 @@ const CATEGORY_ORDER: CustomizationCategory[] = ['outfit', 'hair', 'face', 'scal
 export default function CustomizationRoom({
   companionType,
   tier,
+  ageTier,
   inventory,
   onOpenMarket,
 }: {
   companionType: CompanionType
   tier: AppearanceTier
+  // PR #53 요청 5번: 연령대별 실제 초상화 미리보기용. 지정하지 않으면
+  // (호출부가 아직 안 넘기면) 기존처럼 SVG만 보여준다.
+  ageTier?: AgeTier
   inventory: MockInventory
   onOpenMarket: () => void
 }) {
@@ -34,18 +40,38 @@ export default function CustomizationRoom({
   const items = CUSTOMIZATION_CATALOG.filter(
     (i) => i.category === activeCategory && (i.companionType === companionType || i.companionType === 'any'),
   )
+  // PR #53 요청 5번: 파란 도형 SVG 대신 실제 캐릭터 이미지를 보여준다.
+  // 단, 한복처럼 그림에 실제 색이 반영되는 옷을 입었을 때는 "옷
+  // 갈아입히기 실시간 미리보기"라는 이 화면의 핵심 기능을 지키기 위해
+  // 계속 SVG를 쓴다(GameStage.tsx와 같은 조건 — 정적 사진으로는 옷을
+  // 갈아입혀도 반영할 수 없다).
+  const outfitHasVisualOverride = Boolean(equippedOutfitId && OUTFIT_PALETTE_OVERRIDE[equippedOutfitId as OutfitId])
+  const portraitSrc = ageTier && !outfitHasVisualOverride ? AGE_PORTRAIT_SRC[companionType][ageTier] : null
 
   return (
     <div className="flex flex-col gap-4">
-      {/* PR #50 긴급 재작업: 메인 화면이 이제 실제 일러스트 자체를 그대로
-          보여주므로, 여기서 같은 그림을 "참고용"으로 또 보여줄 필요가
-          없어졌다. 대신 옷을 실시간으로 갈아입혀 볼 수 있는 이 미리보기는
-          (그림 한 장짜리 일러스트로는 불가능한 기능이라) 기존 SVG로
-          계속 보여준다 — 그 차이를 짧게 안내한다. */}
-      <p className="text-center text-[11px] text-amber-600">메인 화면은 제공해주신 일러스트로 표시돼요. 여기서는 옷을 실시간으로 갈아입혀 미리 볼 수 있어요.</p>
+      {/* PR #53 후속: 기본 의상(outfitHasVisualOverride가 false)일 때는
+          실제 연령대 초상화를 보여주고, 한복처럼 그림에 반영되는 옷을
+          입었을 때만 "옷 갈아입히기 미리보기" 용도로 SVG로 바뀐다는
+          안내로 교체했다(PR #50 때는 실제 사진 자체가 없어서 안내문으로
+          차이를 때웠지만, 이제는 실제로 사진이 뜬다). */}
+      {portraitSrc ? (
+        <p className="text-center text-[11px] text-amber-600">지금 연령대의 실제 모습이에요. 옷을 갈아입히면 미리보기로 바뀌어요.</p>
+      ) : (
+        <p className="text-center text-[11px] text-amber-600">옷을 실시간으로 갈아입혀 미리 볼 수 있어요.</p>
+      )}
 
       <div className="flex justify-center rounded-2xl bg-amber-950 p-4">
-        <CharacterSprite companionType={companionType} pose="idle" size={140} tier={tier} outfitId={equippedOutfitId as OutfitId} />
+        {portraitSrc ? (
+          <img
+            data-testid="customization-age-portrait"
+            src={portraitSrc}
+            alt={`${companionType === 'nuri' ? '누리' : '두리'} 캐릭터`}
+            className="h-[140px] w-[140px] rounded-2xl object-cover shadow-lg ring-2 ring-amber-700/50"
+          />
+        ) : (
+          <CharacterSprite companionType={companionType} pose="idle" size={140} tier={tier} outfitId={equippedOutfitId as OutfitId} />
+        )}
       </div>
 
       <div className="flex gap-1 overflow-x-auto rounded-full bg-amber-100 p-1">

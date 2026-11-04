@@ -34,12 +34,26 @@ function levelUpSuffix(leveledUp: boolean, newLevel: number): string {
   return leveledUp ? ` 🎉 레벨업! 이제 Lv.${newLevel}이에요!` : ''
 }
 
-export function buildSavedReply(source: 'user_taught' | 'ai_generated', leveledUp: boolean, newLevel: number): string {
+// PR #53 요청 3번: 연령대 단계(toddler→teen→junior_20s→...)를 넘어서는
+// "진화"는 평범한 레벨업과 다르게, 그 마일스톤 자체를 알려준다 — 어느
+// 단계로 진화했는지는 호출부가 넘겨주는 라벨 그대로 쓰므로, 앞으로
+// 다른 단계(10대→20대 등)가 이 진화 로직을 타게 되어도 문구를 따로
+// 추가할 필요가 없다.
+function evolvedSuffix(newLevel: number, evolvedStageLabel: string): string {
+  return ` 🎉 ${evolvedStageLabel} 단계로 성장했어요! 이제 Lv.${newLevel}이에요!`
+}
+
+export function buildSavedReply(
+  source: 'user_taught' | 'ai_generated',
+  leveledUp: boolean,
+  newLevel: number,
+  evolvedStageLabel: string | null = null,
+): string {
   const base =
     source === 'user_taught'
       ? '이 지식을 배웠어요! 다음엔 또 어떤 걸 가르쳐 주실 건가요?'
       : '이 지식을 학습 기록에 저장했어요! 다음엔 또 무엇을 공부해볼까요?'
-  return base + levelUpSuffix(leveledUp, newLevel)
+  return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
 }
 
 export function buildQuizResultMessage(

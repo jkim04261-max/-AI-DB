@@ -193,7 +193,7 @@ export default function AdminPage() {
   }, [navigate])
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
       <h1 className="text-xl font-bold text-slate-900">관리자 대시보드</h1>
 
       {state.status === 'loading' && (

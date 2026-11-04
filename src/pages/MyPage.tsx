@@ -40,7 +40,7 @@ export default function MyPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
         <h1 className="text-xl font-bold text-slate-900">마이페이지</h1>
         <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
       </div>
@@ -49,7 +49,7 @@ export default function MyPage() {
 
   if (!user) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
         <h1 className="text-xl font-bold text-slate-900">마이페이지</h1>
 
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white p-8 text-center">
@@ -80,7 +80,7 @@ export default function MyPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
       <h1 className="text-xl font-bold text-slate-900">마이페이지</h1>
 
       {/* 계정 정보 + 이용 플랜 */}

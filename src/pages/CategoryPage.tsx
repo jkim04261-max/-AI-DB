@@ -18,7 +18,7 @@ export default function CategoryPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
       <div className="flex items-center gap-4">
         <span
           className={`flex h-14 w-14 items-center justify-center rounded-2xl text-white ${colors.bg}`}

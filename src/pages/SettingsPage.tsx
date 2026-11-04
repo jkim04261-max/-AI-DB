@@ -9,7 +9,7 @@ const legalLinks = [
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 lg:max-w-none xl:px-10">
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-500">
           <Settings size={26} />

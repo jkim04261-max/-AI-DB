@@ -443,6 +443,19 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- api/character.ts: handleSaveKnowledge's teen-evolution exp/level
+  // bump (GREATEST(...) on both columns) — checked before the generic
+  // 'UPDATE characters' profession matcher below, since both start with
+  // "UPDATE characters" but have completely different bound params. ---
+  if (has(text, 'UPDATE characters', 'GREATEST(exp,')) {
+    const [evolvedExp, evolvedLevel, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.exp = Math.max(row.exp ?? 0, evolvedExp)
+    row.level = Math.max(row.level ?? 1, evolvedLevel)
+    return Promise.resolve({ rows: [{ exp: row.exp, level: row.level }] })
+  }
+
   // --- api/character.ts: change/set profession (checked before the
   // generic 'FROM characters' list matcher below, since this statement has
   // no FROM clause at all) ---

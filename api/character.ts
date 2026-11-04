@@ -21,9 +21,26 @@ import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
-import { KNOWLEDGE_SAVE_EXP, QUIZ_CORRECT_EXP, EXAM_PASS_EXP, EXAM_PASS_THRESHOLD, levelForExp } from './_lib/characterGrowth'
+import {
+  KNOWLEDGE_SAVE_EXP,
+  QUIZ_CORRECT_EXP,
+  EXAM_PASS_EXP,
+  EXAM_PASS_THRESHOLD,
+  levelForExp,
+  cumulativeExpForLevel,
+} from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
-import { ageTierForLevel, meetsAgeTier, AGE_TIER_LABEL, ageBlockedMessage } from './_lib/characterAge'
+import {
+  ageTierForLevel,
+  meetsAgeTier,
+  AGE_TIER_LABEL,
+  AGE_TIER_STAGE_LABEL,
+  AGE_TIER_MIN_LEVEL,
+  EVOLUTION_KNOWLEDGE_COUNT,
+  nextAgeTier,
+  cumulativeEvolutionThreshold,
+  ageBlockedMessage,
+} from './_lib/characterAge'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #51(직업 선택 제한 해제, 2026-11-01): 처음엔 회계사·가수 2개만
@@ -789,7 +806,42 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // requestId already returned earlier, before ever reaching here). No
     // separate dedup table needed: the existing client_request_id unique
     // index is what makes the INSERT above itself happen at most once.
-    const expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+    let expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+
+    // PR #53 요청 3번: 연령대별로 지식 '적합' 저장이 일정 개수(지금 단계가
+    // 요구하는 개수 — EVOLUTION_KNOWLEDGE_COUNT, "10대 10회·20대 20회처럼
+    // 확장 가능한 구조") 쌓이면 다음 단계로 "진화"시킨다. 방금 저장한 이
+    // 항목도 포함해서 세야 하므로 INSERT 이후(entry 확보 후)에 COUNT한다.
+    // 이미 이번 단계를 벗어났다면(지난 저장에서 이미 진화했거나 다른
+    // 경로로 레벨업했다면) 그 단계 조건은 다시 발동하지 않는다 —
+    // nextAgeTier가 없는 마지막 단계(master_50s)도 자연히 제외된다.
+    let evolvedStageLabel: string | null = null
+    {
+      const currentTier = ageTierForLevel(expResult.newLevel)
+      const requiredForThisTier = EVOLUTION_KNOWLEDGE_COUNT[currentTier]
+      const next = nextAgeTier(currentTier)
+      if (requiredForThisTier !== undefined && next) {
+        const countResult = await sql<{ count: number }>`
+          SELECT COUNT(*)::int AS count FROM character_knowledge_entries WHERE character_id = ${character.id} AND user_id = ${userId}
+        `
+        const totalSaved = countResult.rows[0]?.count ?? 0
+        if (totalSaved >= cumulativeEvolutionThreshold(currentTier)) {
+          const evolvedExp = cumulativeExpForLevel(AGE_TIER_MIN_LEVEL[next])
+          const evolvedLevel = AGE_TIER_MIN_LEVEL[next]
+          const bumped = await sql<{ exp: number; level: number }>`
+            UPDATE characters
+            SET exp = GREATEST(exp, ${evolvedExp}), level = GREATEST(level, ${evolvedLevel})
+            WHERE id = ${character.id} AND user_id = ${userId}
+            RETURNING exp, level
+          `
+          const row = bumped.rows[0]
+          if (row) {
+            evolvedStageLabel = AGE_TIER_STAGE_LABEL[next]
+            expResult = { exp: row.exp, oldLevel: expResult.oldLevel, newLevel: row.level, leveledUp: row.level > expResult.oldLevel }
+          }
+        }
+      }
+    }
 
     // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
     // knowledge entry above is the thing that matters and it has already
@@ -798,7 +850,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // on failure, log server-side and still return 201 with the real
     // entry, rather than failing (or refunding anything) for a save that
     // actually worked.
-    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel)
+    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel, evolvedStageLabel)
     try {
       await ensureCharacterMessagesTable()
       await sql`
