@@ -11,6 +11,7 @@ import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfess
 import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
+import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
 import type { CharacterPose } from './CharacterSprite'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -67,6 +68,9 @@ export default function InteractionPanel({
   // 연령대(6미션 게이트로 고정됐을 수 있음)를 그대로 쓴다.
   const characterAgeTier = character.ageTier
   const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
+  // PR #65: profession==='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가
+  // 실제로 입력한 직업명을 보여준다 — 기존 49개 직업은 1바이트도 안 바뀜.
+  const professionLabel = profession === 'custom' ? character.customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -140,6 +144,9 @@ export default function InteractionPanel({
   // 쓰는 것을 구분하기 위해).
   const [missionType, setMissionType] = useState<MissionType | null>(null)
   const markManualEdit = () => setMissionType((prev) => prev ?? 'knowhow')
+  // PR #65: 지식 카드 10종 분류(선택값) — missionType(입력 방식)과는
+  // 독립된 축이라 별도 state로 관리한다. 안 골라도 저장은 그대로 된다.
+  const [knowledgeCategory, setKnowledgeCategory] = useState<KnowledgeCategory | null>(null)
   // 가르치기와 스스로 공부하기 중 어느 쪽이 지금 진행 중인지 — 두 액션은
   // 동시에 실행되지 않도록 서로를 막는다(버튼 disabled 공유).
   const [busyAction, setBusyAction] = useState<'teach' | 'study' | null>(null)
@@ -253,12 +260,21 @@ export default function InteractionPanel({
     setSaving(true)
     setSaveError(null)
     try {
-      const result = await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken, missionType ?? undefined)
+      const result = await saveKnowledge(
+        character.companionType,
+        title,
+        verifiedSnapshot.content,
+        content,
+        verificationToken,
+        missionType ?? undefined,
+        knowledgeCategory ?? undefined,
+      )
       pushLine('character', result.savedReply)
       if (result.missionProgress) setMissionProgress(result.missionProgress)
       setTitle('')
       setContent('')
       setMissionType(null)
+      setKnowledgeCategory(null)
       setVerification(null)
       setVerifiedSnapshot(null)
       setVerificationToken(null)
@@ -309,7 +325,7 @@ export default function InteractionPanel({
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-cyan-400/20 bg-slate-950/40 p-4">
       <p className="text-xs font-semibold text-cyan-200/70">
-        {name} · {PROFESSION_LABEL[profession]}와 상호작용하기
+        {name} · {professionLabel}와 상호작용하기
       </p>
 
       {/* PR #63: 6단계 카드형 미션 진행 현황 — 유형별(객관식/주관식/
@@ -521,6 +537,32 @@ export default function InteractionPanel({
             </p>
           )}
 
+          {/* PR #65: 지식 카드 10종 분류 — 선택값이라 안 골라도 저장은
+              그대로 된다. */}
+          {!isStale && verification.status === 'appropriate' && !ageBlocked && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] font-semibold text-cyan-200/60">이 지식은 어떤 종류인가요? (선택)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {KNOWLEDGE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    data-testid={`knowledge-category-chip-${cat}`}
+                    aria-pressed={knowledgeCategory === cat}
+                    onClick={() => setKnowledgeCategory((prev) => (prev === cat ? null : cat))}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                      knowledgeCategory === cat
+                        ? 'bg-cyan-400/30 text-cyan-100 ring-1 ring-cyan-300/60'
+                        : 'bg-white/5 text-cyan-200/60 hover:bg-white/10'
+                    }`}
+                  >
+                    {KNOWLEDGE_CATEGORY_ICON[cat]} {KNOWLEDGE_CATEGORY_LABEL[cat]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button
             onClick={() => void handleSave()}
             disabled={saving || isStale || verification.status !== 'appropriate' || ageBlocked}
@@ -558,6 +600,7 @@ export default function InteractionPanel({
                     <p className="truncate text-sm font-medium text-slate-100">{record.title}</p>
                     <p className="text-[11px] text-cyan-200/50">
                       {new Date(record.createdAt).toLocaleDateString('ko-KR')} · {SOURCE_LABEL[record.source]}
+                      {record.knowledgeCategory && ` · ${KNOWLEDGE_CATEGORY_ICON[record.knowledgeCategory]} ${KNOWLEDGE_CATEGORY_LABEL[record.knowledgeCategory]}`}
                     </p>
                   </div>
                   <span

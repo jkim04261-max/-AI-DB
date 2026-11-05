@@ -188,6 +188,33 @@ async function run() {
     t.assert(res.statusCode === 404, '아직 캐릭터를 만들지 않은 사용자가 직업을 선택하려 하면 404')
   }
 
+  // --- PR #65: 자유 직업 입력("custom") sentinel 값의 기본 검증 — 실제
+  // 가르치기/스스로 공부하기/집중력 통합 흐름은 tests/knowledge.test.cjs
+  // 에서 다룬다. 여기서는 PATCH 자체의 입력 검증만 확인한다. ---
+  {
+    mock.seedUser(10, { email: 'frank@test.com' })
+    const frankCookie = cookieHeaderFor(auth, 10, 0, 'frank@test.com')
+    const frankReq = (overrides = {}) => ({ headers: { cookie: frankCookie }, ...overrides })
+    await characterHandler(frankReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+
+    {
+      const res = mockRes()
+      await characterHandler(frankReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom', customProfessionLabel: '' } }), res)
+      t.assert(res.statusCode === 400, "빈 문자열 customProfessionLabel은 거부된다 (400, profession='custom')")
+    }
+    {
+      const res = mockRes()
+      await characterHandler(frankReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom', customProfessionLabel: '   ' } }), res)
+      t.assert(res.statusCode === 400, '공백만 있는 customProfessionLabel도 거부된다 (400)')
+    }
+    {
+      const res = mockRes()
+      await characterHandler(frankReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom', customProfessionLabel: '  수산물 감별사  ' } }), res)
+      t.assert(res.statusCode === 200, '앞뒤 공백이 있는 자유 직업명은 trim되어 저장된다 (200)')
+      t.assert(res.body.character?.custom_profession_label === '수산물 감별사', '저장된 값은 trim된 결과다')
+    }
+  }
+
   return t.summary()
 }
 
