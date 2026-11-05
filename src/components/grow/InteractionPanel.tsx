@@ -18,10 +18,14 @@ const VERIFICATION_LABEL: Record<KnowledgeVerification['status'], string> = {
   needs_revision: '수정 필요',
   unverifiable: '검증 불가',
 }
+// PR #62: 다크 글래스 "미션 창" 배경 위에서도 잘 읽히도록 배지 색을
+// 밝은 바탕용(green-100 등)에서 다크 글래스용(green-400/20 등)으로
+// 바꿨다 — 상태별 색 구분(초록=적합/호박=수정 필요/빨강=검증 불가)과
+// 텍스트 자체는 완전히 동일해서 기존 getByText 셀렉터에 영향 없음.
 const VERIFICATION_BADGE_CLASS: Record<KnowledgeVerification['status'], string> = {
-  appropriate: 'bg-green-100 text-green-700',
-  needs_revision: 'bg-amber-100 text-amber-700',
-  unverifiable: 'bg-red-100 text-red-700',
+  appropriate: 'bg-green-400/20 text-green-200',
+  needs_revision: 'bg-amber-400/20 text-amber-200',
+  unverifiable: 'bg-rose-400/20 text-rose-200',
 }
 const SOURCE_LABEL: Record<KnowledgeEntry['source'], string> = {
   user_taught: '직접 가르침',
@@ -264,22 +268,30 @@ export default function InteractionPanel({
 
   const busy = busyAction !== null
 
+  // PR #62 요청 1~2번: 화면 전체를 "게임 속 미션 창" 톤(다크 글래스 +
+  // 청록 홀로그램)으로 바꾸고, 입력 방식을 3개의 또렷이 구분된 미션
+  // 카드(① 선택지 고르기 ② AI 추천 받기 ③ 직접 입력)로 재배치한다.
+  // 중요: 아래는 순수 레이아웃/색상 변경이다 — 어떤 버튼의 텍스트·
+  // data-testid·활성화 조건도 바꾸지 않았다(기존 e2e가 패널을 열자마자
+  // 입력칸을 바로 채우는 흐름을 그대로 쓰기 때문에, 입력칸을 "직접
+  // 입력" 카드 뒤에 숨기는 토글 방식은 쓰지 않았다 — 항상 함께
+  // 렌더링되고, 카드 구분은 순전히 시각적 그룹핑이다).
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-dashed border-slate-300 p-4">
-      <p className="text-xs font-semibold text-slate-500">
+    <div className="flex flex-col gap-4 rounded-2xl border border-cyan-400/20 bg-slate-950/40 p-4">
+      <p className="text-xs font-semibold text-cyan-200/70">
         {name} · {PROFESSION_LABEL[profession]}와 상호작용하기
       </p>
 
-      {historyLoading && <p className="text-xs text-slate-400">대화 기록을 불러오는 중...</p>}
-      {historyError && <p className="text-xs text-red-500">{historyError}</p>}
+      {historyLoading && <p className="text-xs text-cyan-200/50">대화 기록을 불러오는 중...</p>}
+      {historyError && <p className="text-xs text-rose-300">{historyError}</p>}
 
       {dialogue.length > 0 && (
-        <div className="flex max-h-56 flex-col gap-2 overflow-y-auto rounded-xl bg-slate-50 p-3">
+        <div className="flex max-h-56 flex-col gap-2 overflow-y-auto rounded-xl bg-slate-900/50 p-3">
           {dialogue.map((line) => (
             <div key={line.id} className={`flex ${line.speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
               <p
                 className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-xs ${
-                  line.speaker === 'user' ? 'bg-indigo-500 text-white' : 'bg-white text-slate-700 shadow-sm'
+                  line.speaker === 'user' ? 'bg-cyan-600 text-white' : 'bg-slate-800/80 text-slate-100 shadow-sm'
                 }`}
               >
                 {line.speaker === 'character' && <span className="mr-1 font-semibold">{name}:</span>}
@@ -290,33 +302,64 @@ export default function InteractionPanel({
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="text-[11px] text-slate-400">
-              지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {topicSuggestions.map((topic) => (
-                <button
-                  key={topic.title}
-                  type="button"
-                  data-testid="topic-suggestion-chip"
-                  onClick={() => applyTopicSuggestion(topic)}
-                  className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
-                >
-                  {topic.title}
-                </button>
-              ))}
-            </div>
+      {/* 미션 ① 선택지에서 고르기 — 8~9살 눈높이에서 제일 쉬운, 터치 한
+          번으로 끝나는 입력 방식. 입력칸이 비어 있을 때만 보여주는 기존
+          조건은 그대로 유지했다. */}
+      {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-cyan-400/25 bg-cyan-400/5 p-3 shadow-[0_0_14px_rgba(34,211,238,0.08)]">
+          <p className="text-xs font-bold text-cyan-200">🎯 선택지에서 고르기</p>
+          <p className="text-[11px] text-cyan-200/60">
+            지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {topicSuggestions.map((topic) => (
+              <button
+                key={topic.title}
+                type="button"
+                data-testid="topic-suggestion-chip"
+                onClick={() => applyTopicSuggestion(topic)}
+                className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1 text-xs font-medium text-cyan-100 hover:bg-cyan-400/20"
+              >
+                {topic.title}
+              </button>
+            ))}
           </div>
+        </div>
+      )}
+
+      {/* 미션 ② AI 추천 받기 — 버튼 하나로 예시를 받아오되, 저장(완료
+          처리)은 반드시 아래 "저장" 버튼을 눌러야만 일어난다(자동 완료
+          금지, PR #62 요청 2번). */}
+      <div className="flex flex-col gap-2 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-3 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
+        <p className="text-xs font-bold text-purple-200">✨ AI 추천 받기</p>
+        <button
+          onClick={() => void handleSelfStudy()}
+          disabled={busy}
+          className="self-start rounded-xl border border-purple-400/40 bg-purple-400/10 px-4 py-2 text-sm font-semibold text-purple-100 hover:bg-purple-400/20 disabled:opacity-50"
+        >
+          {busyAction === 'study' ? `${name}가 스스로 공부하는 중...` : `${name} 스스로 공부하기`}
+        </button>
+        <p className="text-[11px] text-purple-200/60">
+          AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
+          내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
+        </p>
+        {studyRemaining && (
+          <p className="text-[11px] text-purple-200/60">
+            오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
+          </p>
         )}
+      </div>
+
+      {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
+          경로. */}
+      <div className="flex flex-col gap-2 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-3">
+        <p className="text-xs font-bold text-cyan-200/80">✏️ 직접 입력하기</p>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="지식 제목"
           maxLength={100}
-          className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="rounded-xl border border-cyan-400/25 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
         />
         <textarea
           value={content}
@@ -324,43 +367,27 @@ export default function InteractionPanel({
           placeholder="가르칠 지식 내용을 입력해주세요."
           maxLength={2000}
           rows={4}
-          className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="rounded-xl border border-cyan-400/25 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
         />
         <div className="flex flex-col items-start gap-1">
           <button
             onClick={() => void handleTeach()}
             disabled={busy || !title.trim() || !content.trim()}
-            className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 disabled:opacity-50"
+            className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_0_12px_rgba(56,189,248,0.4)] hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 disabled:shadow-none"
           >
             {busyAction === 'teach' ? 'Gemini 검증 중...' : 'Gemini 검증하기'}
           </button>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-cyan-200/50">
             입력한 지식을 Gemini가 검토해요. 검증 성공 후 저장해야 경험치가 지급되고, Gemini API 호출에 따른 비용이 발생할 수 있어요.
           </p>
         </div>
-        <div className="flex flex-col items-start gap-1">
-          <button
-            onClick={() => void handleSelfStudy()}
-            disabled={busy}
-            className="rounded-xl border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-500 hover:bg-indigo-50 disabled:opacity-50"
-          >
-            {busyAction === 'study' ? `${name}가 스스로 공부하는 중...` : `${name} 스스로 공부하기`}
-          </button>
-          <p className="text-[11px] text-slate-400">
-            기존 학습 기록을 참고해 AI가 새로운 학습 내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
-          </p>
-        </div>
-        {studyRemaining && (
-          <p className="text-[11px] text-slate-400">
-            오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
-          </p>
-        )}
       </div>
 
-      {actionError && <p className="text-sm text-red-500">{actionError}</p>}
+      {actionError && <p className="text-sm text-rose-300">{actionError}</p>}
 
       {verification && (
-        <div className="flex flex-col gap-2 rounded-xl bg-slate-50 p-3">
+        <div className="flex flex-col gap-2 rounded-2xl border border-cyan-400/20 bg-slate-900/50 p-3">
+          <p className="text-xs font-bold text-cyan-200/80">📋 미션 결과</p>
           <span
             className={`self-start rounded-full px-2.5 py-0.5 text-xs font-semibold ${VERIFICATION_BADGE_CLASS[verification.status]}`}
           >
@@ -368,12 +395,12 @@ export default function InteractionPanel({
           </span>
           {ageBlocked && requiredAgeTier && (
             <div className="flex flex-col gap-1.5">
-              <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-600">
+              <p data-testid="age-blocked-notice" className="text-xs font-semibold text-rose-300">
                 🔒 {AGE_TIER_LABEL[requiredAgeTier]}부터 배울 수 있는 지식이에요 — 아직은 저장할 수 없어요.
               </p>
               {topicSuggestions.length > 0 && (
                 <div className="flex flex-col gap-1">
-                  <p className="text-[11px] text-rose-500">
+                  <p className="text-[11px] text-rose-300/80">
                     지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 이런 지식부터 가르쳐 보세요:
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -383,7 +410,7 @@ export default function InteractionPanel({
                         type="button"
                         data-testid="age-blocked-topic-suggestion-chip"
                         onClick={() => applyTopicSuggestion(topic)}
-                        className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100"
+                        className="rounded-full border border-rose-400/40 bg-rose-400/10 px-2.5 py-1 text-xs font-medium text-rose-200 hover:bg-rose-400/20"
                       >
                         {topic.title}
                       </button>
@@ -393,31 +420,31 @@ export default function InteractionPanel({
               )}
             </div>
           )}
-          {verification.explanation && <p className="text-xs text-slate-600">설명: {verification.explanation}</p>}
-          {verification.relevance && <p className="text-xs text-slate-600">관련성: {verification.relevance}</p>}
-          {verification.issues && <p className="text-xs text-red-500">문제점: {verification.issues}</p>}
+          {verification.explanation && <p className="text-xs text-slate-200/80">설명: {verification.explanation}</p>}
+          {verification.relevance && <p className="text-xs text-slate-200/80">관련성: {verification.relevance}</p>}
+          {verification.issues && <p className="text-xs text-rose-300">문제점: {verification.issues}</p>}
           {verification.suggestion && (
             <div className="flex flex-col gap-1">
-              <p className="text-xs text-slate-600">제안: {verification.suggestion}</p>
+              <p className="text-xs text-slate-200/80">💡 힌트: {verification.suggestion}</p>
               <button
                 onClick={handleApplySuggestion}
-                className="self-start text-xs font-semibold text-indigo-500 hover:text-indigo-600"
+                className="self-start text-xs font-semibold text-cyan-300 hover:text-cyan-200"
               >
                 제안 내용 적용 (다시 검증 필요)
               </button>
             </div>
           )}
 
-          {isStale && <p className="text-xs text-amber-600">내용이 바뀌었어요. 저장하려면 다시 검증해주세요.</p>}
+          {isStale && <p className="text-xs text-amber-300">내용이 바뀌었어요. 저장하려면 다시 검증해주세요.</p>}
           {!isStale && verification.status === 'needs_revision' && (
-            <p className="text-xs text-amber-600">내용을 수정한 후 다시 검증해주세요.</p>
+            <p className="text-xs text-amber-300">💡 내용을 수정한 후 다시 검증해주세요.</p>
           )}
           {!isStale && verification.status === 'unverifiable' && (
-            <p className="text-xs text-red-500">이 내용은 저장할 수 없어요. 내용을 다시 확인해주세요.</p>
+            <p className="text-xs text-rose-300">이 내용은 저장할 수 없어요. 내용을 다시 확인해주세요.</p>
           )}
 
           {teachRemaining && (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-cyan-200/50">
               오늘 남은 지식 검증 횟수: {teachRemaining.remaining}/{teachRemaining.limit}
             </p>
           )}
@@ -425,18 +452,18 @@ export default function InteractionPanel({
           <button
             onClick={() => void handleSave()}
             disabled={saving || isStale || verification.status !== 'appropriate' || ageBlocked}
-            className="self-start rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="self-start rounded-xl border border-emerald-400/50 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.25)] hover:bg-emerald-400/20 disabled:opacity-50 disabled:shadow-none"
           >
             {saving ? '저장 중...' : '저장'}
           </button>
-          {saveError && <p className="text-sm text-red-500">{saveError}</p>}
+          {saveError && <p className="text-sm text-rose-300">{saveError}</p>}
         </div>
       )}
 
       <div className="flex flex-col gap-2">
         <button
           onClick={handleToggleRecords}
-          className="flex items-center gap-1 self-start text-xs font-semibold text-slate-500 hover:text-slate-700"
+          className="flex items-center gap-1 self-start text-xs font-semibold text-cyan-200/70 hover:text-cyan-100"
         >
           학습 기록 {recordsOpen ? `(${recordsTotal}개)` : ''}
           {recordsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -444,20 +471,20 @@ export default function InteractionPanel({
 
         {recordsOpen && (
           <div className="flex flex-col gap-2">
-            {recordsLoading && <p className="text-xs text-slate-400">불러오는 중...</p>}
-            {recordsError && <p className="text-xs text-red-500">{recordsError}</p>}
+            {recordsLoading && <p className="text-xs text-cyan-200/50">불러오는 중...</p>}
+            {recordsError && <p className="text-xs text-rose-300">{recordsError}</p>}
             {!recordsLoading && records !== null && records.length === 0 && (
-              <p className="text-xs text-slate-400">아직 가르친 지식이 없어요.</p>
+              <p className="text-xs text-cyan-200/50">아직 가르친 지식이 없어요.</p>
             )}
             {records?.map((record) => (
-              <div key={record.id} className="rounded-xl border border-slate-200 p-2.5">
+              <div key={record.id} className="rounded-xl border border-cyan-400/15 bg-slate-900/30 p-2.5">
                 <button
                   onClick={() => setExpandedRecordId((prev) => (prev === record.id ? null : record.id))}
                   className="flex w-full items-center justify-between text-left"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-800">{record.title}</p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="truncate text-sm font-medium text-slate-100">{record.title}</p>
+                    <p className="text-[11px] text-cyan-200/50">
                       {new Date(record.createdAt).toLocaleDateString('ko-KR')} · {SOURCE_LABEL[record.source]}
                     </p>
                   </div>
@@ -468,9 +495,9 @@ export default function InteractionPanel({
                   </span>
                 </button>
                 {expandedRecordId === record.id && (
-                  <div className="mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2 text-xs text-slate-600">
+                  <div className="mt-2 flex flex-col gap-1 border-t border-cyan-400/10 pt-2 text-xs text-slate-200/80">
                     <p>{record.finalContent}</p>
-                    <p className="text-slate-400">{record.verificationExplanation}</p>
+                    <p className="text-cyan-200/40">{record.verificationExplanation}</p>
                   </div>
                 )}
               </div>
