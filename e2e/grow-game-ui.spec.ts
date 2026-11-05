@@ -985,3 +985,54 @@ test('on a mobile viewport, the action menu still stacks below the stage as a gr
 
   expect(menuBox.y).toBeGreaterThanOrEqual(stageBox.y + stageBox.height - 1)
 })
+
+// PR #62 요청 1~2번: "가르치기·스스로 공부하기" 화면을 게이미피케이션
+// 인터페이스로 개편 — 팝업이 판타지 테두리의 글래스모피즘 "미션 창"으로
+// 뜨고, 그 안에 선택지 고르기/AI 추천/직접 입력 3개의 미션 카드가
+// 함께 보여야 한다. 기존 입력칸·버튼 텍스트·data-testid는 전혀
+// 바뀌지 않았으므로(InteractionPanel.tsx 참고) 다른 knowledge.spec.ts
+// 테스트들의 동작 자체를 재검증하지는 않고, 이 PR에서 새로 생긴
+// "3개 미션 카드 + 미션 창" 레이아웃 계약만 검증한다.
+test('the teach/study panel shows three distinct gamified mission cards inside a mission-styled sheet', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('🎯 선택지에서 고르기')).toBeVisible()
+  await expect(dialog.getByText('✨ AI 추천 받기')).toBeVisible()
+  await expect(dialog.getByText('✏️ 직접 입력하기')).toBeVisible()
+
+  // 기존 입력 경로(입력칸·버튼)는 토글 없이 그대로 바로 쓸 수 있어야
+  // 한다 — knowledge.spec.ts의 모든 시나리오가 패널을 열자마자 바로
+  // placeholder를 채우는 흐름에 의존하기 때문에, 이 계약이 깨지면 그
+  // 테스트들이 전부 실패한다.
+  await expect(page.getByPlaceholder('지식 제목')).toBeVisible()
+  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '누리 스스로 공부하기' })).toBeVisible()
+
+  // 미션 창 전용 테두리 색(청록 홀로그램)이 적용됐는지 확인 — 다른
+  // 화면(성장 보기 등)은 기존 호박목재 테두리를 그대로 유지해야 한다.
+  await expect(dialog).toHaveClass(/border-cyan-400\/50/)
+})
+
+test('other sheets (e.g. 성장 보기) keep the original fantasy-wood sheet style, unaffected by the teach/study mission redesign', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '성장 보기' }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveClass(/border-\[#d4af37\]/)
+  await expect(dialog).not.toHaveClass(/border-cyan-400\/50/)
+})

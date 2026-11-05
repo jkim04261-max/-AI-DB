@@ -39,15 +39,15 @@ export default function GameMenu({
   onSelect: (action: GameMenuAction) => void
 }) {
   return (
-    // PR #49: 스테이지 하단에 얹히는 반투명 목재 액션 바 — 흰 카드 그리드
-    // 목록에서, 게임 화면 하단에 붙은 RPG형 액션 바 느낌으로 바꿨다.
+    // PR #49: 스테이지 하단에 얹히는 반투명 액션 바.
     // 버튼 텍스트/role은 그대로라 기존 e2e 셀렉터가 그대로 통한다.
     // PR #54 요청 3번: PC(lg+)에서는 더 이상 4열 그리드가 아니라 세로
-    // 한 줄 사이드 패널 목록으로 보여준다 — GrowPage가 바깥에서 이
-    // 메뉴를 하단 대신 옆면 패널에 배치하고(flex-row), 이 컴포넌트는
-    // lg:grid-cols-1로 한 칸씩 쌓이게만 바꾸면 된다(별도 prop 없이
-    // 반응형 클래스만으로 처리 — 로직/접근성 계약은 100% 동일).
-    <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-amber-900/40 bg-amber-950/75 p-1.5 backdrop-blur-sm sm:gap-2 lg:grid-cols-1 lg:gap-1.5 lg:border-none lg:bg-transparent lg:p-0">
+    // 한 줄 사이드 패널 목록으로 보여준다.
+    // PR #62 요청 1번: 기존 호박목재(amber) RPG 액션바 톤을, 메인
+    // 스테이지의 새 마법진 도서관 배경(청록·푸른 홀로그램)과 어울리는
+    // 유리질 홀로그램 톤으로 바꿨다 — 색/그림자만 바뀌고 구조·레이블·
+    // disabled 로직·터치 타깃 크기는 완전히 동일하다(회귀 없음).
+    <div className="grid grid-cols-4 gap-1.5 rounded-2xl border border-cyan-400/30 bg-slate-950/70 p-1.5 shadow-[0_0_18px_rgba(56,189,248,0.15)] backdrop-blur-md sm:gap-2 lg:grid-cols-1 lg:gap-1.5 lg:border-cyan-400/20 lg:bg-slate-950/40 lg:p-2 lg:shadow-[0_0_14px_rgba(56,189,248,0.1)]">
       {ITEMS.map(({ action, label, icon: Icon, alwaysEnabled }) => {
         const quizBlocked = action === 'quiz' && !examSupported
         return (
@@ -58,11 +58,11 @@ export default function GameMenu({
             disabled={(!alwaysEnabled && disabled) || quizBlocked}
             // 44px+ 터치 타깃 보장(py-3 + 아이콘/텍스트 2줄). lg+에서는
             // 세로 목록이라 아이콘+글자를 가로로 나란히 배치한다.
-            className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl py-2 text-[10px] font-semibold text-amber-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100 lg:min-h-[48px] lg:flex-row lg:justify-start lg:gap-2.5 lg:rounded-xl lg:px-3 lg:text-xs lg:hover:bg-amber-900/40"
+            className="flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-xl border border-cyan-400/10 bg-cyan-400/5 py-2 text-[10px] font-semibold text-cyan-50 active:scale-95 disabled:opacity-40 disabled:active:scale-100 lg:min-h-[48px] lg:flex-row lg:justify-start lg:gap-2.5 lg:rounded-xl lg:px-3 lg:text-xs lg:hover:border-cyan-400/30 lg:hover:bg-cyan-400/10 lg:hover:shadow-[0_0_10px_rgba(56,189,248,0.25)]"
           >
-            <Icon size={17} className="text-amber-300" />
+            <Icon size={17} className="text-cyan-300 drop-shadow-[0_0_4px_rgba(34,211,238,0.6)]" />
             {label}
-            {quizBlocked && <span className="text-[9px] font-normal text-amber-300/70">준비 중</span>}
+            {quizBlocked && <span className="text-[9px] font-normal text-cyan-300/70">준비 중</span>}
           </button>
         )
       })}
