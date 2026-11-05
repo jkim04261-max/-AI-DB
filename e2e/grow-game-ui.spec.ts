@@ -1004,9 +1004,12 @@ test('the teach/study panel shows three distinct gamified mission cards inside a
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByText('🎯 선택지에서 고르기')).toBeVisible()
-  await expect(dialog.getByText('✨ AI 추천 받기')).toBeVisible()
-  await expect(dialog.getByText('✏️ 직접 입력하기')).toBeVisible()
+  // PR #63: 미션 진행 요약 뱃지("🎯 선택지에서 고르기 0/2")도 같은
+  // 문구를 부분 문자열로 포함하므로, 카드 제목 자체(전체 텍스트가 정확히
+  // 일치하는 요소)만 집도록 exact: true로 좁힌다.
+  await expect(dialog.getByText('🎯 선택지에서 고르기', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('✨ AI 추천 받기', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('✏️ 직접 입력하기', { exact: true })).toBeVisible()
 
   // 기존 입력 경로(입력칸·버튼)는 토글 없이 그대로 바로 쓸 수 있어야
   // 한다 — knowledge.spec.ts의 모든 시나리오가 패널을 열자마자 바로
