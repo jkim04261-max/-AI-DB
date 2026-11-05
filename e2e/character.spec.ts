@@ -293,3 +293,87 @@ test('cancelling the change confirmation keeps the original profession', async (
   await expect(page.getByTestId('profession-badge')).toHaveText('회계사')
   expect(patchCalled).toBe(false)
 })
+
+// PR #65('최종 통합 개발 명령서'): 고정 50개 직업 목록 대신 사용자가
+// 자유롭게 직업을 타이핑할 수 있다 — "숲해설가" 예시로 그 흐름 전체를
+// 확인한다(선택 → PATCH에 sentinel 'custom' + 실제 입력 텍스트 전송 →
+// HUD 배지에 입력한 텍스트 그대로 표시, 고정 라벨이 아님).
+test('entering a free-text profession ("숲해설가") sends sentinel profession "custom" and shows the typed label', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let patchBody: { companionType?: string; profession?: string; customProfessionLabel?: string } | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: null, custom_profession_label: null, level: 1, exp: 0, focus_percent: 90, created_at: new Date().toISOString() },
+          ],
+        }),
+      })
+      return true
+    }
+    if (method === 'PATCH') {
+      patchBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: 'nuri',
+            stage: 'child',
+            profession: 'custom',
+            custom_profession_label: '숲해설가',
+            level: 1,
+            exp: 0,
+            focus_percent: 90,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '직업 선택' }).click()
+  await page.getByPlaceholder('예: 숲해설가').fill('숲해설가')
+  await page.getByRole('button', { name: '이 직업으로 선택' }).click()
+
+  await expect(page.getByTestId('profession-badge')).toHaveText('숲해설가')
+  expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
+})
+
+// PR #65: 집중력 게이지 — 교육·장비 단계에 따른 전체 반영은 PR #66에서
+// 이어가지만, 지금도 캐릭터 행의 focus_percent가 화면에 그대로 보여야
+// 한다.
+test('shows the character\'s focus gauge percentage', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'accountant', level: 1, exp: 0, focus_percent: 72, created_at: new Date().toISOString() },
+          ],
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('focus-gauge')).toContainText('72%')
+})

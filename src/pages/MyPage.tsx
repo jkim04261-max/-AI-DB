@@ -135,7 +135,11 @@ export default function MyPage() {
                   </p>
                   <p className="text-xs text-slate-400">
                     {STAGE_LABEL[character.stage]} ·{' '}
-                    {character.profession ? PROFESSION_LABEL[character.profession] : '직업 미선택'}
+                    {character.profession
+                      ? character.profession === 'custom'
+                        ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
+                        : PROFESSION_LABEL[character.profession]
+                      : '직업 미선택'}
                   </p>
                 </div>
               </div>

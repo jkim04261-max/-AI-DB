@@ -19,8 +19,8 @@ const state = {
   teachUsage: new Map(), // `${userId}|${date}` -> { used_count }
   studyUsage: new Map(), // `${userId}|${date}` -> { used_count }
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
-  characters: [], // { id, user_id, companion_type, stage }
-  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save }
+  characters: [], // { id, user_id, companion_type, stage, custom_profession_label, focus_percent }
+  knowledgeEntries: [], // { id, user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save, knowledge_category }
   characterMessages: [], // { id, user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id }
   nextCharacterMessageId: 1,
   examAttempts: [], // { id, user_id, character_id, kind, profession, question_id, score, passed, exp_awarded }
@@ -456,14 +456,29 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- PR #65: api/character.ts's adjustFocusPercent (verify/study/save
+  // knowledge's focus-gauge nudge) — checked before the generic
+  // 'UPDATE characters' profession matcher below, same reasoning as the
+  // exp/level/mission_unlocked_tier matchers above. Clamps 0~100, matching
+  // the real query's LEAST(100, GREATEST(0, focus_percent + $delta)).
+  if (has(text, 'UPDATE characters', 'SET focus_percent =')) {
+    const [delta, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.focus_percent = Math.min(100, Math.max(0, (row.focus_percent ?? 90) + delta))
+    return Promise.resolve({ rows: [{ focus_percent: row.focus_percent }] })
+  }
+
   // --- api/character.ts: change/set profession (checked before the
   // generic 'FROM characters' list matcher below, since this statement has
-  // no FROM clause at all) ---
+  // no FROM clause at all). PR #65: now also sets custom_profession_label
+  // in the same statement. ---
   if (has(text, 'UPDATE characters')) {
-    const [profession, userId, companionType] = values
+    const [profession, customProfessionLabel, userId, companionType] = values
     const row = state.characters.find((c) => c.user_id === userId && c.companion_type === companionType)
     if (!row) return Promise.resolve({ rows: [] })
     row.profession = profession
+    row.custom_profession_label = customProfessionLabel
     const now = new Date().toISOString()
     return Promise.resolve({
       rows: [
@@ -473,9 +488,11 @@ function sql(strings, ...values) {
           companion_type: row.companion_type,
           stage: row.stage,
           profession: row.profession,
+          custom_profession_label: row.custom_profession_label ?? null,
           level: row.level ?? 1,
           exp: row.exp ?? 0,
           mission_unlocked_tier: row.mission_unlocked_tier ?? null,
+          focus_percent: row.focus_percent ?? 90,
           created_at: now,
         },
       ],
@@ -499,9 +516,11 @@ function sql(strings, ...values) {
               companion_type: row.companion_type,
               stage: row.stage,
               profession: row.profession,
+              custom_profession_label: row.custom_profession_label ?? null,
               level: row.level ?? 1,
               exp: row.exp ?? 0,
               mission_unlocked_tier: row.mission_unlocked_tier ?? null,
+              focus_percent: row.focus_percent ?? 90,
               created_at: now,
             },
           ]
@@ -521,9 +540,11 @@ function sql(strings, ...values) {
         companion_type: c.companion_type,
         stage: c.stage,
         profession: c.profession,
+        custom_profession_label: c.custom_profession_label ?? null,
         level: c.level ?? 1,
         exp: c.exp ?? 0,
         mission_unlocked_tier: c.mission_unlocked_tier ?? null,
+        focus_percent: c.focus_percent ?? 90,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -539,9 +560,34 @@ function sql(strings, ...values) {
     if (exists) return Promise.resolve({ rows: [] })
     const id = state.nextCharacterId++
     const now = new Date().toISOString()
-    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, mission_unlocked_tier: null })
+    state.characters.push({
+      id,
+      user_id: userId,
+      companion_type: companionType,
+      stage,
+      profession: null,
+      custom_profession_label: null,
+      level: 1,
+      exp: 0,
+      mission_unlocked_tier: null,
+      focus_percent: 90,
+    })
     return Promise.resolve({
-      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, mission_unlocked_tier: null, created_at: now }],
+      rows: [
+        {
+          id,
+          user_id: userId,
+          companion_type: companionType,
+          stage,
+          profession: null,
+          custom_profession_label: null,
+          level: 1,
+          exp: 0,
+          mission_unlocked_tier: null,
+          focus_percent: 90,
+          created_at: now,
+        },
+      ],
     })
   }
 
@@ -676,8 +722,21 @@ function sql(strings, ...values) {
   // literal in the real query (only ever-'appropriate' rows get inserted),
   // not a bound parameter, so it's not in `values`. ---
   if (has(text, 'INSERT INTO character_knowledge_entries')) {
-    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId, source, missionType, ageTierAtSave] =
-      values
+    const [
+      userId,
+      characterId,
+      profession,
+      customProfessionLabel,
+      title,
+      originalContent,
+      finalContent,
+      verificationExplanation,
+      requestId,
+      source,
+      missionType,
+      ageTierAtSave,
+      knowledgeCategory,
+    ] = values
     const id = state.nextKnowledgeEntryId++
     const now = new Date().toISOString()
     const entry = {
@@ -685,6 +744,7 @@ function sql(strings, ...values) {
       user_id: userId,
       character_id: characterId,
       profession,
+      custom_profession_label: customProfessionLabel ?? null,
       title,
       original_content: originalContent,
       final_content: finalContent,
@@ -694,6 +754,7 @@ function sql(strings, ...values) {
       source,
       mission_type: missionType ?? null,
       age_tier_at_save: ageTierAtSave ?? null,
+      knowledge_category: knowledgeCategory ?? null,
       created_at: now,
     }
     state.knowledgeEntries.push(entry)
