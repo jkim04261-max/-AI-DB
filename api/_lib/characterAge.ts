@@ -54,39 +54,23 @@ function ageTierIndex(tier: AgeTier): number {
   return AGE_TIER_ORDER.indexOf(tier)
 }
 
-// PR #53 요청 3번: "향후 10대 10회, 20대 20회 등 확장 가능한 구조로
-// 설계" — 연령대 라벨의 "연대" 숫자를 그대로 따르는 단일 표(table)로
-// 만들어, 나중에 다른 단계의 진화 조건을 바꾸거나 추가할 때 이 표
-// 숫자만 고치면 되게 했다(코드 분기를 늘릴 필요가 없다). 지금 단계에서
-// 지식 '적합' 저장이 이 개수만큼 쌓이면 다음 단계로 진화한다.
-// master_50s는 마지막 단계라 다음 단계가 없으므로 표에 없다.
-export const EVOLUTION_KNOWLEDGE_COUNT: Partial<Record<AgeTier, number>> = {
-  toddler: 5,
-  teen: 10,
-  junior_20s: 20,
-  career_30s: 30,
-  veteran_40s: 40,
-}
-
 // 다음 연령대 — 마지막 단계(master_50s)면 null.
 export function nextAgeTier(tier: AgeTier): AgeTier | null {
   const idx = ageTierIndex(tier)
   return idx >= 0 && idx < AGE_TIER_ORDER.length - 1 ? AGE_TIER_ORDER[idx + 1] : null
 }
 
-// 지금 단계로 "진화"하는 데 필요한 지식 '적합' 저장 누적 총합 — 이전
-// 단계들의 요구치를 전부 더한 값이다. character_knowledge_entries는
-// 단계별로 따로 세지 않고 캐릭터 생성 이후 누적 개수를 그대로 쓰므로
-// (새 카운터 컬럼 없이, 이 서비스의 "DB 변경 없이 표시만 분기" 원칙을
-// 그대로 따름), 판정 기준도 "지금까지 거쳐온 모든 단계의 목표를 합친
-// 누적치"여야 앞 단계에서 쌓은 개수가 자연스럽게 이어진다.
-export function cumulativeEvolutionThreshold(tier: AgeTier): number {
-  let total = 0
-  for (let i = 0; i <= ageTierIndex(tier); i++) {
-    total += EVOLUTION_KNOWLEDGE_COUNT[AGE_TIER_ORDER[i]] ?? 0
-  }
-  return total
-}
+// PR #63: "지식 적합 저장 개수가 쌓이면 조기 진화"하던 예전
+// EVOLUTION_KNOWLEDGE_COUNT/cumulativeEvolutionThreshold 가속 장치를
+// 완전히 대체한다 — 더 이상 개수만 세지 않고, 유형별(객관식/주관식/
+// 노하우) 균형을 요구하는 진짜 게이트로 바뀐다. 실제 집계/진화 판정
+// 로직은 api/_lib/characterMissions.ts에 있다(이 파일은 상수만 둔다).
+export type MissionType = 'objective' | 'subjective' | 'knowhow'
+export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow']
+// 한 연령대를 "졸업"하려면 유형마다 이 개수만큼 확정해야 한다(2개씩 x
+// 3유형 = 총 6개) — 모든 연령대에 동일하게 적용되는 고정값.
+export const MISSIONS_REQUIRED_PER_TYPE = 2
+export const MISSIONS_REQUIRED_TOTAL = MISSIONS_REQUIRED_PER_TYPE * MISSION_TYPES.length
 
 // 지금 연령대가 특정 연령대"이상"인지 — 지식 난이도 게이팅(가르치기 검증)
 // 에 쓴다. 캐릭터의 실제 연령대가 지식이 요구하는 연령대보다 낮으면

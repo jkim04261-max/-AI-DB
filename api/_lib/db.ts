@@ -246,6 +246,20 @@ export function ensureCharacterTables() {
       // backfills every existing character row with no data loss.
       await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 1`
       await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS exp INTEGER NOT NULL DEFAULT 0`
+
+      // PR #63: 연령대 "진화" 게이트의 실제 저장소. NULL이면(모든 기존
+      // 캐릭터 + 이 기능을 아직 한 번도 평가받지 않은 새 캐릭터) 예전처럼
+      // character.level에서 그때그때 계산한 값을 그대로 쓴다(api/_lib/
+      // characterMissions.ts의 effectiveAgeTier) — 이 컬럼이 존재한다는
+      // 사실 자체는 기존 캐릭터의 화면/동작을 1바이트도 바꾸지 않는다.
+      // maybeEvolveAgeTier가 처음으로 이 값을 써넣는 순간부터만(= 레벨은
+      // 다음 단계에 닿았는데 이번 단계 6미션이 아직 안 끝났을 때) 그
+      // 캐릭터는 레벨이 더 올라도 여기 고정된 값 밑으로 묶인다 — 이게
+      // "레벨만으로는 못 넘어가는" 진짜 게이트다.
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS mission_unlocked_tier TEXT
+          CHECK (mission_unlocked_tier IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -345,6 +359,23 @@ export function ensureKnowledgeTable() {
       await sql`
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS source TEXT
           NOT NULL DEFAULT 'user_taught' CHECK (source IN ('user_taught', 'ai_generated'))
+      `
+
+      // PR #63: 6단계 카드형 미션(객관식/주관식/노하우) 시스템 — 이 저장이
+      // 어느 미션 슬롯을 채웠는지, 그리고 저장 당시 캐릭터가 어느
+      // 연령대였는지를 스냅샷한다. 둘 다 nullable이라 기존 행(이 PR 이전에
+      // 저장된 모든 지식)은 NULL로 남고, 아래 미션 집계 쿼리는 항상
+      // `age_tier_at_save = 특정 티어`로 비교하므로 NULL 행은 어느 집계에도
+      // 걸리지 않는다 — 기존 사용자가 이미 쌓아둔 기록이 새 게이트를
+      // 공짜로 통과시켜주지도, 거꾸로 막아버리지도 않는다(완전히 중립).
+      // profession 컬럼과 동일한 "저장 당시 값을 그대로 박아둔다"는 원칙.
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS mission_type TEXT
+          CHECK (mission_type IN ('objective', 'subjective', 'knowhow'))
+      `
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS age_tier_at_save TEXT
+          CHECK (age_tier_at_save IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
       `
     })().catch((err) => {
       knowledgeTableReady = null
@@ -535,6 +566,13 @@ export type ProfessionId =
   | 'police-officer' | 'civil-servant' | 'social-worker' | 'event-planner'
   | 'massage-therapist'
 
+// PR #63: characters.mission_unlocked_tier / character_knowledge_entries
+// .age_tier_at_save가 쓰는 6단계 연령대 — api/_lib/characterAge.ts의
+// AgeTier와 반드시 같은 값이어야 한다(그 파일을 import하지 않는 이유는
+// ProfessionId와 같은 이 파일의 기존 "행 타입은 여기서 직접 리터럴로
+// 적는다" 관례를 따른 것).
+type AgeTierValue = 'toddler' | 'teen' | 'junior_20s' | 'career_30s' | 'veteran_40s' | 'master_50s'
+
 export interface CharacterRow {
   id: number
   user_id: number
@@ -543,6 +581,7 @@ export interface CharacterRow {
   profession: ProfessionId | null
   level: number
   exp: number
+  mission_unlocked_tier: AgeTierValue | null
   created_at: string
 }
 
@@ -557,6 +596,8 @@ export interface KnowledgeEntryRow {
   verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
   verification_explanation: string
   source: 'user_taught' | 'ai_generated'
+  mission_type: 'objective' | 'subjective' | 'knowhow' | null
+  age_tier_at_save: AgeTierValue | null
   created_at: string
 }
 

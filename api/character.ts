@@ -27,20 +27,16 @@ import {
   EXAM_PASS_EXP,
   EXAM_PASS_THRESHOLD,
   levelForExp,
-  cumulativeExpForLevel,
 } from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
 import {
-  ageTierForLevel,
   meetsAgeTier,
   AGE_TIER_LABEL,
-  AGE_TIER_STAGE_LABEL,
-  AGE_TIER_MIN_LEVEL,
-  EVOLUTION_KNOWLEDGE_COUNT,
-  nextAgeTier,
-  cumulativeEvolutionThreshold,
+  MISSION_TYPES,
+  type MissionType,
   ageBlockedMessage,
 } from './_lib/characterAge'
+import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
 const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // PR #51(직업 선택 제한 해제, 2026-11-01): 처음엔 회계사·가수 2개만
@@ -189,6 +185,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetUsage(res, session.sub)
       return
     }
+    if (action === 'missions') {
+      await handleGetMissions(req, res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -233,11 +233,19 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) return null
 
   const result = await sql<CharacterRow>`
-    SELECT id, user_id, companion_type, stage, profession, level, exp, created_at
+    SELECT id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
     FROM characters
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
   return result.rows[0] ?? null
+}
+
+// PR #63: 캐릭터 행을 JSON으로 내보낼 때마다 effectiveAgeTier를 함께
+// 계산해 age_tier 필드로 얹는다 — 프런트가 더 이상 character.level로
+// 연령대를 직접 계산하지 않고(그러면 미션 게이트로 고정된 상태를 다시
+// 레벨로 무시해버리게 된다) 이 값을 그대로 쓰게 하기 위해서다.
+function toCharacterJson(row: CharacterRow) {
+  return { ...row, age_tier: effectiveAgeTier(row) }
 }
 
 async function handleGet(res: VercelResponse, userId: number) {
@@ -245,15 +253,39 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, profession, level, exp, created_at
+      SELECT id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
     `
-    res.status(200).json({ characters: result.rows })
+    res.status(200).json({ characters: result.rows.map(toCharacterJson) })
   } catch (err) {
     console.error('[api/character] unexpected error on GET', err)
     res.status(500).json({ error: '캐릭터 정보를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// PR #63: 지금 캐릭터의 연령대 미션 진행상황(카드 6개 UI용) — 소비 없는
+// 순수 조회라 몇 번을 열어봐도 아무것도 바뀌지 않는다(peekTeachUsage와
+// 같은 원칙).
+async function handleGetMissions(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+
+  try {
+    await ensureCharacterTables()
+    await ensureKnowledgeTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    const progress = await getMissionProgress(userId, character.id, effectiveAgeTier(character))
+    res.status(200).json({ missionProgress: progress })
+  } catch (err) {
+    console.error('[api/character] unexpected error on missions', err)
+    res.status(500).json({ error: '성장 미션 정보를 불러오는 중 오류가 발생했어요.' })
   }
 }
 
@@ -296,7 +328,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, profession, level, exp, created_at
+      RETURNING id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -304,7 +336,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       return
     }
 
-    res.status(201).json({ character })
+    res.status(201).json({ character: toCharacterJson(character) })
   } catch (err) {
     console.error('[api/character] unexpected error on POST', err)
     res.status(500).json({ error: '캐릭터를 만드는 중 오류가 발생했어요.' })
@@ -339,7 +371,7 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
       UPDATE characters
       SET profession = ${profession}
       WHERE user_id = ${userId} AND companion_type = ${companionType}
-      RETURNING id, user_id, companion_type, stage, profession, level, exp, created_at
+      RETURNING id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
     `
     const character = updated.rows[0]
     if (!character) {
@@ -347,7 +379,7 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
       return
     }
 
-    res.status(200).json({ character })
+    res.status(200).json({ character: toCharacterJson(character) })
   } catch (err) {
     console.error('[api/character] unexpected error on PATCH', err)
     res.status(500).json({ error: '직업을 저장하는 중 오류가 발생했어요.' })
@@ -464,9 +496,12 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
 
     // PR #52: 캐릭터의 "지금" 연령대와, Gemini가 이 지식에 매긴 "필요한
     // 최소 연령대"를 비교한다. 내용 자체는 적합(appropriate)해도 캐릭터가
-    // 아직 너무 어리면 저장을 막는다 — character.level에서 그때그때
-    // 계산하므로 DB 변경이 전혀 없다(api/_lib/characterAge.ts).
-    const characterAgeTier = ageTierForLevel(character.level)
+    // 아직 너무 어리면 저장을 막는다.
+    // PR #63: character.level의 순수 파생값이 아니라 effectiveAgeTier를
+    // 쓴다 — 레벨은 이미 다음 단계에 닿았어도 6미션 게이트에 아직 막혀
+    // 있는 캐릭터라면, 나이 제한도 그 "진짜" 연령대 기준으로 걸려야
+    // 일관된다(화면엔 toddler 뱃지인데 teen 수준 지식은 통과하는 모순 방지).
+    const characterAgeTier = effectiveAgeTier(character)
     const ageBlocked = verification.status === 'appropriate' && !meetsAgeTier(characterAgeTier, verification.requiredAgeTier)
 
     // Signed server-side, over the exact (user, character, title, content)
@@ -590,7 +625,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       study = await generateSelfStudy(
         PROFESSION_LABEL[character.profession],
         knownTitlesResult.rows.map((r) => r.title),
-        ageTierForLevel(character.level),
+        effectiveAgeTier(character),
       )
     } catch (err) {
       // 생성 자체가 실패했거나(설정/타임아웃/네트워크/비2xx) 응답을 해석할
@@ -606,7 +641,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
     // PR #52: 스스로 공부하기도 같은 연령 게이트를 적용한다 — 캐릭터가
     // 아직 어린데 스스로 전문 자격증 수준 지식을 만들어 저장하는 건
     // 일관성이 없다고 판단했다(handleVerifyKnowledge와 동일한 로직).
-    const characterAgeTier = ageTierForLevel(character.level)
+    const characterAgeTier = effectiveAgeTier(character)
     const ageBlocked = study.status === 'appropriate' && !meetsAgeTier(characterAgeTier, study.requiredAgeTier)
 
     const verificationToken = signKnowledgeVerification({
@@ -683,9 +718,17 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     finalContent?: unknown
     verificationToken?: unknown
     requestId?: unknown
+    missionType?: unknown
   }
   const { companionType, title, originalContent, finalContent, verificationToken } = body
   const requestId = typeof body.requestId === 'string' && body.requestId ? body.requestId : null
+  // PR #63: 어느 미션 카드(① 선택지 고르기=objective ② AI 추천=subjective
+  // ③ 직접 입력=knowhow)로 저장했는지 — 선택값이라 안 보내도(예: 기존
+  // e2e가 쓰는 "그냥 저장") 저장 자체는 그대로 성공하고, 그저 어느
+  // 미션에도 집계되지 않을 뿐이다(source/profession과 같은 "저장 당시
+  // 값을 스냅샷"하는 트러스트 모델 — 클라이언트가 어느 입력 경로를 썼는지
+  // 그대로 신뢰한다).
+  const missionType = typeof body.missionType === 'string' && (MISSION_TYPES as string[]).includes(body.missionType) ? (body.missionType as MissionType) : null
 
   if (typeof title !== 'string' || !title.trim() || title.trim().length > MAX_TITLE_LENGTH) {
     res.status(400).json({ error: `지식 제목을 ${MAX_TITLE_LENGTH}자 이내로 입력해주세요.` })
@@ -733,7 +776,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // PR #52: verify-knowledge에서 이미 한 번 막았어도, 서명된 토큰만으로
     // 저장을 직접 시도하는 우회를 막기 위해 저장 시점에도 다시 검사한다
     // (캐릭터의 "현재" 레벨 기준 — verify 이후 레벨이 바뀌었을 수도 있다).
-    if (!meetsAgeTier(ageTierForLevel(character.level), tokenPayload.requiredAgeTier)) {
+    if (!meetsAgeTier(effectiveAgeTier(character), tokenPayload.requiredAgeTier)) {
       res.status(400).json({ error: ageBlockedMessage(AGE_TIER_LABEL[tokenPayload.requiredAgeTier]) })
       return
     }
@@ -761,7 +804,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // shape as findReplay in api/conversations/[id].ts.
     if (requestId) {
       const existing = await sql<KnowledgeEntryRow>`
-        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
+        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND client_request_id = ${requestId}
       `
@@ -791,12 +834,17 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     ].filter((p): p is string => typeof p === 'string')
     const verificationExplanation = explanationParts.join('\n') || '적합'
 
+    // PR #63: 이 저장이 적용되는 "지금" 연령대 — INSERT/진화 판정 둘 다
+    // 이 값을 쓴다(이번 저장 자체가 주는 XP로 레벨이 바뀌기 *전* 스냅샷,
+    // profession과 같은 "행위 당시 값을 그대로 박아둔다" 원칙).
+    const tierAtSaveStart = effectiveAgeTier(character)
+
     const inserted = await sql<KnowledgeEntryRow>`
       INSERT INTO character_knowledge_entries
-        (user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source)
+        (user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save)
       VALUES
-        (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source})
-      RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
+        (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source}, ${missionType}, ${tierAtSaveStart})
+      RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, created_at
     `
     const entry = inserted.rows[0]
 
@@ -806,42 +854,12 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // requestId already returned earlier, before ever reaching here). No
     // separate dedup table needed: the existing client_request_id unique
     // index is what makes the INSERT above itself happen at most once.
-    let expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+    const expResult = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
 
-    // PR #53 요청 3번: 연령대별로 지식 '적합' 저장이 일정 개수(지금 단계가
-    // 요구하는 개수 — EVOLUTION_KNOWLEDGE_COUNT, "10대 10회·20대 20회처럼
-    // 확장 가능한 구조") 쌓이면 다음 단계로 "진화"시킨다. 방금 저장한 이
-    // 항목도 포함해서 세야 하므로 INSERT 이후(entry 확보 후)에 COUNT한다.
-    // 이미 이번 단계를 벗어났다면(지난 저장에서 이미 진화했거나 다른
-    // 경로로 레벨업했다면) 그 단계 조건은 다시 발동하지 않는다 —
-    // nextAgeTier가 없는 마지막 단계(master_50s)도 자연히 제외된다.
-    let evolvedStageLabel: string | null = null
-    {
-      const currentTier = ageTierForLevel(expResult.newLevel)
-      const requiredForThisTier = EVOLUTION_KNOWLEDGE_COUNT[currentTier]
-      const next = nextAgeTier(currentTier)
-      if (requiredForThisTier !== undefined && next) {
-        const countResult = await sql<{ count: number }>`
-          SELECT COUNT(*)::int AS count FROM character_knowledge_entries WHERE character_id = ${character.id} AND user_id = ${userId}
-        `
-        const totalSaved = countResult.rows[0]?.count ?? 0
-        if (totalSaved >= cumulativeEvolutionThreshold(currentTier)) {
-          const evolvedExp = cumulativeExpForLevel(AGE_TIER_MIN_LEVEL[next])
-          const evolvedLevel = AGE_TIER_MIN_LEVEL[next]
-          const bumped = await sql<{ exp: number; level: number }>`
-            UPDATE characters
-            SET exp = GREATEST(exp, ${evolvedExp}), level = GREATEST(level, ${evolvedLevel})
-            WHERE id = ${character.id} AND user_id = ${userId}
-            RETURNING exp, level
-          `
-          const row = bumped.rows[0]
-          if (row) {
-            evolvedStageLabel = AGE_TIER_STAGE_LABEL[next]
-            expResult = { exp: row.exp, oldLevel: expResult.oldLevel, newLevel: row.level, leveledUp: row.level > expResult.oldLevel }
-          }
-        }
-      }
-    }
+    // PR #63: "지식 적합 저장 개수가 쌓이면 조기 진화"하던 예전 로직을
+    // 대체한다 — 이번 저장 덕분에 레벨 조건(필요하다면)과 6미션 조건을
+    // 둘 다 만족했는지 확인하고, 만족하면 다음 연령대로 진화시킨다.
+    const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult.newLevel, character.mission_unlocked_tier)
 
     // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
     // knowledge entry above is the thing that matters and it has already
@@ -850,7 +868,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // on failure, log server-side and still return 201 with the real
     // entry, rather than failing (or refunding anything) for a save that
     // actually worked.
-    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel, evolvedStageLabel)
+    const savedReply = buildSavedReply(tokenPayload.source, expResult.leveledUp, expResult.newLevel, evolveResult.newAgeTierStageLabel)
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -868,6 +886,10 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
       exp: expResult.exp,
       level: expResult.newLevel,
       leveledUp: expResult.leveledUp,
+      missionProgress: evolveResult.missionProgress,
+      evolved: evolveResult.evolved,
+      newAgeTier: evolveResult.newAgeTier,
+      newAgeTierLabel: evolveResult.newAgeTierLabel,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on save-knowledge', err)
@@ -1072,7 +1094,11 @@ async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId:
       VALUES (${userId}, ${character.id}, 'quiz', ${character.profession}, ${questionId}, ${null}, ${correct}, ${expAwarded})
     `
 
-    const message = buildQuizResultMessage(correct, question.explanation, expAwarded, expResult.leveledUp, expResult.newLevel)
+    // PR #63: 퀴즈 XP만으로도(6미션은 이미 끝났는데 레벨만 모자랐던 경우)
+    // 진화 조건을 채울 수 있다 — save-knowledge와 같은 공통 판정을 쓴다.
+    const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult.newLevel, character.mission_unlocked_tier)
+
+    const message = buildQuizResultMessage(correct, question.explanation, expAwarded, expResult.leveledUp, expResult.newLevel, evolveResult.newAgeTierStageLabel)
 
     res.status(200).json({
       correct,
@@ -1082,6 +1108,9 @@ async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId:
       level: expResult.newLevel,
       leveledUp: expResult.leveledUp,
       message,
+      evolved: evolveResult.evolved,
+      newAgeTier: evolveResult.newAgeTier,
+      newAgeTierLabel: evolveResult.newAgeTierLabel,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on quiz-submit', err)
@@ -1213,7 +1242,10 @@ async function handleSubmitExam(req: VercelRequest, res: VercelResponse, userId:
       VALUES (${userId}, ${character.id}, 'exam', ${character.profession}, ${null}, ${score}, ${passed}, ${expAwarded})
     `
 
-    const message = buildExamResultMessage(passed, score, total, expAwarded, expResult.leveledUp, expResult.newLevel)
+    // PR #63: 시험 XP도 퀴즈와 같은 이유로 진화 판정을 공유한다.
+    const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult.newLevel, character.mission_unlocked_tier)
+
+    const message = buildExamResultMessage(passed, score, total, expAwarded, expResult.leveledUp, expResult.newLevel, evolveResult.newAgeTierStageLabel)
 
     res.status(200).json({
       passed,
@@ -1225,6 +1257,9 @@ async function handleSubmitExam(req: VercelRequest, res: VercelResponse, userId:
       level: expResult.newLevel,
       leveledUp: expResult.leveledUp,
       message,
+      evolved: evolveResult.evolved,
+      newAgeTier: evolveResult.newAgeTier,
+      newAgeTierLabel: evolveResult.newAgeTierLabel,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on exam-submit', err)

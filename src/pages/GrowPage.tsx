@@ -21,7 +21,7 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
-import { ageTierForLevel, AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel } from '../data/characterAge'
+import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -75,6 +75,11 @@ export default function GrowPage() {
   const [knowledgeStats, setKnowledgeStats] = useState({ total: 0, aiGenerated: 0 })
   const [messageTotal, setMessageTotal] = useState(0)
   const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null)
+  // PR #63: 연령대 "진화"(6미션 게이트 통과) 전용 축하 연출 — 평범한
+  // 레벨업 배너와 별개로, character.ageTier가 바뀌는 순간만 지켜본다
+  // (InteractionPanel/ExamPanel을 전혀 건드리지 않는 기존 leveledUpTo
+  // 패턴과 동일한 원칙).
+  const [evolvedTo, setEvolvedTo] = useState<AgeTier | null>(null)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -96,9 +101,11 @@ export default function GrowPage() {
   })
   const prevExpRef = useRef<number | null>(null)
   const prevLevelRef = useRef<number | null>(null)
+  const prevAgeTierRef = useRef<AgeTier | null>(null)
   const prevOpenSheetRef = useRef<GameMenuAction | null>(null)
   const bubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const levelUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const evolveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
   // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
@@ -225,6 +232,24 @@ export default function GrowPage() {
     prevLevelRef.current = character?.level ?? null
   }, [character?.companionType])
 
+  // PR #63: 연령대가 실제로 바뀌었을 때만(6미션 게이트를 막 통과했을
+  // 때만) 레벨업과 별개로 더 눈에 띄는 "진화" 연출을 띄운다 — 레벨만
+  // 올라서는 ageTier가 안 바뀔 수 있으므로(미션이 안 끝났으면 서버가
+  // ageTier를 그대로 고정해 보낸다) 평범한 레벨업과 자연히 구분된다.
+  useEffect(() => {
+    if (!character) return
+    const prev = prevAgeTierRef.current
+    if (prev !== null && character.ageTier !== prev) {
+      setEvolvedTo(character.ageTier)
+      if (evolveTimeoutRef.current) clearTimeout(evolveTimeoutRef.current)
+      evolveTimeoutRef.current = setTimeout(() => setEvolvedTo(null), 2800)
+    }
+    prevAgeTierRef.current = character.ageTier
+  }, [character?.ageTier])
+  useEffect(() => {
+    prevAgeTierRef.current = character?.ageTier ?? null
+  }, [character?.companionType])
+
   // PR #48 "게임 루프 강화": 캐릭터가 먼저 말을 거는 효과 — 캐릭터를
   // 고를 때마다(또는 처음 들어왔을 때) 한 번만, 지금 추천하는 퀘스트
   // 문구를 말풍선으로 띄운다. examPassed를 아직 못 받아온 상태(로딩 중)
@@ -261,6 +286,7 @@ export default function GrowPage() {
     return () => {
       if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
       if (levelUpTimeoutRef.current) clearTimeout(levelUpTimeoutRef.current)
+      if (evolveTimeoutRef.current) clearTimeout(evolveTimeoutRef.current)
       if (turnTransitionTimeoutRef.current) clearTimeout(turnTransitionTimeoutRef.current)
     }
   }, [])
@@ -389,9 +415,11 @@ export default function GrowPage() {
       })
     : null
   const tier = character ? appearanceTierForLevel(character.level) : 'rookie'
-  // PR #52: 6단계 연령대 — character.level에서 그때그때 계산하는
-  // 표시용 파생값(DB 변경 없음, characterAppearance.ts의 tier와 같은 원칙).
-  const ageTier = character ? ageTierForLevel(character.level) : 'toddler'
+  // PR #52: 6단계 연령대 — PR #63부터는 character.level에서 다시 계산하지
+  // 않고 서버가 내려준 값을 그대로 쓴다(6미션 게이트로 고정된 상태를
+  // 레벨만으로 무시해버리지 않도록 — GrowthContext.tsx의 Character.ageTier
+  // 참고).
+  const ageTier = character?.ageTier ?? 'toddler'
   // PR #52 후속 5차 요청 3번: 티어보다 더 구체적인 "지금 몇 살인지" 숫자
   // 뱃지용 — 역시 character.level에서 그때그때 계산하는 표시용 값이다.
   const ageNumber = character ? ageNumberForLevel(character.level) : 8
@@ -487,6 +515,14 @@ export default function GrowPage() {
                       className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-2xl font-extrabold text-amber-300 drop-shadow-lg"
                     >
                       🎉 Lv.{leveledUpTo} 레벨업!
+                    </span>
+                  )}
+                  {evolvedTo !== null && (
+                    <span
+                      data-testid="evolution-banner"
+                      className="motion-safe:animate-[grow-levelup-pop_2.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-[42%] whitespace-nowrap text-3xl font-extrabold text-cyan-200 drop-shadow-lg"
+                    >
+                      ✨ {AGE_TIER_STAGE_LABEL[evolvedTo]} 단계로 진화했어요!
                     </span>
                   )}
                   {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}

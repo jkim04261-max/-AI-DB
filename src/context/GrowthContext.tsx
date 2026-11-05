@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useAuth } from './AuthContext'
 import type { ProfessionId } from '../data/characterProfessions'
 import type { AgeTier } from '../data/characterAge'
+import type { MissionType, MissionProgress } from '../data/characterMissions'
 
 export type CompanionType = 'nuri' | 'duri'
 
@@ -57,6 +58,11 @@ export interface Character {
   // KNOWLEDGE_VS_MODEL_DISCLAIMER, shown next to this in the UI.
   level: number
   exp: number
+  // PR #63: 더 이상 level에서 클라이언트가 직접 계산하지 않는다(그러면
+  // 6미션 게이트로 고정된 상태를 무시하고 레벨만으로 다시 계산해버리게
+  // 된다) — 서버가 계산한 "진짜" 연령대를 그대로 쓴다(api/character.ts의
+  // toCharacterJson).
+  ageTier: AgeTier
   createdAt: string
 }
 
@@ -77,6 +83,15 @@ export interface GrowthUpdate {
   exp: number
   level: number
   leveledUp: boolean
+}
+
+// PR #63: 지식 저장/퀴즈/시험 어느 경로로든 XP가 바뀌면 같은 모양의
+// 진화 결과가 따라온다 — "레벨 조건 + 6미션 확정" 둘 다 충족된 바로 그
+// 액션의 응답에 실려 온다(별도 폴링 없음).
+export interface EvolutionUpdate {
+  evolved: boolean
+  newAgeTier: AgeTier | null
+  newAgeTierLabel: string | null
 }
 
 // PR #45 checkpoint 3.6: one line of the persistent conversation log for a
@@ -147,7 +162,9 @@ interface GrowthContextValue {
     originalContent: string,
     finalContent: string,
     verificationToken: string,
-  ) => Promise<{ entry: KnowledgeEntry; savedReply: string } & GrowthUpdate>
+    missionType?: MissionType,
+  ) => Promise<{ entry: KnowledgeEntry; savedReply: string; missionProgress: MissionProgress | null } & GrowthUpdate & EvolutionUpdate>
+  getMissionProgress: (companionType: CompanionType) => Promise<MissionProgress>
   listKnowledge: (
     companionType: CompanionType,
     options?: { limit?: number; offset?: number },
@@ -161,13 +178,16 @@ interface GrowthContextValue {
     companionType: CompanionType,
     questionId: string,
     answerIndex: number,
-  ) => Promise<{ correct: boolean; explanation: string; message: string } & GrowthUpdate>
+  ) => Promise<{ correct: boolean; explanation: string; message: string } & GrowthUpdate & EvolutionUpdate>
   getExam: (companionType: CompanionType) => Promise<{ questions: ExamQuestion[]; alreadyPassed: boolean }>
   getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
     answers: { questionId: string; answerIndex: number }[],
-  ) => Promise<{ passed: boolean; score: number; total: number; results: { questionId: string; correct: boolean }[]; message: string } & GrowthUpdate>
+  ) => Promise<
+    { passed: boolean; score: number; total: number; results: { questionId: string; correct: boolean }[]; message: string } & GrowthUpdate &
+      EvolutionUpdate
+  >
 }
 
 interface CharacterApiRow {
@@ -177,6 +197,7 @@ interface CharacterApiRow {
   profession: ProfessionId | null
   level: number
   exp: number
+  age_tier: AgeTier
   created_at: string
 }
 
@@ -188,6 +209,7 @@ function fromApiRow(row: CharacterApiRow): Character {
     profession: row.profession,
     level: row.level ?? 1,
     exp: row.exp ?? 0,
+    ageTier: row.age_tier ?? 'toddler',
     createdAt: row.created_at,
   }
 }
@@ -261,8 +283,14 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // level/exp in local state after any XP-granting action (지식 저장,
   // 퀴즈, 시험) — so the Lv./XP shown on the game screen stays in sync
   // without re-fetching the whole character list every time.
-  const updateCharacterGrowth = useCallback((companionType: CompanionType, level: number, exp: number) => {
-    setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, level, exp } : c)))
+  // PR #63: evolved가 true인 액션은 newAgeTier도 함께 넘겨 ageTier까지
+  // 같이 갱신한다 — 생략하면(진화하지 않은 보통의 XP 획득) ageTier는
+  // 건드리지 않는다(레벨이 올라도 미션 게이트가 안 끝났으면 서버가
+  // ageTier를 그대로 유지해 보내주므로, 굳이 다시 계산할 필요가 없다).
+  const updateCharacterGrowth = useCallback((companionType: CompanionType, level: number, exp: number, newAgeTier?: AgeTier | null) => {
+    setCharacters((prev) =>
+      prev.map((c) => (c.companionType === companionType ? { ...c, level, exp, ...(newAgeTier ? { ageTier: newAgeTier } : {}) } : c)),
+    )
   }, [])
 
   const createCharacter = useCallback(async (companionType: CompanionType) => {
@@ -372,6 +400,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       originalContent: string,
       finalContent: string,
       verificationToken: string,
+      missionType?: MissionType,
     ) => {
       // A fresh key per save attempt — if this exact request somehow reaches
       // the server twice (a retried fetch, a double click that got through
@@ -383,7 +412,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/character?action=save-knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId }),
+        body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId, missionType }),
       })
       const data = (await res.json().catch(() => ({}))) as {
         entry?: KnowledgeEntryApiRow
@@ -392,12 +421,16 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp?: number
         level?: number
         leveledUp?: boolean
+        missionProgress?: MissionProgress
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
         error?: string
       }
       if (!res.ok || !data.entry || !data.savedReply || data.exp === undefined || data.level === undefined) {
         throw new Error(data.error || '학습 기록을 저장하는 중 오류가 발생했어요.')
       }
-      updateCharacterGrowth(companionType, data.level, data.exp)
+      updateCharacterGrowth(companionType, data.level, data.exp, data.newAgeTier)
       return {
         entry: fromKnowledgeApiRow(companionType, data.entry),
         savedReply: data.savedReply,
@@ -405,6 +438,10 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp: data.exp,
         level: data.level,
         leveledUp: data.leveledUp ?? false,
+        missionProgress: data.missionProgress ?? null,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
       }
     },
     [updateCharacterGrowth],
@@ -481,12 +518,15 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp?: number
         level?: number
         leveledUp?: boolean
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
         error?: string
       }
       if (!res.ok || data.correct === undefined || data.exp === undefined || data.level === undefined) {
         throw new Error(data.error || '퀴즈 채점 중 오류가 발생했어요.')
       }
-      updateCharacterGrowth(companionType, data.level, data.exp)
+      updateCharacterGrowth(companionType, data.level, data.exp, data.newAgeTier)
       return {
         correct: data.correct,
         explanation: data.explanation ?? '',
@@ -495,6 +535,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp: data.exp,
         level: data.level,
         leveledUp: data.leveledUp ?? false,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
       }
     },
     [updateCharacterGrowth],
@@ -530,12 +573,15 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp?: number
         level?: number
         leveledUp?: boolean
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
         error?: string
       }
       if (!res.ok || data.passed === undefined || data.score === undefined || data.total === undefined || data.exp === undefined || data.level === undefined) {
         throw new Error(data.error || '시험 채점 중 오류가 발생했어요.')
       }
-      updateCharacterGrowth(companionType, data.level, data.exp)
+      updateCharacterGrowth(companionType, data.level, data.exp, data.newAgeTier)
       return {
         passed: data.passed,
         score: data.score,
@@ -546,6 +592,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         exp: data.exp,
         level: data.level,
         leveledUp: data.leveledUp ?? false,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
       }
     },
     [updateCharacterGrowth],
@@ -575,6 +624,18 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // PR #63: "가르치기·스스로 공부하기" 패널이 열릴 때(그리고 저장
+  // 직후) 지금 연령대의 6개 미션 카드 진행 상태를 보여주기 위한 조회 —
+  // 소비 없는 순수 GET이다.
+  const getMissionProgress = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'missions', companionType })}`)
+    const data = (await res.json().catch(() => ({}))) as { missionProgress?: MissionProgress; error?: string }
+    if (!res.ok || !data.missionProgress) {
+      throw new Error(data.error || '성장 미션 정보를 불러오는 중 오류가 발생했어요.')
+    }
+    return data.missionProgress
+  }, [])
+
   return (
     <GrowthContext.Provider
       value={{
@@ -585,6 +646,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         verifyKnowledge,
         studyGenerate,
         saveKnowledge,
+        getMissionProgress,
         listKnowledge,
         listMessages,
         getQuiz,

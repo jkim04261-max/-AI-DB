@@ -8,8 +8,9 @@ import {
   type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
-import { AGE_TIER_LABEL, ageTierForLevel, type AgeTier } from '../../data/characterAge'
+import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
+import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import type { CharacterPose } from './CharacterSprite'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -53,12 +54,14 @@ export default function InteractionPanel({
   profession: ProfessionId
   onPoseChange?: (pose: CharacterPose) => void
 }) {
-  const { verifyKnowledge, studyGenerate, saveKnowledge, listKnowledge, listMessages } = useGrowth()
+  const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
   // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
   // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
   // 쉬운 쪽으로 자연스럽게 유도한다.
-  const characterAgeTier = ageTierForLevel(character.level)
+  // PR #63: 더 이상 level에서 다시 계산하지 않고 서버가 내려준 "진짜"
+  // 연령대(6미션 게이트로 고정됐을 수 있음)를 그대로 쓴다.
+  const characterAgeTier = character.ageTier
   const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -108,8 +111,31 @@ export default function InteractionPanel({
     }
   }, [character.companionType, listMessages])
 
+  // PR #63: 지금 연령대의 6개 미션 카드(객관식2·주관식2·노하우2) 진행
+  // 상태 — 패널이 열릴 때 한 번 불러오고, 저장이 성공할 때마다 그 응답에
+  // 실려 오는 최신 값으로 갱신한다(별도 재조회 없이).
+  const [missionProgress, setMissionProgress] = useState<MissionProgress | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getMissionProgress(character.companionType)
+      .then((p) => {
+        if (!cancelled) setMissionProgress(p)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [character.companionType, getMissionProgress])
+
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  // 지금 입력칸을 채운 경로 — ① 선택지 칩=objective ② AI 추천=subjective
+  // ③ 직접 타이핑=knowhow. 저장할 때 이 값을 그대로 서버에 보내 어느
+  // 미션 슬롯을 채우는지 알려준다(한 번 정해지면, 저장/초기화 전까지는
+  // 이어서 수정해도 바뀌지 않는다 — 예시를 고치는 것과 처음부터 직접
+  // 쓰는 것을 구분하기 위해).
+  const [missionType, setMissionType] = useState<MissionType | null>(null)
+  const markManualEdit = () => setMissionType((prev) => prev ?? 'knowhow')
   // 가르치기와 스스로 공부하기 중 어느 쪽이 지금 진행 중인지 — 두 액션은
   // 동시에 실행되지 않도록 서로를 막는다(버튼 disabled 공유).
   const [busyAction, setBusyAction] = useState<'teach' | 'study' | null>(null)
@@ -180,6 +206,7 @@ export default function InteractionPanel({
       const result = await studyGenerate(character.companionType)
       setTitle(result.knowledge.title)
       setContent(result.knowledge.content)
+      setMissionType('subjective')
       setVerification(result.verification)
       setVerifiedSnapshot({ title: result.knowledge.title, content: result.knowledge.content })
       setVerificationToken(result.verificationToken)
@@ -209,6 +236,7 @@ export default function InteractionPanel({
   const applyTopicSuggestion = (topic: { title: string; content: string }) => {
     setTitle(topic.title)
     setContent(topic.content)
+    setMissionType('objective')
     setVerification(null)
     setVerifiedSnapshot(null)
     setVerificationToken(null)
@@ -221,10 +249,12 @@ export default function InteractionPanel({
     setSaving(true)
     setSaveError(null)
     try {
-      const result = await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken)
+      const result = await saveKnowledge(character.companionType, title, verifiedSnapshot.content, content, verificationToken, missionType ?? undefined)
       pushLine('character', result.savedReply)
+      if (result.missionProgress) setMissionProgress(result.missionProgress)
       setTitle('')
       setContent('')
+      setMissionType(null)
       setVerification(null)
       setVerifiedSnapshot(null)
       setVerificationToken(null)
@@ -270,6 +300,39 @@ export default function InteractionPanel({
         {name} · {PROFESSION_LABEL[profession]}와 상호작용하기
       </p>
 
+      {/* PR #63: 6단계 카드형 미션 진행 현황 — 유형별(객관식/주관식/
+          노하우) 2개씩, 총 6개를 확정해야 다음 연령대로 진화한다. */}
+      {missionProgress && (
+        <div className="flex flex-col gap-1.5 rounded-xl bg-indigo-50 p-2.5" data-testid="mission-progress-summary">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-indigo-700">
+              {missionProgress.ageTierLabel} 성장 미션 {missionProgress.confirmedTotal}/{missionProgress.requiredTotal}
+            </p>
+            {missionProgress.allConfirmed && missionProgress.nextAgeTierLabel && (
+              <span className="text-[10px] font-semibold text-emerald-600">
+                레벨만 채우면 {missionProgress.nextAgeTierLabel}로 진화해요!
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {MISSION_TYPES.map((type) => {
+              const p = missionProgress.byType[type]
+              return (
+                <span
+                  key={type}
+                  data-testid={`mission-progress-${type}`}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    p.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-indigo-500'
+                  }`}
+                >
+                  {MISSION_TYPE_ICON[type]} {MISSION_TYPE_LABEL[type]} {p.confirmed}/{p.required}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {historyLoading && <p className="text-xs text-slate-400">대화 기록을 불러오는 중...</p>}
       {historyError && <p className="text-xs text-red-500">{historyError}</p>}
 
@@ -293,6 +356,9 @@ export default function InteractionPanel({
       <div className="flex flex-col gap-2">
         {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
           <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-slate-600">
+              {MISSION_TYPE_ICON.objective} {MISSION_TYPE_LABEL.objective} (객관식)
+            </p>
             <p className="text-[11px] text-slate-400">
               지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
             </p>
@@ -311,16 +377,25 @@ export default function InteractionPanel({
             </div>
           </div>
         )}
+        <p className="text-xs font-semibold text-slate-600">
+          {MISSION_TYPE_ICON.knowhow} {MISSION_TYPE_LABEL.knowhow} (나의 노하우)
+        </p>
         <input
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value)
+            markManualEdit()
+          }}
           placeholder="지식 제목"
           maxLength={100}
           className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
         />
         <textarea
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => {
+            setContent(e.target.value)
+            markManualEdit()
+          }}
           placeholder="가르칠 지식 내용을 입력해주세요."
           maxLength={2000}
           rows={4}
@@ -339,6 +414,9 @@ export default function InteractionPanel({
           </p>
         </div>
         <div className="flex flex-col items-start gap-1">
+          <p className="text-xs font-semibold text-slate-600">
+            {MISSION_TYPE_ICON.subjective} {MISSION_TYPE_LABEL.subjective} (주관식)
+          </p>
           <button
             onClick={() => void handleSelfStudy()}
             disabled={busy}

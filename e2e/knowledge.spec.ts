@@ -1,11 +1,20 @@
 import { test, expect, type Page, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
+import { ageTierForLevel } from '../src/data/characterAge'
 
 // 지식 가르치기 + Gemini 검증 (PR #44) — all mocked, no real DB/Gemini call.
 // See e2e/README.md. ChatProvider also mounts at the app root and fetches
 // /api/conversations as soon as a user is set, so every test here mocks
 // that too even though it's unrelated to this feature.
 const USER = { id: 1, email: 'alice@test.com' }
+
+// PR #63: 서버가 캐릭터 JSON에 age_tier를 함께 내려주기 시작했다 — 이
+// 모의 응답들은 실제 서버의 진화 게이트를 거치지 않으므로
+// (mission_unlocked_tier가 항상 null인 상태와 같다), 명시하지 않은
+// 캐릭터는 실제 서버와 동일하게 level에서 계산한 값을 기본으로 채운다.
+function withAgeTier(c: Record<string, unknown>): Record<string, unknown> {
+  return { age_tier: ageTierForLevel(typeof c.level === 'number' ? c.level : 1), ...c }
+}
 
 function mockEmptyConversations(page: Page) {
   return page.route('**/api/conversations', async (route) => {
@@ -27,6 +36,7 @@ async function mockCharacterApi(
     onListKnowledge?: (route: Route) => Promise<void>
     onStudyGenerate?: (route: Route) => Promise<void>
     onListMessages?: (route: Route) => Promise<void>
+    onMissions?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -74,7 +84,37 @@ async function mockCharacterApi(
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ characters: options.characters ?? [] }),
+        body: JSON.stringify({ characters: (options.characters ?? []).map((c) => withAgeTier(c as Record<string, unknown>)) }),
+      })
+      return
+    }
+    // PR #63: InteractionPanel이 열릴 때마다 6미션 진행상황을 조회한다 —
+    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 항상 빈(0/6)
+    // 기본값을 돌려준다.
+    if (method === 'GET' && action === 'missions') {
+      if (options.onMissions) {
+        await options.onMissions(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 0, required: 2, complete: false },
+            },
+            confirmedTotal: 0,
+            requiredTotal: 6,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
       })
       return
     }
@@ -537,4 +577,191 @@ test('reopening the panel (e.g. after a refresh) reloads the persisted conversat
   await expect(dialog.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
   await expect(dialog.getByText('정확해요! 알려주셔서 고마워요!', { exact: false })).toBeVisible()
   expect(messagesRequested).toBeGreaterThan(0)
+})
+
+// --- PR #63: 6단계 카드형 미션 — 어느 입력 경로(선택지 칩/AI 추천/직접
+// 입력)로 채웠는지가 저장 요청의 missionType으로 그대로 실려가는지
+// 확인한다. 셋 다 기존 검증/저장 로직 자체는 전혀 건드리지 않았으므로,
+// 여기서는 missionType 태깅만 검증한다.
+
+test('filling the form from a topic suggestion chip and saving tags the save request as missionType=objective', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-objective',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: 1, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByTestId('topic-suggestion-chip').first().click()
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.missionType).toBe('objective')
+})
+
+test('clicking 스스로 공부하기 and saving tags the save request as missionType=subjective', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-subjective',
+          characterReply: "오늘은 '복식부기'를 공부했어요!",
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: 1, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'ai_generated', created_at: new Date().toISOString() },
+          savedReply: '저장했어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.missionType).toBe('subjective')
+})
+
+test('typing the title/content directly and saving tags the save request as missionType=knowhow', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-knowhow',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: 1, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByPlaceholder('지식 제목').fill('나만의 노하우')
+  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('현장에서만 배울 수 있는 내용')
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.missionType).toBe('knowhow')
+})
+
+test('the mission progress summary shows the current tier\'s 6-slot progress, by type', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    // 이 테스트만 2/0/1(objective는 이미 완료)로 기본 진행 상태를 덮어쓴다.
+    onMissions: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 2, required: 2, complete: true },
+              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 1, required: 2, complete: false },
+            },
+            confirmedTotal: 3,
+            requiredTotal: 6,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('mission-progress-summary')).toContainText('8~9살 성장 미션 3/6')
+  await expect(page.getByTestId('mission-progress-objective')).toContainText('2/2')
+  await expect(page.getByTestId('mission-progress-subjective')).toContainText('0/2')
+  await expect(page.getByTestId('mission-progress-knowhow')).toContainText('1/2')
 })
