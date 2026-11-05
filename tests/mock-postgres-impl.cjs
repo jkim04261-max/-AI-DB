@@ -20,7 +20,7 @@ const state = {
   studyUsage: new Map(), // `${userId}|${date}` -> { used_count }
   passwordResetTokens: [], // { id, user_id, token_hash, expires_at, used_at }
   characters: [], // { id, user_id, companion_type, stage }
-  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source }
+  knowledgeEntries: [], // { id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save }
   characterMessages: [], // { id, user_id, character_id, speaker, source, content, verification_status, knowledge_entry_id }
   nextCharacterMessageId: 1,
   examAttempts: [], // { id, user_id, character_id, kind, profession, question_id, score, passed, exp_awarded }
@@ -443,17 +443,17 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
-  // --- api/character.ts: handleSaveKnowledge's teen-evolution exp/level
-  // bump (GREATEST(...) on both columns) — checked before the generic
-  // 'UPDATE characters' profession matcher below, since both start with
-  // "UPDATE characters" but have completely different bound params. ---
-  if (has(text, 'UPDATE characters', 'GREATEST(exp,')) {
-    const [evolvedExp, evolvedLevel, characterId, userId] = values
+  // --- api/_lib/characterMissions.ts: maybeEvolveAgeTier's pin/advance
+  // write — checked before the generic 'UPDATE characters' profession
+  // matcher below, since both start with "UPDATE characters" but have
+  // completely different bound params. Same statement shape covers both
+  // "hold at the current tier" (level outran missions) and "advance to the
+  // next tier" (both conditions met) — only the bound value differs. ---
+  if (has(text, 'UPDATE characters', 'SET mission_unlocked_tier =')) {
+    const [tier, characterId, userId] = values
     const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
-    if (!row) return Promise.resolve({ rows: [] })
-    row.exp = Math.max(row.exp ?? 0, evolvedExp)
-    row.level = Math.max(row.level ?? 1, evolvedLevel)
-    return Promise.resolve({ rows: [{ exp: row.exp, level: row.level }] })
+    if (row) row.mission_unlocked_tier = tier
+    return Promise.resolve({ rows: [] })
   }
 
   // --- api/character.ts: change/set profession (checked before the
@@ -475,6 +475,7 @@ function sql(strings, ...values) {
           profession: row.profession,
           level: row.level ?? 1,
           exp: row.exp ?? 0,
+          mission_unlocked_tier: row.mission_unlocked_tier ?? null,
           created_at: now,
         },
       ],
@@ -500,6 +501,7 @@ function sql(strings, ...values) {
               profession: row.profession,
               level: row.level ?? 1,
               exp: row.exp ?? 0,
+              mission_unlocked_tier: row.mission_unlocked_tier ?? null,
               created_at: now,
             },
           ]
@@ -521,6 +523,7 @@ function sql(strings, ...values) {
         profession: c.profession,
         level: c.level ?? 1,
         exp: c.exp ?? 0,
+        mission_unlocked_tier: c.mission_unlocked_tier ?? null,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -536,9 +539,9 @@ function sql(strings, ...values) {
     if (exists) return Promise.resolve({ rows: [] })
     const id = state.nextCharacterId++
     const now = new Date().toISOString()
-    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0 })
+    state.characters.push({ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, mission_unlocked_tier: null })
     return Promise.resolve({
-      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, created_at: now }],
+      rows: [{ id, user_id: userId, companion_type: companionType, stage, profession: null, level: 1, exp: 0, mission_unlocked_tier: null, created_at: now }],
     })
   }
 
@@ -620,6 +623,22 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: row ? [{ ...row }] : [] })
   }
 
+  // --- api/_lib/characterMissions.ts: getMissionProgress's per-type count
+  // (checked before the generic COUNT(*) matcher below, since this query
+  // also contains 'COUNT(*)' and 'character_knowledge_entries' as
+  // substrings but groups by mission_type instead of returning one total) ---
+  if (has(text, 'GROUP BY mission_type')) {
+    const [characterId, userId, tier] = values
+    const counts = new Map()
+    for (const e of state.knowledgeEntries) {
+      if (e.character_id !== characterId || e.user_id !== userId) continue
+      if (e.age_tier_at_save !== tier || !e.mission_type) continue
+      counts.set(e.mission_type, (counts.get(e.mission_type) ?? 0) + 1)
+    }
+    const rows = [...counts.entries()].map(([mission_type, count]) => ({ mission_type, count }))
+    return Promise.resolve({ rows })
+  }
+
   // --- api/character.ts: handleListKnowledge's count ---
   if (has(text, 'COUNT(*)', 'character_knowledge_entries')) {
     const [characterId, userId] = values
@@ -657,7 +676,7 @@ function sql(strings, ...values) {
   // literal in the real query (only ever-'appropriate' rows get inserted),
   // not a bound parameter, so it's not in `values`. ---
   if (has(text, 'INSERT INTO character_knowledge_entries')) {
-    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId, source] =
+    const [userId, characterId, profession, title, originalContent, finalContent, verificationExplanation, requestId, source, missionType, ageTierAtSave] =
       values
     const id = state.nextKnowledgeEntryId++
     const now = new Date().toISOString()
@@ -673,6 +692,8 @@ function sql(strings, ...values) {
       verification_explanation: verificationExplanation,
       client_request_id: requestId,
       source,
+      mission_type: missionType ?? null,
+      age_tier_at_save: ageTierAtSave ?? null,
       created_at: now,
     }
     state.knowledgeEntries.push(entry)

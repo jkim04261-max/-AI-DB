@@ -320,13 +320,11 @@ async function run() {
   // 쓰므로, 바로 앞의 req-growth-1 검증 1회와 합치면 11회가 되어 제한에
   // 걸리기 때문).
   //
-  // PR #53 요청 3번(8~9살 단계에서 지식 '적합' 5회 누적 시 청소년기로
-  // 자동 진화) 때문에, 순수 XP 곡선만으로 Lv.2까지 오르는 옛 시나리오는
-  // 더 이상 성립하지 않는다 — dave의 두리는 req-growth-1(1번째)에 이어
-  // 이 루프의 i=0~2(2~4번째)까지 토들러인 채로 쌓이다가, i=3에서 누적
-  // 5번째 저장이 되어 일반 XP 가산(40+10=50) 직후 곧장 Lv.5(청소년기)로
-  // 진화한다. 그 뒤(i=4~9)는 이미 teen이라 진화 로직이 다시 발동하지
-  // 않고, 평범하게 10XP씩만 쌓인다(Lv.5→6 임계값 500XP에는 한참 못 미침).
+  // PR #63: 연령대 "진화"는 더 이상 지식 저장 개수만으로 자동 발동하지
+  // 않는다(유형별 2개씩 + 레벨 둘 다 필요 — api/_lib/characterMissions.ts
+  // 참고, 그 자체의 전용 테스트는 knowledge.test.cjs에 있다). missionType
+  // 을 안 보내는 이 루프는 순수 XP 곡선만 검증한다: req-growth-1(10XP) +
+  // 이 루프 10회(100XP) = 110XP → 레벨업 임계값(100) 하나만 넘어 Lv.2.
   mock.setFakeDate('2026-02-01')
   for (let i = 0; i < 10; i++) {
     const v = mockRes()
@@ -347,16 +345,12 @@ async function run() {
       }),
       s,
     )
-    if (i === 3) {
-      t.assert(s.body.level === 5, '누적 5번째 적합 저장(req-growth-1 + i=0~3)에서 청소년기(Lv.5)로 진화한다')
-      t.assert(s.body.exp >= 1000, '진화 시 exp도 Lv.5 임계값(누적 1000) 이상으로 올라간다')
-      t.assert(s.body.leveledUp === true, '진화도 레벨업으로 취급된다')
-      t.assert(s.body.savedReply.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
-    }
-    if (i === 9) {
-      t.assert(s.body.level === 5, '진화 이후에는 10XP씩만 쌓이므로(Lv.5→6은 500XP 필요) 루프가 끝나도 여전히 Lv.5다')
-      t.assert(s.body.leveledUp === false, '진화 이후의 저장들은 평범한 저장이라 레벨업으로 보고되지 않는다')
-    }
+    t.assert(s.body.evolved === false, `${i}번째 저장은 미션 타입을 안 보냈으므로 진화하지 않는다`)
+    // 레벨업 임계값(100) 자체는 req-growth-1의 10XP + 이 루프 9번째(i=8)
+    // 저장으로 누적 100에 닿는 순간(i=8) 넘는다 — i=9(10번째)는 이미
+    // Lv.2인 채로 10XP만 더 쌓일 뿐이라 leveledUp은 그때는 false다. 정확한
+    // 타이밍을 여기서 다시 따지기보다, 루프가 끝난 뒤의 최종 상태(7번)만
+    // 확인한다.
   }
 
   // --- 7: XP가 높다고 "AI가 똑똑해졌다"고 말하지 않는다 — 메시지에
@@ -365,7 +359,7 @@ async function run() {
     const res = mockRes()
     await characterHandler(daveReq({ method: 'GET' }), res)
     const duri = res.body.characters.find((c) => c.companion_type === 'duri')
-    t.assert(duri.level === 5 && duri.exp === 1060, '캐릭터 목록 조회에도 최신 level/exp가 반영된다(진화 이후 누적값 기준)')
+    t.assert(duri.level === 2 && duri.exp === 110, '캐릭터 목록 조회에도 최신 level/exp가 반영된다')
   }
 
   // checkpoint 5: 동시 중복 제출 — 같은 문제/같은 시험을 거의 동시에 두 번

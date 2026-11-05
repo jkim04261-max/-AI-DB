@@ -769,18 +769,21 @@ async function run() {
     )
   }
 
-  // --- PR #53 요청 3번: 8~9살(toddler) 단계에서 지식 '적합' 판정이 5회
-  // 쌓이면 일반 XP 곡선과 별개로 곧장 청소년기(teen, Lv.5)로 "진화"한다.
-  // 5번째 저장에서만 진화가 발동하고(4번째까지는 Lv.1 그대로), savedReply
-  // 에도 일반 레벨업과 다른 진화 전용 문구가 담긴다.
+  // --- PR #63: 연령대 "진화"는 더 이상 지식 저장 개수(flat count)가
+  // 아니라, 한 연령대에서 유형별(객관식=objective/주관식=subjective/
+  // 노하우=knowhow) 2개씩 총 6개를 확정 저장해야 하고, *동시에* 레벨도
+  // 다음 단계 기준을 넘어야 한다(레벨 조건 유지 + 미션 게이트 추가) —
+  // 둘 중 하나만 만족해서는 절대 진화하지 않는 "진짜 게이트"인지
+  // 확인한다.
   {
     mock.seedUser(11, { email: 'kate@test.com' })
     const kateCookie = cookieHeaderFor(auth, 11, 0, 'kate@test.com')
     const kateReq = (overrides = {}) => ({ headers: { cookie: kateCookie }, query: {}, ...overrides })
     await characterHandler(kateReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
     await characterHandler(kateReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const kateNuri = mock.state.characters.find((c) => c.user_id === 11 && c.companion_type === 'nuri')
 
-    const teachOnce = async (n) => {
+    const teachOnce = async (n, missionType) => {
       geminiBehavior = {
         kind: 'json',
         result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
@@ -802,6 +805,7 @@ async function run() {
             finalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
             verificationToken: verifyRes.body.verificationToken,
             requestId: `req-evolve-${n}`,
+            missionType,
           },
         }),
         saveRes,
@@ -809,80 +813,112 @@ async function run() {
       return saveRes
     }
 
-    for (let n = 1; n <= 4; n++) {
-      const res = await teachOnce(n)
-      t.assert(res.statusCode === 201, `${n}번째 적합 지식 저장이 성공한다`)
-      t.assert(res.body.level === 1, `${n}번째 저장까지는 아직 Lv.1(toddler)이다 — 진화는 5번째에만 발동`)
-    }
+    // 1) 첫 저장(아직 Lv.1)에서 mission_unlocked_tier가 처음으로
+    // 'toddler'에 고정된다(이 게이트를 처음 평가받는 모든 캐릭터가
+    // 거치는 지점 — 레벨이 이미 높은 기존 캐릭터라면 여기서 그 레벨
+    // 기준 단계로 "소급 강등 없이" 고정되고, 이 캐릭터처럼 Lv.1이면
+    // 당연히 toddler로 고정된다).
+    const firstSave = await teachOnce(1, 'objective')
+    t.assert(firstSave.statusCode === 201, '첫 지식 저장이 성공한다')
+    t.assert(firstSave.body.evolved === false, '아직 Lv.1이라 진화 조건(레벨) 자체가 안 된다')
+    t.assert(kateNuri.mission_unlocked_tier === 'toddler', '첫 평가에서 toddler로 고정된다')
 
-    const fifth = await teachOnce(5)
-    t.assert(fifth.statusCode === 201, '5번째 적합 지식 저장이 성공한다')
-    t.assert(fifth.body.level === 5, '5번째 적합 판정으로 Lv.5(청소년기 시작)로 진화한다')
-    t.assert(fifth.body.leveledUp === true, '진화도 레벨업으로 취급되어 leveledUp이 true다')
+    // 레벨이 이미 teen 기준(Lv.5)을 넘어도(퀴즈·시험 등으로 다른 곳에서
+    // 올랐다고 가정), 미션을 안 끝냈으면 절대 진화하지 않는다 — "지금
+    // 단계에 고정"된 채 레벨이 더 올라도 조용히 새어나가지 않아야 한다
+    // (예전 EVOLUTION_KNOWLEDGE_COUNT와 다른 점).
+    kateNuri.level = 5
+    kateNuri.exp = 1000
+    const noMissionSave = await teachOnce(2, 'objective')
+    t.assert(noMissionSave.statusCode === 201, '레벨만 충분한 상태에서도 저장 자체는 성공한다')
+    t.assert(noMissionSave.body.evolved === false, '미션이 2/6뿐이면 레벨이 충분해도 진화하지 않는다')
+    t.assert(noMissionSave.body.missionProgress.confirmedTotal === 2, '지금까지 저장한 2건이 objective 2개로 집계된다')
+    t.assert(kateNuri.mission_unlocked_tier === 'toddler', '레벨은 넘었지만 미션이 안 끝나서 toddler에 그대로 고정된다(진짜 게이트)')
+
+    const getRes = mockRes()
+    await characterHandler(kateReq({ method: 'GET', query: {} }), getRes)
+    const kateNuriJson = getRes.body.characters.find((c) => c.companion_type === 'nuri')
+    t.assert(kateNuriJson.level === 5 && kateNuriJson.age_tier === 'toddler', '캐릭터 목록 응답도 레벨(5)과 무관하게 age_tier는 toddler로 고정되어 내려온다')
+
+    // 2) 유형 구성이 2+2+2가 아니면(객관식만 계속 쌓여도) 진화하지 않는다
+    // — "총 6개"가 아니라 "유형별 2개씩"이 조건이다.
+    for (let n = 3; n <= 6; n++) {
+      const res = await teachOnce(n, 'objective')
+      t.assert(res.body.evolved === false, `${n}번째(여전히 objective만)까지는 진화하지 않는다`)
+    }
+    const missionsRes = mockRes()
+    await characterHandler(kateReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), missionsRes)
     t.assert(
-      fifth.body.savedReply?.includes('청소년 단계로 성장했어요'),
-      '진화 시 응답 문구에 일반 레벨업과 다른 "청소년 단계로 성장" 안내가 포함된다',
+      missionsRes.body.missionProgress.byType.objective.confirmed === 2 && missionsRes.body.missionProgress.byType.objective.complete === true,
+      'objective는 2개에서 더 이상 늘지 않고(유형별 상한 2) 완료 표시된다',
     )
+    t.assert(missionsRes.body.missionProgress.byType.subjective.confirmed === 0 && missionsRes.body.missionProgress.byType.knowhow.confirmed === 0, 'subjective/knowhow는 아직 0개다')
+    t.assert(missionsRes.body.missionProgress.allConfirmed === false, '유형이 한쪽으로 쏠려 있으면 총 개수가 충분해도 allConfirmed는 false다')
 
-    const kateNuri = mock.state.characters.find((c) => c.user_id === 11 && c.companion_type === 'nuri')
-    t.assert(kateNuri.exp >= 1000, 'DB에 저장된 exp도 Lv.5 임계값(누적 1000) 이상으로 올라가 있다 — 다음 저장에서 다시 역산돼도 toddler로 안 돌아간다')
+    // 3) subjective 2개 + knowhow 2개까지 채우면(= 2+2+2) 레벨도 이미
+    // 충분하므로 그 즉시 진화한다.
+    await teachOnce(7, 'subjective')
+    const subj2 = await teachOnce(8, 'subjective')
+    t.assert(subj2.body.evolved === false, 'subjective가 2개 찼어도 knowhow가 아직 0개라 진화하지 않는다')
+    await teachOnce(9, 'knowhow')
+    const evolved = await teachOnce(10, 'knowhow')
+    t.assert(evolved.statusCode === 201, '유형별 2개씩 마지막 지식 저장이 성공한다')
+    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지고 레벨도 충분해 진화한다')
+    t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
+    t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
+    t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
+    t.assert(kateNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록되어 다음 요청에서도 유지된다')
 
-    // 6번째부터는 이미 teen이라 다시 진화 로직이 발동하지 않아야 한다
-    // (requiredAgeTier를 junior_20s로 바꿔 ageBlocked 없이 통과시키고,
-    // 평범한 레벨업 문구인지만 확인한다).
-    geminiBehavior = {
-      kind: 'json',
-      result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
-    }
-    const sixthVerify = mockRes()
+    // 4) teen으로 넘어간 뒤에는 toddler 때 쌓은 6개가 재사용되지 않고,
+    // teen 자신의 미션 집계가 0부터 다시 시작한다.
+    const teenMissions = mockRes()
+    await characterHandler(kateReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), teenMissions)
+    t.assert(teenMissions.body.missionProgress.ageTier === 'teen' && teenMissions.body.missionProgress.confirmedTotal === 0, 'teen 단계는 toddler 때 저장을 재사용하지 않고 0/6부터 새로 시작한다')
+
+    // 5) 미션은 이미 다 끝났는데 레벨만 모자란 경우 — 순수 XP 액션만으로도
+    // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
+    // 판정을 공유한다는 뜻). 지금까지 이미 지식 검증을 9회 썼으므로(하루
+    // 10회 제한), 이 구간에서 더 쓰기 전에 날짜를 넘겨 리셋한다 — 하루
+    // 제한 자체를 테스트하는 게 아니라 진화 로직을 테스트하는 구간이므로
+    // teachOnce(5)/(7~8)의 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
+    mock.setFakeDate('2026-03-02')
+    await teachOnce(11, 'objective')
+    await teachOnce(12, 'objective')
+    await teachOnce(13, 'subjective')
+    await teachOnce(14, 'subjective')
+    await teachOnce(15, 'knowhow')
+    const sixthTeenMission = await teachOnce(16, 'knowhow')
+    t.assert(sixthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 6미션도 모두 채웠다')
+    t.assert(sixthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
+    t.assert(kateNuri.mission_unlocked_tier === 'teen', '미션은 끝났지만 레벨이 부족해 teen에 고정된 채다')
+
+    kateNuri.level = 10
+    kateNuri.exp = 4500
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' } }
+    const bonusVerify = mockRes()
     await characterHandler(
-      kateReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '쉬운 지식 6', content: '여섯 번째 내용' } }),
-      sixthVerify,
+      kateReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '아무 지식', content: '아무 내용' } }),
+      bonusVerify,
     )
-    const sixthSave = mockRes()
+    const levelOnlySave = mockRes()
     await characterHandler(
       kateReq({
         method: 'POST',
         query: { action: 'save-knowledge' },
         body: {
           companionType: 'nuri',
-          title: '쉬운 지식 6',
-          originalContent: '여섯 번째 내용',
-          finalContent: '여섯 번째 내용',
-          verificationToken: sixthVerify.body.verificationToken,
-          requestId: 'req-evolve-6',
+          title: '아무 지식',
+          originalContent: '아무 내용',
+          finalContent: '아무 내용',
+          verificationToken: bonusVerify.body.verificationToken,
+          requestId: 'req-evolve-level-catchup',
         },
       }),
-      sixthSave,
+      levelOnlySave,
     )
-    t.assert(sixthSave.statusCode === 201, '진화 이후의 저장도 정상 동작한다')
-    t.assert(!sixthSave.body.savedReply?.includes('청소년 단계로 성장했어요'), '이미 teen이 된 뒤에는 진화 문구가 다시 뜨지 않는다')
-
-    // --- 요청 3번 "향후 10대 10회, 20대 20회 등 확장 가능한 구조" 검증 —
-    // teen 단계의 요구치(10회)는 "이번 단계부터 새로 10개"가 아니라
-    // "누적 총합이 toddler(5) + teen(10) = 15개"가 되는 시점에 발동한다
-    // (character_knowledge_entries를 단계별로 따로 세지 않고 캐릭터
-    // 전체 누적 개수로 판정하는 설계이기 때문). 7~14번째는 teen을
-    // 유지하다가 15번째에 junior_20s(Lv.10)로 진화해야, 같은 로직이
-    // toddler 말고 다른 단계에서도 그대로 동작한다는 걸 보여준다.
-    // 하루 지식 검증 10회 제한(knowledgeLimit.ts)과는 별개 테스트이므로,
-    // 날짜를 넘겨 kate의 하루 검증 횟수를 리셋한다(1~6번째로 이미 6회를
-    // 썼고, 이 구간만 8회를 더 쓰므로 그대로는 제한에 걸린다).
-    mock.setFakeDate('2026-03-01')
-    let lastSave
-    for (let n = 7; n <= 14; n++) {
-      lastSave = await teachOnce(n)
-      t.assert(lastSave.statusCode === 201, `${n}번째 적합 지식 저장이 성공한다`)
-      t.assert(lastSave.body.level === 5, `${n}번째 저장까지는 teen(Lv.5)을 유지한다 — 누적 15개가 되는 15번째에만 다음 진화 발동`)
-    }
-
-    const fifteenth = await teachOnce(15)
-    t.assert(fifteenth.statusCode === 201, '15번째 적합 지식 저장이 성공한다')
-    t.assert(fifteenth.body.level === 10, '누적 15개(toddler 5 + teen 10)에서 junior_20s(Lv.10)로 진화한다 — teen 단계에서도 같은 일반화된 로직이 동작한다')
-    t.assert(
-      fifteenth.body.savedReply?.includes('청년 단계로 성장했어요'),
-      'junior_20s로 진화할 때는 그 단계의 스테이지 라벨("청년")이 그대로 문구에 쓰인다 — 단계마다 문구를 새로 코딩할 필요가 없다',
-    )
+    t.assert(levelOnlySave.body.evolved === true, '미션은 이미 끝나 있었으므로 레벨만 채워지면(퀴즈든 지식 저장이든) 그 즉시 진화한다')
+    t.assert(levelOnlySave.body.newAgeTier === 'junior_20s', '다음 연령대는 junior_20s다')
+    t.assert(levelOnlySave.body.savedReply?.includes('청년 단계로 성장했어요'), 'junior_20s 진화 문구에는 그 단계의 스테이지 라벨("청년")이 쓰인다')
   }
 
   return t.summary()

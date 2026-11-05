@@ -1,5 +1,15 @@
 import { test, expect, type Page, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
+import { ageTierForLevel } from '../src/data/characterAge'
+
+// PR #63: 서버가 캐릭터 JSON에 age_tier(진화 게이트로 고정될 수 있는
+// "진짜" 연령대)를 함께 내려주기 시작했다 — 이 모의 응답들은 실제
+// 서버의 maybeEvolveAgeTier를 거치지 않으므로(= mission_unlocked_tier가
+// 항상 null인 상태와 같다), age_tier를 명시하지 않은 캐릭터는 실제
+// 서버와 똑같이 level에서 계산한 값을 기본으로 채워준다.
+function withAgeTier<T extends { level?: number; age_tier?: string }>(c: T): T & { age_tier: string } {
+  return { age_tier: ageTierForLevel(c.level ?? 1), ...c }
+}
 
 // PR #46: the new 2.5D-style game screen's own wiring — menu items that
 // didn't exist before this PR ("함께 대화하기"/"성장 보기"/"앨범·기록"),
@@ -73,6 +83,32 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
       return
     }
+    // PR #63: InteractionPanel이 열릴 때마다 6미션 진행상황을 조회한다 —
+    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 항상 빈(0/6)
+    // 기본값을 돌려준다.
+    if (method === 'GET' && action === 'missions') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 0, required: 2, complete: false },
+            },
+            confirmedTotal: 0,
+            requiredTotal: 6,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+      return
+    }
     if (method === 'GET' && action === 'quiz' && options.onQuiz) {
       await options.onQuiz(route)
       return
@@ -82,7 +118,11 @@ async function mockCharacterApi(
       return
     }
     if (method === 'GET' && !action) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: options.characters ?? [] }) })
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ characters: (options.characters ?? []).map((c) => withAgeTier(c as Record<string, unknown>)) }),
+      })
       return
     }
     // PR #52: 직업 저장(PATCH) — 고른 직업을 그대로 반영한 캐릭터를
@@ -93,9 +133,9 @@ async function mockCharacterApi(
         return
       }
       const body = route.request().postDataJSON() as { companionType?: string; profession?: string }
-      const base = (options.characters ?? []).find(
-        (c): c is Record<string, unknown> => typeof c === 'object' && c !== null && (c as Record<string, unknown>).companion_type === body.companionType,
-      )
+      const base = (options.characters ?? [])
+        .map((c) => withAgeTier(c as Record<string, unknown>))
+        .find((c): c is Record<string, unknown> => c.companion_type === body.companionType)
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -354,6 +394,53 @@ test('leveling up (not just gaining XP) shows a distinct level-up celebration on
 
   await expect(page.getByTestId('level-up-banner')).toBeVisible()
   await expect(page.getByTestId('level-up-banner')).toContainText('Lv.2')
+})
+
+// PR #63: 연령대 "진화"(6미션 게이트 통과)는 평범한 레벨업과 별개의 더
+// 눈에 띄는 축하 연출을 띄운다 — character.ageTier가 실제로 바뀔 때만
+// 발동하는지 확인한다(퀴즈 XP 하나로도 missionProgress가 이미 끝나
+// 있었다면 그 즉시 진화할 수 있다는 걸 보여준다).
+test('evolving to the next age tier (not just leveling up) shows a distinct evolution celebration on the stage', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_SINGER],
+    onQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ question: { id: 'singer-1', text: '복식호흡이란?', choices: ['배로 숨쉬기', '가슴으로 숨쉬기', '숨 참기', '빠르게 숨쉬기'] } }),
+      })
+    },
+    onQuizSubmit: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          correct: true,
+          explanation: '배로 숨을 쉬는 발성 기초예요.',
+          expAwarded: 460,
+          exp: 0,
+          level: 5,
+          leveledUp: true,
+          message: '레벨업! (+460XP)',
+          evolved: true,
+          newAgeTier: 'teen',
+          newAgeTierLabel: '10대',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '문제 풀기' }).click()
+  await page.getByRole('button', { name: /퀴즈 풀기/ }).click()
+  await page.getByRole('button', { name: '배로 숨쉬기' }).click()
+  await page.getByRole('button', { name: '제출' }).click()
+
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
 })
 
 // PR #47 체크포인트 1: 레벨에 따른 외형 분기 구조 — 레벨 6 이상이면
@@ -917,9 +1004,12 @@ test('the teach/study panel shows three distinct gamified mission cards inside a
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByText('🎯 선택지에서 고르기')).toBeVisible()
-  await expect(dialog.getByText('✨ AI 추천 받기')).toBeVisible()
-  await expect(dialog.getByText('✏️ 직접 입력하기')).toBeVisible()
+  // PR #63: 미션 진행 요약 뱃지("🎯 선택지에서 고르기 0/2")도 같은
+  // 문구를 부분 문자열로 포함하므로, 카드 제목 자체(전체 텍스트가 정확히
+  // 일치하는 요소)만 집도록 exact: true로 좁힌다.
+  await expect(dialog.getByText('🎯 선택지에서 고르기', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('✨ AI 추천 받기', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('✏️ 직접 입력하기', { exact: true })).toBeVisible()
 
   // 기존 입력 경로(입력칸·버튼)는 토글 없이 그대로 바로 쓸 수 있어야
   // 한다 — knowledge.spec.ts의 모든 시나리오가 패널을 열자마자 바로

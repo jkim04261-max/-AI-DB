@@ -62,11 +62,12 @@ export function buildQuizResultMessage(
   expAwarded: number,
   leveledUp: boolean,
   newLevel: number,
+  evolvedStageLabel: string | null = null,
 ): string {
   const base = correct
     ? `정답이에요! ${explanation}${expAwarded > 0 ? ` (+${expAwarded}XP)` : ''}`
     : `아쉬워요, 정답이 아니었어요. ${explanation}`
-  return base + levelUpSuffix(leveledUp, newLevel)
+  return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
 }
 
 export function buildExamResultMessage(
@@ -76,11 +77,12 @@ export function buildExamResultMessage(
   expAwarded: number,
   leveledUp: boolean,
   newLevel: number,
+  evolvedStageLabel: string | null = null,
 ): string {
   const base = passed
     ? `시험 합격이에요! ${score}/${total}문제를 맞혔어요.${expAwarded > 0 ? ` (+${expAwarded}XP)` : ''}`
     : `아쉽지만 불합격이에요. ${score}/${total}문제를 맞혔어요. 다시 도전해볼까요?`
-  return base + levelUpSuffix(leveledUp, newLevel)
+  return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
 }
 
 // PR #45 checkpoint 4 (조건 7): shown in the UI next to level/XP so it's
