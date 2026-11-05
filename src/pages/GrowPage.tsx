@@ -598,7 +598,11 @@ export default function GrowPage() {
       )}
 
       {openSheet && character && (character.profession || openSheet === 'customize' || openSheet === 'market') && (
-        <BottomSheet title={SHEET_TITLE[openSheet]} onClose={() => setOpenSheet(null)}>
+        <BottomSheet
+          title={SHEET_TITLE[openSheet]}
+          onClose={() => setOpenSheet(null)}
+          variant={openSheet === 'teach' || openSheet === 'study' ? 'mission' : 'default'}
+        >
           {(openSheet === 'teach' || openSheet === 'study') && character.profession && (
             <InteractionPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
           )}
