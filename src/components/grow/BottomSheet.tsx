@@ -13,6 +13,11 @@ import { X } from 'lucide-react'
 // variant를 추가해 기본값은 기존 스타일을 1바이트도 바꾸지 않고
 // 그대로 유지하고, teach/study를 여는 GrowPage 호출부에서만
 // variant="mission"을 넘긴다.
+//
+// PR A(UI/UX 가독성 개선): "답답하다"는 피드백에 따라 mission 변형만
+// PC에서 훨씬 넓게(sm:max-w-lg → sm:max-w-4xl) 키우고 세로 여유도
+// 늘렸다 — 다른 6개 화면이 쓰는 default 변형의 sm:max-w-lg는 전혀
+// 건드리지 않는다(위와 동일한 이유).
 export default function BottomSheet({
   title,
   onClose,
@@ -42,7 +47,7 @@ export default function BottomSheet({
         aria-label={title}
         className={
           isMission
-            ? 'motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[88vh] w-full flex-col rounded-t-3xl border-2 border-cyan-400/50 bg-slate-900/80 shadow-[0_8px_40px_rgba(56,189,248,0.3)] ring-4 ring-cyan-300/20 ring-inset backdrop-blur-xl sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl'
+            ? 'motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[92vh] w-full flex-col rounded-t-3xl border-2 border-cyan-400/50 bg-slate-900/80 shadow-[0_8px_40px_rgba(56,189,248,0.3)] ring-4 ring-cyan-300/20 ring-inset backdrop-blur-xl sm:max-h-[90vh] sm:max-w-4xl sm:rounded-3xl'
             : 'motion-safe:animate-[grow-sheet-up_0.22s_ease-out] flex max-h-[88vh] w-full flex-col rounded-t-3xl border-2 border-[#d4af37] bg-amber-50 shadow-[0_8px_30px_rgba(0,0,0,0.35)] ring-4 ring-[#2b1a0f] ring-inset sm:max-h-[85vh] sm:max-w-lg sm:rounded-3xl'
         }
       >
@@ -52,11 +57,11 @@ export default function BottomSheet({
         <div
           className={
             isMission
-              ? 'flex shrink-0 items-center justify-between rounded-t-[22px] border-b-2 border-cyan-400/40 bg-gradient-to-b from-indigo-950/90 to-slate-950/90 px-4 py-3 sm:rounded-t-[22px]'
+              ? 'flex shrink-0 items-center justify-between rounded-t-[22px] border-b-2 border-cyan-400/40 bg-gradient-to-b from-indigo-950/90 to-slate-950/90 px-5 py-4 sm:rounded-t-[22px]'
               : 'flex shrink-0 items-center justify-between rounded-t-[22px] border-b-2 border-[#d4af37] bg-gradient-to-b from-[#4a2f1a] to-[#2b1a0f] px-4 py-3 sm:rounded-t-[22px]'
           }
         >
-          <p className={isMission ? 'text-sm font-bold tracking-wide text-cyan-100' : 'text-sm font-bold tracking-wide text-[#f4d58d]'}>
+          <p className={isMission ? 'text-lg font-bold tracking-wide text-cyan-100' : 'text-sm font-bold tracking-wide text-[#f4d58d]'}>
             {title}
           </p>
           <button
@@ -65,14 +70,14 @@ export default function BottomSheet({
             aria-label="닫기"
             className={
               isMission
-                ? 'flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/60 text-cyan-100 hover:bg-cyan-400/20'
+                ? 'flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/60 text-cyan-100 hover:bg-cyan-400/20'
                 : 'flex h-8 w-8 items-center justify-center rounded-full border border-[#d4af37]/70 text-[#f4d58d] hover:bg-[#d4af37]/20'
             }
           >
-            <X size={16} />
+            <X size={isMission ? 18 : 16} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div className={isMission ? 'min-h-0 flex-1 overflow-y-auto p-5 sm:p-6' : 'min-h-0 flex-1 overflow-y-auto p-4'}>{children}</div>
       </div>
     </div>
   )

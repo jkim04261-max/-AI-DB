@@ -182,19 +182,22 @@ body {
 @keyframes grow-xp-pop {
   0% {
     opacity: 0;
-    transform: translate(-50%, 6px) scale(0.9);
+    transform: translate(-50%, 10px) scale(0.6);
   }
   15% {
     opacity: 1;
-    transform: translate(-50%, 0) scale(1);
+    transform: translate(-50%, 0) scale(1.35);
+  }
+  30% {
+    transform: translate(-50%, -4px) scale(1.1);
   }
   80% {
     opacity: 1;
-    transform: translate(-50%, -6px) scale(1);
+    transform: translate(-50%, -14px) scale(1.15);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -18px) scale(1);
+    transform: translate(-50%, -34px) scale(1.15);
   }
 }
 /* PR #47 체크포인트 1: XP가 올라서 레벨 자체가 바뀌었을 때만(퀴즈 정답
@@ -204,18 +207,42 @@ body {
 @keyframes grow-levelup-pop {
   0% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.6);
+    transform: translate(-50%, -50%) scale(0.3) rotate(-4deg);
+    filter: drop-shadow(0 0 0px currentColor);
   }
-  20% {
+  18% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1.15);
+    transform: translate(-50%, -50%) scale(1.5) rotate(3deg);
+    filter: drop-shadow(0 0 18px currentColor);
+  }
+  32% {
+    transform: translate(-50%, -50%) scale(1.15) rotate(-1deg);
   }
   70% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(1.25) rotate(0deg);
+    filter: drop-shadow(0 0 22px currentColor);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(1.25);
+    filter: drop-shadow(0 0 0px currentColor);
+  }
+}
+/* PR A: 스탯 게이지가 올라가는 순간 잠깐 테두리가 밝게 번쩍이는
+   펄스 — StatGauges.tsx가 값이 늘어난 바에만 motion-safe:로 짧게
+   붙였다 뗀다(900ms). */
+@keyframes grow-stat-pulse {
+  0% {
+    box-shadow: 0 0 0px rgba(34, 211, 238, 0);
+    filter: brightness(1);
+  }
+  30% {
+    box-shadow: 0 0 16px rgba(34, 211, 238, 0.9);
+    filter: brightness(1.5);
+  }
+  100% {
+    box-shadow: 0 0 0px rgba(34, 211, 238, 0);
+    filter: brightness(1);
   }
 }
