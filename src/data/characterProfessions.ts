@@ -8,6 +8,13 @@
 // 실제로 시험을 볼 수 있는 것처럼 보이지 않게(기존 "미구현 기능을 있는
 // 것처럼 보이지 않는다" 원칙과 동일). 직업 자체를 고르고 저장하는 것,
 // 가르치기/스스로 공부하기는 50개 전부 동작한다.
+// PR #65: '최종 통합 개발 명령서' — 개발자가 직업을 일일이 만들어 넣는
+// 방식(지금의 50개 목록)을 전부 폐기하지 않고, 그 위에 51번째 sentinel
+// 값 'custom' 하나만 더해 사용자가 직접 입력한 자유 직업(예: "숲해설가")을
+// 담는다. 'custom'일 때는 이 파일의 PROFESSION_LABEL 대신 캐릭터에 함께
+// 저장된 custom_profession_label(실제 입력 텍스트)을 표시에 쓴다 — 기존
+// 50개 직업의 선택·저장·가르치기/스스로 공부하기 동작은 전혀 바뀌지
+// 않는다. 시험(examSupported)은 당연히 지원하지 않는다(문제은행 없음).
 export type ProfessionId =
   | 'accountant'
   | 'singer'
@@ -59,6 +66,7 @@ export type ProfessionId =
   | 'social-worker'
   | 'event-planner'
   | 'massage-therapist'
+  | 'custom'
 
 export type ProfessionCategory = 'it' | 'professional' | 'healthcare' | 'education' | 'culture' | 'service'
 
@@ -140,9 +148,14 @@ export const PROFESSIONS: ProfessionOption[] = [
   { id: 'massage-therapist', label: '마사지 테라피스트', category: 'service', examSupported: false },
 ]
 
-export const PROFESSION_LABEL: Record<ProfessionId, string> = Object.fromEntries(
-  PROFESSIONS.map((p) => [p.id, p.label]),
-) as Record<ProfessionId, string>
+// PR #65: 'custom'은 PROFESSIONS 그리드에는 없다(선택이 아니라 자유
+// 텍스트 입력이라서) — 이 fallback 라벨은 custom_profession_label을 아직
+// 못 읽은 곳에서만 쓰이는 최후의 기본값이고, 실제 표시는 항상 저장된
+// custom_profession_label을 우선한다(호출부에서 처리).
+export const PROFESSION_LABEL: Record<ProfessionId, string> = {
+  ...(Object.fromEntries(PROFESSIONS.map((p) => [p.id, p.label])) as Record<ProfessionId, string>),
+  custom: '사용자 지정 직업',
+}
 
 export const PROFESSION_CATEGORY: Record<ProfessionId, ProfessionCategory> = Object.fromEntries(
   PROFESSIONS.map((p) => [p.id, p.category]),

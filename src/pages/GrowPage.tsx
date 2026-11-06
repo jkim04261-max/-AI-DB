@@ -25,6 +25,8 @@ import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel, typ
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
+import { useMockWallet } from '../hooks/useMockWallet'
+import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const SHEET_TITLE: Record<GameMenuAction, string> = {
@@ -60,10 +62,17 @@ export default function GrowPage() {
   const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge, getUsage } = useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
-  const [creating, setCreating] = useState<CompanionType | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Stage 1(오프닝 프로필): 신규 캐릭터를 만들 때 바로 생성하지 않고
+  // 이름·생일·거주지역·자유 직업을 먼저 입력받는 화면을 거친다 — 어느
+  // 캐릭터(누리/두리)를 만드는 중인지만 들고 있는다.
+  const [onboardingFor, setOnboardingFor] = useState<CompanionType | null>(null)
+  const [onboardingSubmitting, setOnboardingSubmitting] = useState(false)
   const [showProfessionPicker, setShowProfessionPicker] = useState(false)
-  const [pendingChange, setPendingChange] = useState<ProfessionId | null>(null)
+  // PR #65: 'custom'으로 바꾸려는 변경 확인 모달에서는 라벨이 없으니
+  // (PROFESSION_LABEL엔 'custom' 전용 고정 문구만 있다) 입력한 텍스트를
+  // 함께 들고 있어야 확인 문구에 그대로 보여줄 수 있다.
+  const [pendingChange, setPendingChange] = useState<{ profession: ProfessionId; customLabel?: string } | null>(null)
   const [savingProfession, setSavingProfession] = useState(false)
   const [openSheet, setOpenSheet] = useState<GameMenuAction | null>(null)
   const [turnTransition, setTurnTransition] = useState<GameMenuAction | null>(null)
@@ -88,6 +97,11 @@ export default function GrowPage() {
   // 시 초기화, 실제 DB 저장 없음). 자세한 설계 의도는 useMockInventory.ts
   // 참고.
   const inventory = useMockInventory()
+  // Stage 1(오프닝 프로필): 초기 가상 용돈 1,000,000원의 체험판 전용
+  // 상태 — 실제 DB에 저장되지 않는다(useMockWallet.ts 참고). Preview/
+  // Production DB 분리가 아직 검증되지 않은 상태라, 이번 단계에서는
+  // 새 DB 쓰기를 하나도 추가하지 않기로 했다.
+  const wallet = useMockWallet()
 
   const character = characters.find((c) => c.companionType === selected) ?? null
   // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
@@ -95,7 +109,11 @@ export default function GrowPage() {
   // 다른 소스를 보여주며 어긋나는 일이 없도록 한다.
   const quest = computeActiveQuest({
     profession: character?.profession ?? null,
-    professionLabel: character?.profession ? PROFESSION_LABEL[character.profession] : null,
+    professionLabel: character?.profession
+      ? character.profession === 'custom'
+        ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
+        : PROFESSION_LABEL[character.profession]
+      : null,
     knowledgeTotal: knowledgeStats.total,
     examPassed,
   })
@@ -304,20 +322,33 @@ export default function GrowPage() {
     bubbleTimeoutRef.current = setTimeout(() => setBubbleText(null), 3200)
   }
 
-  const handleCreate = async (companionType: CompanionType) => {
-    setCreating(companionType)
+  // Stage 1(오프닝 프로필): OpeningProfileScreen이 모은 입력값을 받아
+  // 실제로 캐릭터를 만든다. 캐릭터 생성·직업 저장은 PR #65까지 이미
+  // 있는 기존 API를 그대로 재사용한다(새로운 쓰기 위험이 아님) — 이름·
+  // 생일·거주지역·초기 용돈은 어디에도 저장하지 않고 화면(말풍선·
+  // wallet 체험판 상태)에만 반영한다.
+  const handleOnboardingComplete = async (profile: OpeningProfile) => {
+    if (!onboardingFor) return
+    const companionType = onboardingFor
+    setOnboardingSubmitting(true)
     setError(null)
     try {
       await createCharacter(companionType)
+      if (profile.profession) {
+        await setProfession(companionType, 'custom', profile.profession)
+        showBubble(toddlerProfessionGreeting(profile.profession))
+      }
+      wallet.grantInitialAllowance()
       setSelected(companionType)
+      setOnboardingFor(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '캐릭터를 만드는 중 오류가 발생했어요.')
     } finally {
-      setCreating(null)
+      setOnboardingSubmitting(false)
     }
   }
 
-  const applyProfession = async (profession: ProfessionId) => {
+  const applyProfession = async (profession: ProfessionId, customLabel?: string) => {
     if (!character) return
     // PR #52 요청 2번: 처음 직업을 고르는 순간(이전까지 직업이 없었고,
     // 아직 8~9살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
@@ -326,10 +357,12 @@ export default function GrowPage() {
     setSavingProfession(true)
     setError(null)
     try {
-      await setProfession(character.companionType, profession)
+      await setProfession(character.companionType, profession, customLabel)
       setPendingChange(null)
       if (isFirstPick) {
-        showBubble(toddlerProfessionGreeting(PROFESSION_LABEL[profession]))
+        // PR #65: 'custom'이면 방금 입력한 텍스트를, 아니면 기존처럼
+        // PROFESSION_LABEL을 쓴다.
+        showBubble(toddlerProfessionGreeting(profession === 'custom' ? customLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '직업을 저장하는 중 오류가 발생했어요.')
@@ -466,6 +499,19 @@ export default function GrowPage() {
             tendencyLabel={tendencyLabel}
           />
 
+          {/* Stage 1(오프닝 프로필): 체험판 전용 가상 용돈 — 실제 DB에
+              저장되지 않는다(useMockWallet.ts). 아직 지급받지 않았으면
+              (온보딩을 거치지 않은 기존 캐릭터) 보여주지 않는다. */}
+          {wallet.balanceWon !== null && (
+            <div
+              data-testid="mock-wallet-balance"
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700"
+            >
+              <span>💰 가상 용돈 {wallet.balanceWon.toLocaleString('ko-KR')}원</span>
+              <span className="text-[10px] font-normal text-amber-400">(체험판)</span>
+            </div>
+          )}
+
           {/* PR #49: 스테이지+HUD+스탯+퀘스트+메뉴를 하나의 목재
               프레임으로 묶었다 — 더 이상 흰 카드들이 줄줄이 쌓인
               목록이 아니라, 하나의 게임 화면이다.
@@ -533,11 +579,25 @@ export default function GrowPage() {
                     name={COMPANION_LABEL[character.companionType]}
                     stage={character.stage}
                     profession={character.profession}
+                    customProfessionLabel={character.customProfessionLabel}
                     exp={character.exp}
                     recentLine={recentLine}
                     ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
                   />
                   {statGauges && <StatGaugesPanel values={statGauges} />}
+                  {/* PR #65: 집중력 게이지 — 교육·장비 단계에 따른 전체
+                      반영은 PR #66에서 이어가고, 지금은 저장 성공/검증
+                      실패에 따라 소폭 오르내리는 값을 보여주기만 한다. */}
+                  <div className="flex items-center gap-1.5" data-testid="focus-gauge">
+                    <span className="w-7 shrink-0 text-[10px] font-semibold text-amber-100">집중력</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-amber-50/15">
+                      <span
+                        className="block h-full rounded-full bg-gradient-to-r from-sky-400 to-cyan-300 transition-[width] duration-500"
+                        style={{ width: `${character.focusPercent}%` }}
+                      />
+                    </span>
+                    <span className="w-8 shrink-0 text-right text-[10px] text-amber-200/70">{character.focusPercent}%</span>
+                  </div>
                   <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
                 </div>
               </div>
@@ -567,20 +627,20 @@ export default function GrowPage() {
           <div className="flex gap-3">
             {!hasNuri && (
               <button
-                onClick={() => handleCreate('nuri')}
-                disabled={creating !== null}
+                onClick={() => setOnboardingFor('nuri')}
+                disabled={onboardingFor !== null}
                 className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
-                {creating === 'nuri' ? '만드는 중...' : '누리 만들기 (남)'}
+                누리 만들기 (남)
               </button>
             )}
             {!hasDuri && (
               <button
-                onClick={() => handleCreate('duri')}
-                disabled={creating !== null}
+                onClick={() => setOnboardingFor('duri')}
+                disabled={onboardingFor !== null}
                 className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
-                {creating === 'duri' ? '만드는 중...' : '두리 만들기 (여)'}
+                두리 만들기 (여)
               </button>
             )}
           </div>
@@ -590,13 +650,14 @@ export default function GrowPage() {
       {showProfessionPicker && character && (
         <ProfessionPicker
           currentProfession={character.profession}
+          currentCustomLabel={character.customProfessionLabel}
           onClose={() => setShowProfessionPicker(false)}
-          onSelect={(id) => {
+          onSelect={(id, customLabel) => {
             setShowProfessionPicker(false)
             if (character.profession === null) {
-              void applyProfession(id)
+              void applyProfession(id, customLabel)
             } else {
-              setPendingChange(id)
+              setPendingChange({ profession: id, customLabel })
             }
           }}
         />
@@ -608,7 +669,9 @@ export default function GrowPage() {
             <h2 className="text-base font-bold text-amber-900">직업을 변경할까요?</h2>
             <p className="mt-1.5 text-sm text-amber-700/80">
               {COMPANION_LABEL[character.companionType]}의 직업을{' '}
-              <span className="font-semibold text-amber-900">{PROFESSION_LABEL[pendingChange]}</span>
+              <span className="font-semibold text-amber-900">
+                {pendingChange.profession === 'custom' ? pendingChange.customLabel : PROFESSION_LABEL[pendingChange.profession]}
+              </span>
               로 변경해요. 캐릭터 자체는 삭제되지 않아요.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -622,7 +685,7 @@ export default function GrowPage() {
               </button>
               <button
                 type="button"
-                onClick={() => void applyProfession(pendingChange)}
+                onClick={() => void applyProfession(pendingChange.profession, pendingChange.customLabel)}
                 disabled={savingProfession}
                 className="rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-sm font-semibold text-white hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50"
               >
@@ -659,6 +722,15 @@ export default function GrowPage() {
           )}
           {openSheet === 'market' && <ItemMarket companionType={character.companionType} inventory={inventory} />}
         </BottomSheet>
+      )}
+
+      {onboardingFor && (
+        <OpeningProfileScreen
+          companionType={onboardingFor}
+          submitting={onboardingSubmitting}
+          onCancel={() => setOnboardingFor(null)}
+          onComplete={handleOnboardingComplete}
+        />
       )}
     </div>
   )

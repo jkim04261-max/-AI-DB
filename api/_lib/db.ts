@@ -210,7 +210,7 @@ export function ensureCharacterTables() {
             'illustrator', 'photographer', 'film-director', 'architect',
             'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
             'police-officer', 'civil-servant', 'social-worker', 'event-planner',
-            'massage-therapist'
+            'massage-therapist', 'custom'
           ))
       `
       // 이미 배포된 DB는 바로 위 ADD COLUMN IF NOT EXISTS가 아무 일도 하지
@@ -219,6 +219,10 @@ export function ensureCharacterTables() {
       // 이름 없는 컬럼 CHECK에 PostgreSQL이 붙이는 기본 이름(<테이블>_
       // <컬럼>_check)에 의존한다 — 콜드스타트마다 실행돼도 몇 번이든
       // 같은 결과인 멱등 연산이라 안전하다.
+      //
+      // PR #65: 사용자가 직접 입력하는 자유 직업("숲해설가" 등)을 담을
+      // sentinel 값 'custom'을 추가했다 — 기존 50개는 그대로 유지, 이
+      // 51번째 값일 때만 아래 custom_profession_label 컬럼을 함께 쓴다.
       await sql`ALTER TABLE characters DROP CONSTRAINT IF EXISTS characters_profession_check`
       await sql`
         ALTER TABLE characters ADD CONSTRAINT characters_profession_check
@@ -233,8 +237,24 @@ export function ensureCharacterTables() {
             'illustrator', 'photographer', 'film-director', 'architect',
             'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
             'police-officer', 'civil-servant', 'social-worker', 'event-planner',
-            'massage-therapist'
+            'massage-therapist', 'custom'
           ))
+      `
+
+      // PR #65: profession='custom'일 때만 쓰는 사용자 입력 직업명(예:
+      // "숲해설가"). nullable이라 기존 50개 직업 캐릭터는 항상 NULL —
+      // 화면/동작에 아무 영향 없음. 다른 48개 CHECK 리터럴과 달리 자유
+      // 텍스트라 애플리케이션 레벨(api/character.ts)에서 길이만 검증한다.
+      await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS custom_profession_label TEXT`
+
+      // PR #65: 교육·장비 단계에 따라 0~100 사이에서 오르내리는 "집중력"
+      // 게이지의 저장소. DEFAULT 90은 명령서가 정의한 "교육○·장비○"
+      // 기본값 — 기존 캐릭터도 전부 이 값으로 백필되지만, 이 PR이 하는
+      // 일은 조회 + 퀴즈/스스로 공부하기 결과에 따른 소폭 가감뿐이라
+      // 기존 성장(exp/level) 로직과는 독립적이다.
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS focus_percent INTEGER
+          NOT NULL DEFAULT 90 CHECK (focus_percent BETWEEN 0 AND 100)
       `
 
       // PR #45 checkpoint 4: level is a cached/denormalized value derived
@@ -303,7 +323,7 @@ export function ensureKnowledgeTable() {
             'illustrator', 'photographer', 'film-director', 'architect',
             'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
             'police-officer', 'civil-servant', 'social-worker', 'event-planner',
-            'massage-therapist'
+            'massage-therapist', 'custom'
           )),
           title TEXT NOT NULL,
           original_content TEXT NOT NULL,
@@ -336,7 +356,26 @@ export function ensureKnowledgeTable() {
             'illustrator', 'photographer', 'film-director', 'architect',
             'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
             'police-officer', 'civil-servant', 'social-worker', 'event-planner',
-            'massage-therapist'
+            'massage-therapist', 'custom'
+          ))
+      `
+
+      // PR #65: characters.custom_profession_label과 동일한 이유 —
+      // profession='custom'으로 저장된 지식 카드가 "저장 당시 직업명"을
+      // 그대로 보존한다(캐릭터의 직업이 나중에 바뀌어도 이 행은 그대로).
+      await sql`ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS custom_profession_label TEXT`
+
+      // PR #65: 지식 카드 10종 분류(직업기초지식/전문정보/실무경험/개인
+      // 노하우/숙련기술/실전문제해결사례/직업관련팁/실패경험과교훈/
+      // 교육훈련경험/인생경험과가치관) — PR #63의 mission_type(입력
+      // 방식: 선택지/AI추천/직접입력)과는 독립된 축이다. nullable이라
+      // 기존 행은 전부 NULL로 중립.
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS knowledge_category TEXT
+          CHECK (knowledge_category IN (
+            'basic_knowledge', 'expert_info', 'hands_on_experience', 'personal_knowhow',
+            'skilled_technique', 'problem_solving_case', 'job_tip', 'failure_lesson',
+            'training_experience', 'life_experience'
           ))
       `
       // Lets the client tag a save request with its own idempotency key —
@@ -553,6 +592,9 @@ export interface MessageAttachmentRow {
 // 시험 관련 행(character_exam_attempts/character_exam_firsts)은 여전히
 // 'accountant' | 'singer'로 좁게 남겨둔다 — 그 기능은 지금도 이 2개
 // 직업뿐이라서(EXAM_SUPPORTED_PROFESSIONS 참고).
+// PR #65: 'custom'은 사용자가 직접 입력한 자유 직업(예: "숲해설가")의
+// sentinel 값 — 이때만 CharacterRow.custom_profession_label /
+// KnowledgeEntryRow.custom_profession_label에 실제 입력 텍스트가 들어간다.
 export type ProfessionId =
   | 'accountant' | 'singer' | 'developer' | 'designer' | 'data-scientist' | 'pm'
   | 'security-engineer' | 'devops' | 'game-developer' | 'qa-engineer' | 'lawyer'
@@ -564,7 +606,14 @@ export type ProfessionId =
   | 'illustrator' | 'photographer' | 'film-director' | 'architect'
   | 'fashion-designer' | 'chef' | 'barista' | 'flight-attendant' | 'firefighter'
   | 'police-officer' | 'civil-servant' | 'social-worker' | 'event-planner'
-  | 'massage-therapist'
+  | 'massage-therapist' | 'custom'
+
+// PR #65: 지식 카드 10종 분류 — src/data/knowledgeCategories.ts의
+// KnowledgeCategory와 반드시 같은 값이어야 한다(이 파일의 기존 관례).
+export type KnowledgeCategory =
+  | 'basic_knowledge' | 'expert_info' | 'hands_on_experience' | 'personal_knowhow'
+  | 'skilled_technique' | 'problem_solving_case' | 'job_tip' | 'failure_lesson'
+  | 'training_experience' | 'life_experience'
 
 // PR #63: characters.mission_unlocked_tier / character_knowledge_entries
 // .age_tier_at_save가 쓰는 6단계 연령대 — api/_lib/characterAge.ts의
@@ -579,9 +628,11 @@ export interface CharacterRow {
   companion_type: 'nuri' | 'duri'
   stage: 'child' | 'adult'
   profession: ProfessionId | null
+  custom_profession_label: string | null
   level: number
   exp: number
   mission_unlocked_tier: AgeTierValue | null
+  focus_percent: number
   created_at: string
 }
 
@@ -590,6 +641,7 @@ export interface KnowledgeEntryRow {
   user_id: number
   character_id: number
   profession: ProfessionId
+  custom_profession_label: string | null
   title: string
   original_content: string
   final_content: string
@@ -598,6 +650,7 @@ export interface KnowledgeEntryRow {
   source: 'user_taught' | 'ai_generated'
   mission_type: 'objective' | 'subjective' | 'knowhow' | null
   age_tier_at_save: AgeTierValue | null
+  knowledge_category: KnowledgeCategory | null
   created_at: string
 }
 

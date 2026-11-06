@@ -111,3 +111,40 @@ test('the /grow game screen fits a phone width with no horizontal scroll, and sh
   expect(stageBox?.x ?? 0).toBeGreaterThanOrEqual(0)
   expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(clientWidth)
 })
+
+// Stage 1(오프닝 프로필): 신규 캐릭터 생성 화면도 폰 너비에서 가로
+// 스크롤 없이 전부 보여야 한다.
+test('the opening profile screen fits a phone width with no horizontal scroll', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await page.route('**/api/conversations', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
+  })
+  await page.route('**/api/character**', async (route) => {
+    const url = new URL(route.request().url())
+    const action = url.searchParams.get('action')
+    const method = route.request().method()
+    // PR #49: 상단 리소스 바의 "행동력"용 GET ?action=usage 기본값 — 캐릭터가
+    // 없어도 GrowPage가 로그인 시점에 한 번 불러온다.
+    if (method === 'GET' && action === 'usage') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
+      return
+    }
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return
+    }
+    await route.fallback()
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
+  await expect(page.getByTestId('opening-profile-start-button')).toBeVisible()
+
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+})
