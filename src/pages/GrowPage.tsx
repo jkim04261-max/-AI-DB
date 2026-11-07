@@ -360,7 +360,10 @@ export default function GrowPage() {
   if (!authLoading && !user) {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6 px-4 py-8">
-        <h1 className="text-xl font-bold text-amber-900">AI 키우기</h1>
+        <div className="flex items-center gap-2">
+          <img src="/assets/logo.png" alt="누리AI 로고" className="h-7 w-7 rounded-lg object-contain" />
+          <h1 className="text-xl font-bold text-amber-900">AI 키우기</h1>
+        </div>
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-8 text-center">
           <p className="text-sm text-amber-700/80">로그인하면 누리·두리를 키울 수 있어요.</p>
           <button
@@ -437,7 +440,10 @@ export default function GrowPage() {
       className="mx-auto flex max-w-xl flex-col gap-3 rounded-3xl bg-gradient-to-b from-amber-50 to-orange-50/60 px-3 py-4 sm:px-4 lg:max-w-none lg:rounded-none xl:px-10"
     >
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
+        <div className="flex items-center gap-2">
+          <img src="/assets/logo.png" alt="누리AI 로고" className="h-6 w-6 rounded-lg object-contain" />
+          <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
+        </div>
         {characters.length > 0 && (
           <div className="flex gap-1 rounded-full bg-amber-100 p-1">
             {characters.map((c) => (
