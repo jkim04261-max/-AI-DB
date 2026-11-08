@@ -230,6 +230,53 @@ test('a user who already has both characters sees no creation UI, just their car
   await expect(page.getByText('새 캐릭터 만들기')).toHaveCount(0)
 })
 
+// 버그 수정(선택한 캐릭터·직업이 메인 화면에 반영되지 않는 문제): 두
+// 캐릭터를 모두 가진 계정이 두리 탭을 보다가 새로고침/재접속하면,
+// 이전에는 선택 상태가 전혀 기억되지 않아 항상 누리(직업 미선택)로
+// 되돌아갔다. 마지막으로 본 탭을 복원해야 한다.
+test('switching to 두리 and reloading keeps showing 두리 (not resetting to the 누리 default)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() },
+            {
+              id: 2,
+              user_id: USER.id,
+              companion_type: 'duri',
+              stage: 'child',
+              profession: 'custom',
+              custom_profession_label: '자전거 수리공',
+              level: 1,
+              exp: 0,
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  // 기본값은 여전히 누리 탭이다(기존 동작 유지).
+  await expect(page.getByTestId('profession-badge')).toHaveText('직업 미선택')
+
+  await page.getByRole('button', { name: '두리', exact: true }).click()
+  await expect(page.getByTestId('profession-badge')).toHaveText('자전거 수리공')
+
+  await page.reload()
+  await expect(page.getByTestId('profession-badge')).toHaveText('자전거 수리공')
+  await expect(page.getByRole('img', { name: '두리 캐릭터, 대기 중' })).toBeVisible()
+})
+
 test('the My Page "내 AI" section reflects the signed-in user\'s characters', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
