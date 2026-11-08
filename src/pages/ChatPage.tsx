@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { MoreHorizontal, RotateCcw, Sparkles, Trash2, User } from 'lucide-react'
+import { MoreHorizontal, RotateCcw, Trash2, User } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
 import { useAuth } from '../context/AuthContext'
@@ -124,15 +124,17 @@ export default function ChatPage() {
               key={i}
               className={`flex items-start gap-2.5 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
-              <span
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white ${
-                  msg.role === 'user'
-                    ? 'bg-slate-300'
-                    : 'bg-gradient-to-br from-indigo-500 to-blue-500'
-                }`}
-              >
-                {msg.role === 'user' ? <User size={16} /> : <Sparkles size={16} />}
-              </span>
+              {msg.role === 'user' ? (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-white">
+                  <User size={16} />
+                </span>
+              ) : (
+                <img
+                  src="/assets/logo.png"
+                  alt="누리AI"
+                  className="h-8 w-8 shrink-0 rounded-full object-cover"
+                />
+              )}
               <div
                 className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
                   msg.role === 'user'
@@ -183,9 +185,11 @@ export default function ChatPage() {
 
           {isPending && (
             <div className="flex items-start gap-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white">
-                <Sparkles size={16} className="animate-spin" />
-              </span>
+              <img
+                src="/assets/logo.png"
+                alt="누리AI"
+                className="h-8 w-8 shrink-0 animate-pulse rounded-full object-cover"
+              />
               <div className="flex max-w-[75%] items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2.5 text-sm text-slate-400">
                 <span>답변을 생성하고 있어요</span>
                 <span className="inline-flex items-end gap-0.5">

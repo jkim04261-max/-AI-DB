@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Sparkles } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import PasswordInput from '../components/PasswordInput'
 
@@ -28,9 +27,7 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto flex max-w-sm flex-col items-center gap-6 px-4 py-14">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 text-white">
-        <Sparkles size={22} fill="currentColor" />
-      </span>
+      <img src="/assets/logo.png" alt="누리AI 로고" className="h-12 w-12 rounded-2xl object-contain" />
       <div className="text-center">
         <h1 className="text-xl font-bold text-slate-900">로그인</h1>
         <p className="mt-1 text-sm text-slate-400">누리AI에 다시 오신 걸 환영해요</p>
