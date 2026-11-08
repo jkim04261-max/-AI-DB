@@ -7,13 +7,16 @@ import type { AgeTier } from '../../data/characterAge'
 // is purely a *visual* state, driven today only by the existing
 // verify-knowledge flow (handleVerify/result in GrowPage.tsx). No DB/API
 // field backs this; it never needs to (PR #45 checkpoint 2 is frontend-only).
-export type CharacterPose = 'idle' | 'studying' | 'happy' | 'sad'
+// 지시서(가르치기 완료 후 자동 식사 이벤트): 'eating'은 새 포즈
+// 종류일 뿐, 기존 4개 포즈의 좌표·의미는 전혀 바뀌지 않는다.
+export type CharacterPose = 'idle' | 'studying' | 'happy' | 'sad' | 'eating'
 
 export const POSE_LABEL: Record<CharacterPose, string> = {
   idle: '대기 중',
   studying: '공부하는 중',
   happy: '기뻐하는 중',
   sad: '아쉬워하는 중',
+  eating: '맛있게 먹는 중',
 }
 
 interface Palette {
@@ -75,6 +78,8 @@ const MOUTH_PATH: Record<CharacterPose, string> = {
   studying: 'M 70 98 Q 80 94 90 98',
   happy: 'M 58 92 Q 80 118 102 92',
   sad: 'M 66 102 Q 80 92 94 102',
+  // 음식을 한입 베어 문 동그란 입 모양.
+  eating: 'M 70 92 Q 80 108 90 92 Q 80 99 70 92 Z',
 }
 
 // 포즈별 눈썹 변형(두 눈 각각 rotate/translate) — 표정 변화 보조.
@@ -83,6 +88,7 @@ const EYEBROW_TRANSFORM: Record<CharacterPose, { left: string; right: string }> 
   studying: { left: 'translate(1px, 2px) rotate(6deg)', right: 'translate(-1px, 2px) rotate(-6deg)' },
   happy: { left: 'translate(0, -3px) rotate(-10deg)', right: 'translate(0, -3px) rotate(10deg)' },
   sad: { left: 'translate(1px, 1px) rotate(14deg)', right: 'translate(-1px, 1px) rotate(-14deg)' },
+  eating: { left: 'translate(0, -2px) rotate(-6deg)', right: 'translate(0, -2px) rotate(6deg)' },
 }
 
 // 포즈별 팔 자세(어깨 기준 회전) — studying은 왼팔이 노트 쪽으로,
@@ -92,6 +98,8 @@ const ARM_TRANSFORM: Record<CharacterPose, { left: string; right: string }> = {
   studying: { left: 'rotate(55deg)', right: 'rotate(-6deg)' },
   happy: { left: 'rotate(150deg)', right: 'rotate(-150deg)' },
   sad: { left: 'rotate(-8deg) translate(2px, 4px)', right: 'rotate(8deg) translate(-2px, 4px)' },
+  // 왼팔로 김밥을 입 쪽으로 들어 올리는 자세.
+  eating: { left: 'rotate(95deg)', right: 'rotate(-10deg)' },
 }
 
 // PR #52 후속: 배지만으로는 "연령대별로 실제로 다른 아바타"라는 느낌이
@@ -249,6 +257,17 @@ export default function CharacterSprite({
               <line x1={6} y1={8} x2={28} y2={8} stroke="#c7cbe0" strokeWidth={1.5} />
               <line x1={6} y1={14} x2={28} y2={14} stroke="#c7cbe0" strokeWidth={1.5} />
               <line x1={6} y1={20} x2={22} y2={20} stroke="#c7cbe0" strokeWidth={1.5} />
+            </g>
+          )}
+
+          {/* eating 전용: 왼손에 든 작은 김밥 한 줄(자체 제작 단순 도형,
+              특정 상호와 무관한 일반적인 음식 아이콘). */}
+          {pose === 'eating' && (
+            <g transform="translate(46 108) rotate(-12)" data-testid="meal-gimbap-prop">
+              <rect x={0} y={0} width={24} height={11} rx={5.5} fill="#f5f0e6" stroke="#2a2a33" strokeWidth={1.5} />
+              <circle cx={6} cy={5.5} r={1.8} fill="#e8b23d" />
+              <circle cx={12} cy={5.5} r={1.8} fill="#5ba3e0" />
+              <circle cx={18} cy={5.5} r={1.8} fill="#d9534f" />
             </g>
           )}
 

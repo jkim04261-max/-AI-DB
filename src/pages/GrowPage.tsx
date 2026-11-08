@@ -52,6 +52,17 @@ const TURN_TRANSITION_LABEL: Partial<Record<GameMenuAction, string>> = {
   quiz: '문제를 준비하고 있어요...',
 }
 
+// 지시서(가르치기 완료 후 자동 식사 이벤트): 8~9살(toddler) 단계에서
+// 가르치기/스스로 공부하기 저장이 이만큼 쌓이면 패널을 닫고 "배고프다"
+// 말풍선 → (체험판 용돈 차감) → 맛있게 먹는 연출로 이어지는 짧은
+// 이벤트를 보여준다. 실제 네이버 플레이스 API 연동이나 실제 결제는
+// 하지 않는다 — '이모네김밥'은 이 체험판 안에서만 쓰이는 식당 이름
+// 플레이버 텍스트이고, 차감도 실제 DB가 아니라 useMockWallet.ts의
+// 체험판 용돈에서만 일어난다.
+const MEAL_TRIGGER_SAVE_COUNT = 3
+const MEAL_COST_WON = 10_000
+const MEAL_RESTAURANT_LABEL = '이모네김밥'
+
 // PR #46: /grow를 카드형 웹페이지에서 캐릭터 중심 게임 화면으로
 // 재구성. 학습·검증·퀴즈·시험·XP·DB 저장 로직은 전부 기존
 // GrowthContext/InteractionPanel/ExamPanel을 그대로 재사용하고(요청 9),
@@ -132,6 +143,15 @@ export default function GrowPage() {
   const levelUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const evolveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 지시서(가르치기 완료 후 자동 식사 이벤트): "배고프다" → "맛있게
+  // 먹는 중" 두 단계로 이어지는 연출에 쓰는 타임아웃들 — 언마운트 시
+  // 전부 정리해야 한다(여러 개가 쌓일 수 있어 배열로 관리).
+  const mealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  // 8~9살 단계에서 가르치기/스스로 공부하기 저장이 몇 번 쌓였는지 — 화면에
+  // 표시하지 않는 내부 카운터라 리렌더를 유발할 필요가 없어 ref로 둔다.
+  // DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면 아래 효과에서
+  // 0으로 되돌린다.
+  const toddlerSaveCountRef = useRef(0)
   // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
   // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
@@ -164,6 +184,7 @@ export default function GrowPage() {
     setRecentLine(null)
     setKnowledgeStats({ total: 0, aiGenerated: 0 })
     setMessageTotal(0)
+    toddlerSaveCountRef.current = 0
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -313,6 +334,8 @@ export default function GrowPage() {
       if (levelUpTimeoutRef.current) clearTimeout(levelUpTimeoutRef.current)
       if (evolveTimeoutRef.current) clearTimeout(evolveTimeoutRef.current)
       if (turnTransitionTimeoutRef.current) clearTimeout(turnTransitionTimeoutRef.current)
+      const mealTimeouts = mealTimeoutsRef.current
+      mealTimeouts.forEach(clearTimeout)
     }
   }, [])
 
@@ -395,6 +418,36 @@ export default function GrowPage() {
   // 않고, 말풍선으로 짧은 반응만 준다(요청 1: 클릭 가능한 소품 인터랙션).
   const handlePropClick = (emoji: string) => {
     showBubble(`${emoji} 오늘도 여기 있네요!`)
+  }
+
+  // 지시서(가르치기 완료 후 자동 식사 이벤트): 패널을 닫고 "배고프다"
+  // 말풍선을 먼저 띄운 뒤, 잠시 뒤 체험판 용돈에서 식사비를 차감하고
+  // 맛있게 먹는 포즈/말풍선으로 이어간다. 체험판 용돈을 아직 지급받지
+  // 않은 캐릭터(wallet.balanceWon === null, Stage 1 온보딩을 거치지
+  // 않은 기존 캐릭터)는 차감 없이 연출만 보여준다.
+  const triggerMealBreak = () => {
+    setOpenSheet(null)
+    showBubble(`배가 고파요! ${MEAL_RESTAURANT_LABEL}에 가서 김밥 한 줄 먹고 올게요!`)
+    const t1 = setTimeout(() => {
+      if (wallet.balanceWon !== null) wallet.spend(MEAL_COST_WON)
+      setPose('eating')
+      showBubble(`냠냠, ${MEAL_RESTAURANT_LABEL} 김밥 진짜 맛있어요! 🍙`)
+      const t2 = setTimeout(() => setPose('idle'), 2600)
+      mealTimeoutsRef.current.push(t2)
+    }, 1400)
+    mealTimeoutsRef.current.push(t1)
+  }
+
+  // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 8~9살
+  // 단계에서만 세고, 지정된 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채우면 위
+  // 식사 이벤트를 띄우고 다시 0부터 센다.
+  const handleKnowledgeSaved = () => {
+    if (!character || character.ageTier !== 'toddler') return
+    toddlerSaveCountRef.current += 1
+    if (toddlerSaveCountRef.current >= MEAL_TRIGGER_SAVE_COUNT) {
+      toddlerSaveCountRef.current = 0
+      triggerMealBreak()
+    }
   }
 
   if (!authLoading && !user) {
@@ -743,7 +796,12 @@ export default function GrowPage() {
           variant={openSheet === 'teach' || openSheet === 'study' ? 'mission' : 'default'}
         >
           {(openSheet === 'teach' || openSheet === 'study') && character.profession && (
-            <InteractionPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
+            <InteractionPanel
+              character={character}
+              profession={character.profession}
+              onPoseChange={handlePoseChange}
+              onKnowledgeSaved={handleKnowledgeSaved}
+            />
           )}
           {openSheet === 'quiz' && character.profession && (
             <ExamPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
