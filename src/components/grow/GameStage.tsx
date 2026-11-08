@@ -215,7 +215,10 @@ export default function GameStage({
               src={portraitSrc}
               alt=""
               aria-hidden
-              className="pointer-events-none h-[92%] w-auto object-contain transition-[filter] duration-200"
+              // 캐릭터와 '○세' 나이 배지 겹침 수정: 92%였던 높이를 줄여서
+              // (items-center로 세로 가운데 정렬되므로 위아래 여백이
+              // 똑같이 늘어난다) 머리 위에 배지가 들어갈 여백을 확보한다.
+              className="pointer-events-none h-[78%] w-auto object-contain transition-[filter] duration-200"
               style={{
                 filter: tapped
                   ? 'drop-shadow(0 0 20px rgba(212, 175, 55, 0.85)) drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35))'
@@ -240,7 +243,12 @@ export default function GameStage({
           </span>
         )}
         <div
-          className="pointer-events-none absolute top-[6%] z-20 flex -translate-x-1/2 items-center gap-1"
+          // 캐릭터와 '○세' 나이 배지 겹침 수정: 위 포트레이트 높이를
+          // 78%로 줄여 생긴 머리 위 여백 안으로, 배지 줄을 6%에서
+          // 1%로 당겨 확실히 떨어뜨렸다(프레임이 overflow-hidden이라
+          // top을 음수로는 못 내리므로, 포트레이트를 줄이는 쪽과
+          // 함께 조정).
+          className="pointer-events-none absolute top-[1%] z-20 flex -translate-x-1/2 items-center gap-1"
           style={{ left: ILLUSTRATED_PORTRAIT_ANCHOR }}
         >
           {tier === 'student' && (

@@ -17,6 +17,7 @@ export default function GrowthHUD({
   name,
   stage,
   profession,
+  customProfessionLabel,
   exp,
   recentLine,
   ageStageLabel,
@@ -24,6 +25,9 @@ export default function GrowthHUD({
   name: string
   stage: 'child' | 'adult'
   profession: ProfessionId | null
+  // PR #65: profession==='custom'일 때만 값이 있다 — 그 외엔 항상
+  // PROFESSION_LABEL[profession]을 그대로 쓴다(기존 동작 그대로).
+  customProfessionLabel?: string | null
   exp: number
   recentLine: string | null
   // PR #52: 6단계 연령대 중 지금 단계의 짧은 이름(예: "초등 저학년").
@@ -42,7 +46,7 @@ export default function GrowthHUD({
         </div>
         <div data-testid="profession-badge" className="flex items-center gap-1 rounded-full bg-amber-50/15 px-2.5 py-1 text-[11px] font-medium text-amber-100">
           <Briefcase size={11} />
-          {profession ? PROFESSION_LABEL[profession] : '직업 미선택'}
+          {profession ? (profession === 'custom' ? customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]) : '직업 미선택'}
         </div>
       </div>
 

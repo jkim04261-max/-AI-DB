@@ -3,6 +3,7 @@ import { useAuth } from './AuthContext'
 import type { ProfessionId } from '../data/characterProfessions'
 import type { AgeTier } from '../data/characterAge'
 import type { MissionType, MissionProgress } from '../data/characterMissions'
+import type { KnowledgeCategory } from '../data/knowledgeCategories'
 
 export type CompanionType = 'nuri' | 'duri'
 
@@ -25,12 +26,16 @@ export interface KnowledgeEntry {
   id: number
   companionType: CompanionType
   profession: ProfessionId
+  // PR #65: profession==='custom'일 때만 값이 있다(그 외엔 항상 null).
+  customProfessionLabel: string | null
   title: string
   originalContent: string
   finalContent: string
   verificationStatus: VerificationStatus
   verificationExplanation: string
   source: KnowledgeSource
+  // PR #65: 지식 카드 10종 분류(선택값) — 안 고르고 저장했으면 null.
+  knowledgeCategory: KnowledgeCategory | null
   createdAt: string
 }
 
@@ -38,12 +43,14 @@ interface KnowledgeEntryApiRow {
   id: number
   character_id: number
   profession: ProfessionId
+  custom_profession_label: string | null
   title: string
   original_content: string
   final_content: string
   verification_status: VerificationStatus
   verification_explanation: string
   source: KnowledgeSource
+  knowledge_category: KnowledgeCategory | null
   created_at: string
 }
 
@@ -52,6 +59,12 @@ export interface Character {
   companionType: CompanionType
   stage: 'child' | 'adult'
   profession: ProfessionId | null
+  // PR #65: profession==='custom'일 때만 값이 있다(사용자가 직접 입력한
+  // 직업명, 예: "숲해설가") — 그 외엔 항상 null.
+  customProfessionLabel: string | null
+  // PR #65: 교육·장비 단계에 따라 오르내리는 집중력 게이지(0~100). 지금은
+  // 저장/검증 성공·실패에 따른 소폭 가감만 반영한다(api/character.ts).
+  focusPercent: number
   // PR #45 checkpoint 4: a game-progression indicator only — level/exp
   // reflect activity inside 누리AI (지식 저장/퀴즈/시험), never the real
   // Gemini model's actual capability. See characterDialogue.ts's
@@ -127,7 +140,7 @@ interface GrowthContextValue {
   characters: Character[]
   loading: boolean
   createCharacter: (companionType: CompanionType) => Promise<void>
-  setProfession: (companionType: CompanionType, profession: ProfessionId) => Promise<void>
+  setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<void>
   verifyKnowledge: (
     companionType: CompanionType,
     title: string,
@@ -144,6 +157,7 @@ interface GrowthContextValue {
     ageBlocked: boolean
     characterAgeTier: AgeTier
     requiredAgeTier: AgeTier
+    focusPercent: number
   }>
   studyGenerate: (companionType: CompanionType) => Promise<{
     knowledge: { title: string; content: string }
@@ -155,6 +169,7 @@ interface GrowthContextValue {
     ageBlocked: boolean
     characterAgeTier: AgeTier
     requiredAgeTier: AgeTier
+    focusPercent: number
   }>
   saveKnowledge: (
     companionType: CompanionType,
@@ -163,7 +178,10 @@ interface GrowthContextValue {
     finalContent: string,
     verificationToken: string,
     missionType?: MissionType,
-  ) => Promise<{ entry: KnowledgeEntry; savedReply: string; missionProgress: MissionProgress | null } & GrowthUpdate & EvolutionUpdate>
+    knowledgeCategory?: KnowledgeCategory,
+  ) => Promise<
+    { entry: KnowledgeEntry; savedReply: string; missionProgress: MissionProgress | null; focusPercent: number } & GrowthUpdate & EvolutionUpdate
+  >
   getMissionProgress: (companionType: CompanionType) => Promise<MissionProgress>
   listKnowledge: (
     companionType: CompanionType,
@@ -195,9 +213,11 @@ interface CharacterApiRow {
   companion_type: CompanionType
   stage: 'child' | 'adult'
   profession: ProfessionId | null
+  custom_profession_label: string | null
   level: number
   exp: number
   age_tier: AgeTier
+  focus_percent: number
   created_at: string
 }
 
@@ -207,9 +227,11 @@ function fromApiRow(row: CharacterApiRow): Character {
     companionType: row.companion_type,
     stage: row.stage,
     profession: row.profession,
+    customProfessionLabel: row.custom_profession_label ?? null,
     level: row.level ?? 1,
     exp: row.exp ?? 0,
     ageTier: row.age_tier ?? 'toddler',
+    focusPercent: row.focus_percent ?? 90,
     createdAt: row.created_at,
   }
 }
@@ -219,12 +241,14 @@ function fromKnowledgeApiRow(companionType: CompanionType, row: KnowledgeEntryAp
     id: row.id,
     companionType,
     profession: row.profession,
+    customProfessionLabel: row.custom_profession_label ?? null,
     title: row.title,
     originalContent: row.original_content,
     finalContent: row.final_content,
     verificationStatus: row.verification_status,
     verificationExplanation: row.verification_explanation,
     source: row.source,
+    knowledgeCategory: row.knowledge_category ?? null,
     createdAt: row.created_at,
   }
 }
@@ -293,6 +317,13 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  // PR #65: verify-knowledge/study-generate/save-knowledge 세 액션 모두
+  // 서버가 그때그때 가감한 focusPercent를 응답에 실어 보낸다 — 이걸로
+  // 로컬 상태만 갱신한다(전체 캐릭터 목록을 다시 불러오지 않는다).
+  const updateFocusPercent = useCallback((companionType: CompanionType, focusPercent: number) => {
+    setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, focusPercent } : c)))
+  }, [])
+
   const createCharacter = useCallback(async (companionType: CompanionType) => {
     const res = await fetch('/api/character', {
       method: 'POST',
@@ -307,11 +338,14 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     setCharacters((prev) => [...prev, created])
   }, [])
 
-  const setProfession = useCallback(async (companionType: CompanionType, profession: ProfessionId) => {
+  // PR #65: profession==='custom'일 때만 customProfessionLabel을 함께
+  // 보낸다 — 기존 50개 직업 선택 흐름은 호출부가 세 번째 인자를 안 넘기면
+  // 그대로 동작한다(회귀 없음).
+  const setProfession = useCallback(async (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => {
     const res = await fetch('/api/character', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companionType, profession }),
+      body: JSON.stringify({ companionType, profession, customProfessionLabel }),
     })
     const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
     if (!res.ok || !data.character) {
@@ -338,11 +372,13 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       ageBlocked?: boolean
       characterAgeTier?: AgeTier
       requiredAgeTier?: AgeTier
+      focusPercent?: number
       error?: string
     }
     if (!res.ok || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '지식을 검증하는 중 오류가 발생했어요.')
     }
+    if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
     return {
       verification: data.verification,
       verificationToken: data.verificationToken,
@@ -352,8 +388,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       ageBlocked: data.ageBlocked ?? false,
       characterAgeTier: data.characterAgeTier ?? 'toddler',
       requiredAgeTier: data.requiredAgeTier ?? 'toddler',
+      focusPercent: data.focusPercent ?? 90,
     }
-  }, [])
+  }, [updateFocusPercent])
 
   // "스스로 공부하기" — Gemini 호출 1회로 캐릭터가 새 지식을 생성하고
   // 스스로 평가한다. verifyKnowledge와 마찬가지로 이 호출 자체는 아무것도
@@ -375,11 +412,13 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       ageBlocked?: boolean
       characterAgeTier?: AgeTier
       requiredAgeTier?: AgeTier
+      focusPercent?: number
       error?: string
     }
     if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '스스로 공부하는 중 오류가 발생했어요.')
     }
+    if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
     return {
       knowledge: data.knowledge,
       verification: data.verification,
@@ -390,8 +429,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       ageBlocked: data.ageBlocked ?? false,
       characterAgeTier: data.characterAgeTier ?? 'toddler',
       requiredAgeTier: data.requiredAgeTier ?? 'toddler',
+      focusPercent: data.focusPercent ?? 90,
     }
-  }, [])
+  }, [updateFocusPercent])
 
   const saveKnowledge = useCallback(
     async (
@@ -401,6 +441,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       finalContent: string,
       verificationToken: string,
       missionType?: MissionType,
+      knowledgeCategory?: KnowledgeCategory,
     ) => {
       // A fresh key per save attempt — if this exact request somehow reaches
       // the server twice (a retried fetch, a double click that got through
@@ -412,7 +453,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       const res = await fetch('/api/character?action=save-knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId, missionType }),
+        body: JSON.stringify({ companionType, title, originalContent, finalContent, verificationToken, requestId, missionType, knowledgeCategory }),
       })
       const data = (await res.json().catch(() => ({}))) as {
         entry?: KnowledgeEntryApiRow
@@ -425,12 +466,14 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         evolved?: boolean
         newAgeTier?: AgeTier | null
         newAgeTierLabel?: string | null
+        focusPercent?: number
         error?: string
       }
       if (!res.ok || !data.entry || !data.savedReply || data.exp === undefined || data.level === undefined) {
         throw new Error(data.error || '학습 기록을 저장하는 중 오류가 발생했어요.')
       }
       updateCharacterGrowth(companionType, data.level, data.exp, data.newAgeTier)
+      if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
       return {
         entry: fromKnowledgeApiRow(companionType, data.entry),
         savedReply: data.savedReply,
@@ -442,9 +485,10 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         evolved: data.evolved ?? false,
         newAgeTier: data.newAgeTier ?? null,
         newAgeTierLabel: data.newAgeTierLabel ?? null,
+        focusPercent: data.focusPercent ?? 90,
       }
     },
-    [updateCharacterGrowth],
+    [updateCharacterGrowth, updateFocusPercent],
   )
 
   const listKnowledge = useCallback(
