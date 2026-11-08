@@ -771,10 +771,11 @@ async function run() {
 
   // --- PR #63: 연령대 "진화"는 더 이상 지식 저장 개수(flat count)가
   // 아니라, 한 연령대에서 유형별(객관식=objective/주관식=subjective/
-  // 노하우=knowhow) 2개씩 총 6개를 확정 저장해야 하고, *동시에* 레벨도
-  // 다음 단계 기준을 넘어야 한다(레벨 조건 유지 + 미션 게이트 추가) —
-  // 둘 중 하나만 만족해서는 절대 진화하지 않는 "진짜 게이트"인지
-  // 확인한다.
+  // 노하우=knowhow) 2개씩 총 6개를 확정 저장해야 하고, teen 이후 단계는
+  // *동시에* 레벨도 다음 단계 기준을 넘어야 한다(레벨 조건 유지 + 미션
+  // 게이트 추가) — 둘 중 하나만 만족해서는 절대 진화하지 않는 "진짜
+  // 게이트"인지 확인한다. (toddler→teen 첫 진화의 레벨-조건-면제 예외는
+  // 지시서 #03 전용 테스트로 별도 확인한다 — 아래 참고.)
   {
     mock.seedUser(11, { email: 'kate@test.com' })
     const kateCookie = cookieHeaderFor(auth, 11, 0, 'kate@test.com')
@@ -820,7 +821,7 @@ async function run() {
     // 당연히 toddler로 고정된다).
     const firstSave = await teachOnce(1, 'objective')
     t.assert(firstSave.statusCode === 201, '첫 지식 저장이 성공한다')
-    t.assert(firstSave.body.evolved === false, '아직 Lv.1이라 진화 조건(레벨) 자체가 안 된다')
+    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/6뿐이라 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '첫 평가에서 toddler로 고정된다')
 
     // 레벨이 이미 teen 기준(Lv.5)을 넘어도(퀴즈·시험 등으로 다른 곳에서
@@ -863,7 +864,7 @@ async function run() {
     await teachOnce(9, 'knowhow')
     const evolved = await teachOnce(10, 'knowhow')
     t.assert(evolved.statusCode === 201, '유형별 2개씩 마지막 지식 저장이 성공한다')
-    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지고 레벨도 충분해 진화한다')
+    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
     t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
     t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
@@ -1063,6 +1064,63 @@ async function run() {
       t.assert(res.body.character?.profession === 'teacher', '직업이 교사로 바뀐다')
       t.assert(res.body.character?.custom_profession_label === null, '고정 직업으로 바꾸면 이전 자유 직업명은 사라진다(null)')
     }
+  }
+
+  // --- 지시서 #03(8~9살 시험 시스템 전면 개편): toddler(8~9살)→teen(10대)
+  // 첫 진화는 "복잡한 레벨 조건 없이" 유형별 2개씩 총 6개(예시 문제
+  // 풀이형=subjective/객관식=objective/노하우 설계형=knowhow) 확정만으로
+  // 즉시 진화해야 한다 — Lv.1(레벨 조건 AGE_TIER_MIN_LEVEL.teen=5에
+  // 한참 못 미침)인 채로도 진화하는지 전용으로 확인한다.
+  {
+    mock.seedUser(12, { email: 'leo@test.com' })
+    const leoCookie = cookieHeaderFor(auth, 12, 0, 'leo@test.com')
+    const leoReq = (overrides = {}) => ({ headers: { cookie: leoCookie }, query: {}, ...overrides })
+    await characterHandler(leoReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(leoReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const leoNuri = mock.state.characters.find((c) => c.user_id === 12 && c.companion_type === 'nuri')
+
+    const teachOnceLeo = async (n, missionType) => {
+      geminiBehavior = {
+        kind: 'json',
+        result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+      }
+      const verifyRes = mockRes()
+      await characterHandler(
+        leoReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: `레오 지식 ${n}`, content: `초등 저학년도 알 수 있는 내용 ${n}` } }),
+        verifyRes,
+      )
+      const saveRes = mockRes()
+      await characterHandler(
+        leoReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: `레오 지식 ${n}`,
+            originalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            finalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            verificationToken: verifyRes.body.verificationToken,
+            requestId: `req-leo-evolve-${n}`,
+            missionType,
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+
+    await teachOnceLeo(1, 'objective')
+    await teachOnceLeo(2, 'objective')
+    await teachOnceLeo(3, 'subjective')
+    await teachOnceLeo(4, 'subjective')
+    await teachOnceLeo(5, 'knowhow')
+    t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
+    const leoEvolved = await teachOnceLeo(6, 'knowhow')
+    t.assert(leoEvolved.statusCode === 201, '6번째(마지막) 지식 저장이 성공한다')
+    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별 2개씩 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
+    t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
+    t.assert(leoNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록된다')
+    t.assert(leoNuri.level === 1, '진화해도 레벨/경험치는 그대로다(진화가 레벨을 강제로 올리지 않는다)')
   }
 
   return t.summary()

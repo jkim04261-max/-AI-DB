@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Briefcase } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType } from '../context/GrowthContext'
 import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS, type ProfessionId } from '../data/characterProfessions'
@@ -464,6 +465,29 @@ export default function GrowPage() {
         )}
       </div>
 
+      {/* PR #01(직업 변경 버튼 전면 이동): 기존엔 화면 맨 아래 작은
+          텍스트 링크였다 — 언제든 눈에 띄고 누르기 쉽도록 화면 맨
+          위쪽 왼쪽(제목 바로 아래)에 독립된 게임 스타일 버튼으로
+          옮겼다. onClick/disabled/문구는 그대로라 기존 e2e의
+          getByRole('button', { name: '직업 변경' }) 셀렉터는 위치와
+          무관하게 계속 통과한다. */}
+      {!loading && character && (
+        <div className="flex flex-col items-start gap-1">
+          <button
+            onClick={() => setShowProfessionPicker(true)}
+            disabled={savingProfession}
+            data-testid="profession-change-button"
+            className="flex items-center gap-1.5 self-start rounded-xl border-2 border-amber-300 bg-gradient-to-b from-amber-400 to-yellow-500 px-4 py-2 text-sm font-bold text-amber-950 shadow-[0_3px_0_rgba(146,64,14,0.5),0_0_10px_rgba(251,191,36,0.35)] transition hover:scale-[1.04] hover:border-amber-200 hover:from-amber-300 hover:to-yellow-400 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+          >
+            <Briefcase size={16} />
+            {character.profession ? '직업 변경' : '직업 선택'}
+          </button>
+          {!character.profession && (
+            <p className="text-xs text-amber-600/70">직업을 선택하면 게임 메뉴를 쓸 수 있어요.</p>
+          )}
+        </div>
+      )}
+
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {!loading && character && (
@@ -570,17 +594,6 @@ export default function GrowPage() {
               </div>
             </div>
           </div>
-
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setShowProfessionPicker(true)}
-              disabled={savingProfession}
-              className="text-xs font-semibold text-amber-600 hover:text-amber-700 disabled:opacity-50"
-            >
-              {character.profession ? '직업 변경' : '직업 선택'}
-            </button>
-          </div>
-          {!character.profession && <p className="text-center text-xs text-amber-600/70">직업을 선택하면 게임 메뉴를 쓸 수 있어요.</p>}
         </div>
       )}
 
