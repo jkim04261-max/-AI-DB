@@ -575,22 +575,21 @@ export default function GrowPage() {
                     backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
                   />
                   {xpPopup !== null && (
-                    <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-base font-extrabold text-amber-300 drop-shadow">
+                    <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl">
                       +{xpPopup} XP
                     </span>
                   )}
                   {leveledUpTo !== null && (
                     <span
                       data-testid="level-up-banner"
-                      className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-2xl font-extrabold text-amber-300 drop-shadow-lg"
-                    >
+                      className="motion-safe:animate-[grow-levelup-pop_2.2s_ease-out_forwards] pointer-events-none absolute left-1/2 top-1/2 whitespace-nowrap text-3xl font-extrabold text-amber-300 drop-shadow-[0_0_20px_rgba(252,211,77,0.9)] sm:text-4xl">
                       🎉 Lv.{leveledUpTo} 레벨업!
                     </span>
                   )}
                   {evolvedTo !== null && (
                     <span
                       data-testid="evolution-banner"
-                      className="motion-safe:animate-[grow-levelup-pop_2.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-[42%] whitespace-nowrap text-3xl font-extrabold text-cyan-200 drop-shadow-lg"
+                      className="motion-safe:animate-[grow-levelup-pop_2.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-[42%] whitespace-nowrap text-2xl font-extrabold text-cyan-200 drop-shadow-[0_0_24px_rgba(103,232,249,0.9)] sm:text-5xl"
                     >
                       ✨ {AGE_TIER_STAGE_LABEL[evolvedTo]} 단계로 진화했어요!
                     </span>
