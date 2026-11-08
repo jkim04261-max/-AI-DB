@@ -44,6 +44,10 @@ const COMPANION_TYPES = new Set(['nuri', 'duri'])
 // 의 50개 직업 전체를 저장할 수 있다(api/_lib/db.ts의 CHECK 제약도
 // 같이 넓혔다) — 가르치기/스스로 공부하기는 Gemini에 직업명만 문자열로
 // 넘기므로 어떤 직업이든 그대로 동작한다.
+// PR #65('최종 통합 개발 명령서'): 'custom'은 사용자가 직접 입력한 자유
+// 직업(예: "숲해설가")의 sentinel 값 — 기존 50개는 그대로 두고 51번째로
+// 추가했다. 이 값으로 저장될 때는 customProfessionLabel도 함께 받아
+// characters.custom_profession_label에 저장한다(아래 handlePatch).
 const PROFESSIONS = new Set([
   'accountant', 'singer', 'developer', 'designer', 'data-scientist', 'pm',
   'security-engineer', 'devops', 'game-developer', 'qa-engineer', 'lawyer',
@@ -55,7 +59,15 @@ const PROFESSIONS = new Set([
   'illustrator', 'photographer', 'film-director', 'architect',
   'fashion-designer', 'chef', 'barista', 'flight-attendant', 'firefighter',
   'police-officer', 'civil-servant', 'social-worker', 'event-planner',
-  'massage-therapist',
+  'massage-therapist', 'custom',
+])
+const CUSTOM_PROFESSION_MAX_LENGTH = 30
+// PR #65: 지식 카드 10종 분류 — api/_lib/db.ts의 KnowledgeCategory와
+// 반드시 같은 값이어야 한다.
+const KNOWLEDGE_CATEGORIES = new Set([
+  'basic_knowledge', 'expert_info', 'hands_on_experience', 'personal_knowhow',
+  'skilled_technique', 'problem_solving_case', 'job_tip', 'failure_lesson',
+  'training_experience', 'life_experience',
 ])
 const PROFESSION_LABEL: Record<string, string> = {
   accountant: '회계사',
@@ -108,6 +120,16 @@ const PROFESSION_LABEL: Record<string, string> = {
   'social-worker': '사회복지사',
   'event-planner': '이벤트 기획자',
   'massage-therapist': '마사지 테라피스트',
+  custom: '사용자 지정 직업',
+}
+// PR #65: profession='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가 그때
+// 입력한 실제 직업명(custom_profession_label)을 Gemini 프롬프트/표시에
+// 쓴다 — verify-knowledge/study-generate 두 곳 모두 이 함수를 거친다.
+function resolveProfessionLabel(character: CharacterRow): string {
+  if (character.profession === 'custom') {
+    return character.custom_profession_label ?? PROFESSION_LABEL.custom
+  }
+  return PROFESSION_LABEL[character.profession ?? ''] ?? character.profession ?? ''
 }
 // "문제 풀기"(퀴즈/시험)는 사람이 직접 쓴 문제은행(api/_lib/examQuestions.ts)
 // 에 묶여 있고, 그건 여전히 회계사·가수 2개뿐이다(법률·헬스케어 등은
@@ -137,6 +159,27 @@ const DAILY_STUDY_LIMIT_REACHED_MESSAGE = `오늘의 스스로 공부하기 요�
 // 목록의 최대 길이 — 프롬프트 크기(=비용)를 제한하면서도 최근에 배운
 // 것 위주로 충분히 참고할 수 있는 수.
 const SELF_STUDY_KNOWN_TITLES_LIMIT = 20
+
+// PR #65: 집중력 게이지(characters.focus_percent)의 1차 최소 반영 —
+// "교육·장비" 단계 자체는 PR #66에서 다루므로, 지금은 실제로 지식을
+// 완성 저장했는지(성공=집중력 소폭 상승)와 검증에서 막혔는지(수정
+// 필요·검증 불가=집중력 소폭 하락)만으로 가감한다. 증감 폭을 작게 둔
+// 이유는 한 번의 성공/실패가 게이지를 급격히 흔들지 않게 하기 위해서다.
+const FOCUS_UP_ON_SAVE = 2
+const FOCUS_DOWN_ON_STRUGGLE = 2
+
+// 0~100 범위를 SQL 레벨에서 직접 클램프한다(동시 요청에도 범위를
+// 벗어나지 않는 원자적 UPDATE) — characters.focus_percent의 CHECK 제약과
+// 같은 경계.
+async function adjustFocusPercent(userId: number, characterId: number, delta: number): Promise<number> {
+  const updated = await sql<{ focus_percent: number }>`
+    UPDATE characters
+    SET focus_percent = LEAST(100, GREATEST(0, focus_percent + ${delta}))
+    WHERE id = ${characterId} AND user_id = ${userId}
+    RETURNING focus_percent
+  `
+  return updated.rows[0]?.focus_percent ?? 90
+}
 
 // Worst case for the verify-knowledge action: 2 Gemini attempts at
 // KNOWLEDGE_VERIFICATION_TIMEOUT_MS each plus a short backoff (see
@@ -233,7 +276,7 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) return null
 
   const result = await sql<CharacterRow>`
-    SELECT id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
+    SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
     FROM characters
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
@@ -253,7 +296,7 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
+      SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
@@ -328,7 +371,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -351,17 +394,31 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
 // pattern handlePost's insert and api/conversations/[id].ts's delete use —
 // a request naming another user's character simply matches no row.
 async function handlePatch(req: VercelRequest, res: VercelResponse, userId: number) {
-  const { companionType, profession } = (req.body ?? {}) as {
+  const { companionType, profession, customProfessionLabel } = (req.body ?? {}) as {
     companionType?: unknown
     profession?: unknown
+    customProfessionLabel?: unknown
   }
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) {
     res.status(400).json({ error: '누리 또는 두리 중 하나를 선택해주세요.' })
     return
   }
   if (typeof profession !== 'string' || !PROFESSIONS.has(profession)) {
-    res.status(400).json({ error: '회계사 또는 가수 중 하나를 선택해주세요.' })
+    res.status(400).json({ error: '직업을 선택해주세요.' })
     return
+  }
+
+  // PR #65: profession='custom'일 때만 실제 입력 텍스트가 필요하다 —
+  // 그 외 49개 직업에서는 (혹시 보내졌더라도) 항상 NULL로 저장해, 이전에
+  // custom으로 저장했던 라벨이 다른 직업으로 바꾼 뒤에도 남아있는 걸
+  // 막는다.
+  let normalizedCustomLabel: string | null = null
+  if (profession === 'custom') {
+    if (typeof customProfessionLabel !== 'string' || !customProfessionLabel.trim() || customProfessionLabel.trim().length > CUSTOM_PROFESSION_MAX_LENGTH) {
+      res.status(400).json({ error: `직업명을 ${CUSTOM_PROFESSION_MAX_LENGTH}자 이내로 입력해주세요.` })
+      return
+    }
+    normalizedCustomLabel = customProfessionLabel.trim()
   }
 
   try {
@@ -369,9 +426,9 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
 
     const updated = await sql<CharacterRow>`
       UPDATE characters
-      SET profession = ${profession}
+      SET profession = ${profession}, custom_profession_label = ${normalizedCustomLabel}
       WHERE user_id = ${userId} AND companion_type = ${companionType}
-      RETURNING id, user_id, companion_type, stage, profession, level, exp, mission_unlocked_tier, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
     `
     const character = updated.rows[0]
     if (!character) {
@@ -481,7 +538,7 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
 
     let verification: KnowledgeVerificationResult
     try {
-      verification = await verifyKnowledge(PROFESSION_LABEL[character.profession], title.trim(), content.trim())
+      verification = await verifyKnowledge(resolveProfessionLabel(character), title.trim(), content.trim())
     } catch (err) {
       // The call itself failed (config/timeout/network/non-2xx) — nothing
       // usable came back, so this attempt shouldn't count against today's
@@ -536,6 +593,12 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
     // 나이 제한에 막혔으면 기존 buildTeachReply(적합/수정 필요/검증 불가
     // 문구)를 쓰지 않고, 요청하신 아동 말투의 거절 메시지를 보여준다.
     const characterReply = ageBlocked ? ageBlockedMessage(AGE_TIER_LABEL[verification.requiredAgeTier]) : buildTeachReply(verification)
+
+    // PR #65: 수정 필요/검증 불가 — 내용을 다듬어야 했던 시도라 집중력을
+    // 소폭 낮춘다(ageBlocked는 내용 자체는 적합 판정이라 제외).
+    const focusPercent =
+      verification.status !== 'appropriate' ? await adjustFocusPercent(userId, character.id, -FOCUS_DOWN_ON_STRUGGLE) : character.focus_percent
+
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -568,6 +631,7 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       ageBlocked,
       characterAgeTier,
       requiredAgeTier: verification.requiredAgeTier,
+      focusPercent,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on verify-knowledge', err)
@@ -623,7 +687,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       // 달라고 요청한다 — 사후 판정(ageBlocked)만으로는 "다 만들고 나서
       // 막혀서 하루 한도만 날린다"는 진도 막힘을 못 막는다.
       study = await generateSelfStudy(
-        PROFESSION_LABEL[character.profession],
+        resolveProfessionLabel(character),
         knownTitlesResult.rows.map((r) => r.title),
         effectiveAgeTier(character),
       )
@@ -665,6 +729,11 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
     // log failure so a result the client can't later reload is never
     // presented as if it happened.
     const characterReply = ageBlocked ? ageBlockedMessage(AGE_TIER_LABEL[study.requiredAgeTier]) : buildStudyReply(study.title, study)
+
+    // PR #65: handleVerifyKnowledge와 동일한 집중력 반영 규칙.
+    const focusPercent =
+      study.status !== 'appropriate' ? await adjustFocusPercent(userId, character.id, -FOCUS_DOWN_ON_STRUGGLE) : character.focus_percent
+
     try {
       await ensureCharacterMessagesTable()
       await sql`
@@ -694,6 +763,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       ageBlocked,
       characterAgeTier,
       requiredAgeTier: study.requiredAgeTier,
+      focusPercent,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on study-generate', err)
@@ -719,9 +789,14 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     verificationToken?: unknown
     requestId?: unknown
     missionType?: unknown
+    knowledgeCategory?: unknown
   }
   const { companionType, title, originalContent, finalContent, verificationToken } = body
   const requestId = typeof body.requestId === 'string' && body.requestId ? body.requestId : null
+  // PR #65: 지식 카드 10종 분류(선택값) — 안 보내면 그냥 NULL로 저장되고
+  // 어떤 기존 동작도 바뀌지 않는다(missionType과 같은 "선택적 태그" 패턴).
+  const knowledgeCategory =
+    typeof body.knowledgeCategory === 'string' && KNOWLEDGE_CATEGORIES.has(body.knowledgeCategory) ? body.knowledgeCategory : null
   // PR #63: 어느 미션 카드(① 선택지 고르기=objective ② AI 추천=subjective
   // ③ 직접 입력=knowhow)로 저장했는지 — 선택값이라 안 보내도(예: 기존
   // e2e가 쓰는 "그냥 저장") 저장 자체는 그대로 성공하고, 그저 어느
@@ -804,7 +879,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // shape as findReplay in api/conversations/[id].ts.
     if (requestId) {
       const existing = await sql<KnowledgeEntryRow>`
-        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, created_at
+        SELECT id, user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, knowledge_category, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND client_request_id = ${requestId}
       `
@@ -821,6 +896,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
           exp: character.exp,
           level: character.level,
           leveledUp: false,
+          focusPercent: character.focus_percent,
         })
         return
       }
@@ -841,10 +917,10 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
 
     const inserted = await sql<KnowledgeEntryRow>`
       INSERT INTO character_knowledge_entries
-        (user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save)
+        (user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save, knowledge_category)
       VALUES
-        (${userId}, ${character.id}, ${character.profession}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source}, ${missionType}, ${tierAtSaveStart})
-      RETURNING id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, created_at
+        (${userId}, ${character.id}, ${character.profession}, ${character.custom_profession_label}, ${title.trim()}, ${originalContent.trim()}, ${finalContent.trim()}, 'appropriate', ${verificationExplanation}, ${requestId}, ${tokenPayload.source}, ${missionType}, ${tierAtSaveStart}, ${knowledgeCategory})
+      RETURNING id, user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, knowledge_category, created_at
     `
     const entry = inserted.rows[0]
 
@@ -860,6 +936,9 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
     // 대체한다 — 이번 저장 덕분에 레벨 조건(필요하다면)과 6미션 조건을
     // 둘 다 만족했는지 확인하고, 만족하면 다음 연령대로 진화시킨다.
     const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult.newLevel, character.mission_unlocked_tier)
+
+    // PR #65: 지식이 실제로 완성 저장된 성공 신호 — 집중력을 소폭 올린다.
+    const focusPercent = await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
 
     // PR #45 checkpoint 3.6: unlike verify-knowledge/study-generate, the
     // knowledge entry above is the thing that matters and it has already
@@ -890,6 +969,7 @@ async function handleSaveKnowledge(req: VercelRequest, res: VercelResponse, user
       evolved: evolveResult.evolved,
       newAgeTier: evolveResult.newAgeTier,
       newAgeTierLabel: evolveResult.newAgeTierLabel,
+      focusPercent,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on save-knowledge', err)
@@ -920,7 +1000,7 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
 
     const [entries, countResult] = await Promise.all([
       sql<KnowledgeEntryRow>`
-        SELECT id, user_id, character_id, profession, title, original_content, final_content, verification_status, verification_explanation, source, created_at
+        SELECT id, user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, knowledge_category, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND user_id = ${userId}
         ORDER BY created_at DESC

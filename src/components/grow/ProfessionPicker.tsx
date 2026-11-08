@@ -1,7 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { PROFESSIONS, CATEGORY_LABEL, type ProfessionCategory, type ProfessionId } from '../../data/characterProfessions'
 
 const CATEGORY_ORDER: ProfessionCategory[] = ['it', 'professional', 'healthcare', 'education', 'culture', 'service']
+
+// PR #65: 자유 입력 직업명의 최대 길이 — api/character.ts의 서버 측
+// 검증과 반드시 같은 값이어야 한다(클라이언트는 UX용 1차 방어선일 뿐,
+// 실제 보장은 서버가 한다).
+const CUSTOM_PROFESSION_MAX_LENGTH = 30
 
 // PR #49에서 만든 50개 직업 카테고리 셀렉터. PR #51(직업 선택 제한
 // 해제)부터는 50개 전부 클릭해서 목표 직업으로 고르고 저장할 수 있다.
@@ -10,15 +15,25 @@ const CATEGORY_ORDER: ProfessionCategory[] = ['it', 'professional', 'healthcare'
 // 작은 "문제 풀기 준비 중" 안내만 붙는다 — 직업 선택 자체를 막지는
 // 않는다(고르면 실제로 저장되고, 가르치기/스스로 공부하기는 그대로
 // 쓸 수 있다).
+//
+// PR #65('최종 통합 개발 명령서'): 개발자가 직업을 일일이 만들어 넣는
+// 고정 목록 방식을 버리고, 사용자가 자유롭게 직업을 타이핑할 수 있게
+// 한다 — 기존 50개 그리드는 그대로 두고(회귀 없음), 그 위에 자유 입력
+// 한 줄만 추가했다. 자유 입력을 선택하면 onSelect('custom', 입력한
+// 텍스트)로 알린다.
 export default function ProfessionPicker({
   currentProfession,
+  currentCustomLabel,
   onSelect,
   onClose,
 }: {
   currentProfession: ProfessionId | null
-  onSelect: (id: ProfessionId) => void
+  currentCustomLabel?: string | null
+  onSelect: (id: ProfessionId, customLabel?: string) => void
   onClose: () => void
 }) {
+  const [customText, setCustomText] = useState(currentProfession === 'custom' ? currentCustomLabel ?? '' : '')
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -26,6 +41,14 @@ export default function ProfessionPicker({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  const trimmedCustomText = customText.trim()
+  const customValid = trimmedCustomText.length > 0 && trimmedCustomText.length <= CUSTOM_PROFESSION_MAX_LENGTH
+
+  const handleCustomSubmit = () => {
+    if (!customValid) return
+    onSelect('custom', trimmedCustomText)
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-amber-950/50 px-0 sm:items-center sm:px-4" onClick={onClose}>
@@ -48,6 +71,38 @@ export default function ProfessionPicker({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {/* PR #65: 자유 직업 입력 — 아래 50개 그리드 중 고르지 않고
+              직접 타이핑할 수 있다(예: "숲해설가"). */}
+          <section className="mb-4 rounded-xl border border-amber-300 bg-amber-100/60 p-3">
+            <h3 className="mb-2 text-xs font-bold text-amber-700">직접 입력하기</h3>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCustomSubmit()
+                }}
+                placeholder="예: 숲해설가"
+                maxLength={CUSTOM_PROFESSION_MAX_LENGTH}
+                aria-label="직업 직접 입력"
+                className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-amber-900 placeholder:text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <button
+                type="button"
+                onClick={handleCustomSubmit}
+                disabled={!customValid}
+                aria-current={currentProfession === 'custom'}
+                className="shrink-0 rounded-lg border border-amber-500 bg-amber-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                이 직업으로 선택
+              </button>
+            </div>
+            {currentProfession === 'custom' && (
+              <p className="mt-1.5 text-[11px] text-amber-600">현재 직업: {currentCustomLabel}</p>
+            )}
+            <p className="mt-1.5 text-[11px] text-amber-500">문제 풀기(퀴즈/시험)는 아직 준비 중이에요.</p>
+          </section>
           {CATEGORY_ORDER.map((category) => (
             <section key={category} className="mb-4">
               <h3 className="mb-2 text-xs font-bold text-amber-700">{CATEGORY_LABEL[category]}</h3>

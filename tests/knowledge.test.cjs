@@ -771,10 +771,11 @@ async function run() {
 
   // --- PR #63: 연령대 "진화"는 더 이상 지식 저장 개수(flat count)가
   // 아니라, 한 연령대에서 유형별(객관식=objective/주관식=subjective/
-  // 노하우=knowhow) 2개씩 총 6개를 확정 저장해야 하고, *동시에* 레벨도
-  // 다음 단계 기준을 넘어야 한다(레벨 조건 유지 + 미션 게이트 추가) —
-  // 둘 중 하나만 만족해서는 절대 진화하지 않는 "진짜 게이트"인지
-  // 확인한다.
+  // 노하우=knowhow) 2개씩 총 6개를 확정 저장해야 하고, teen 이후 단계는
+  // *동시에* 레벨도 다음 단계 기준을 넘어야 한다(레벨 조건 유지 + 미션
+  // 게이트 추가) — 둘 중 하나만 만족해서는 절대 진화하지 않는 "진짜
+  // 게이트"인지 확인한다. (toddler→teen 첫 진화의 레벨-조건-면제 예외는
+  // 지시서 #03 전용 테스트로 별도 확인한다 — 아래 참고.)
   {
     mock.seedUser(11, { email: 'kate@test.com' })
     const kateCookie = cookieHeaderFor(auth, 11, 0, 'kate@test.com')
@@ -820,7 +821,7 @@ async function run() {
     // 당연히 toddler로 고정된다).
     const firstSave = await teachOnce(1, 'objective')
     t.assert(firstSave.statusCode === 201, '첫 지식 저장이 성공한다')
-    t.assert(firstSave.body.evolved === false, '아직 Lv.1이라 진화 조건(레벨) 자체가 안 된다')
+    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/6뿐이라 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '첫 평가에서 toddler로 고정된다')
 
     // 레벨이 이미 teen 기준(Lv.5)을 넘어도(퀴즈·시험 등으로 다른 곳에서
@@ -863,7 +864,7 @@ async function run() {
     await teachOnce(9, 'knowhow')
     const evolved = await teachOnce(10, 'knowhow')
     t.assert(evolved.statusCode === 201, '유형별 2개씩 마지막 지식 저장이 성공한다')
-    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지고 레벨도 충분해 진화한다')
+    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
     t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
     t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
@@ -919,6 +920,207 @@ async function run() {
     t.assert(levelOnlySave.body.evolved === true, '미션은 이미 끝나 있었으므로 레벨만 채워지면(퀴즈든 지식 저장이든) 그 즉시 진화한다')
     t.assert(levelOnlySave.body.newAgeTier === 'junior_20s', '다음 연령대는 junior_20s다')
     t.assert(levelOnlySave.body.savedReply?.includes('청년 단계로 성장했어요'), 'junior_20s 진화 문구에는 그 단계의 스테이지 라벨("청년")이 쓰인다')
+  }
+
+  // --- PR #65: 자유 직업 입력("숲해설가") + 지식 카드 10종 분류 +
+  // 집중력 게이지 소폭 반영 ---
+  {
+    mock.seedUser(20, { email: 'erin@test.com' })
+    const erinCookie = cookieHeaderFor(auth, 20, 0, 'erin@test.com')
+    const erinReq = (overrides = {}) => ({ headers: { cookie: erinCookie }, query: {}, ...overrides })
+    await characterHandler(erinReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+
+    // customProfessionLabel 없이 'custom' 선택은 거부된다.
+    {
+      const res = mockRes()
+      await characterHandler(erinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom' } }), res)
+      t.assert(res.statusCode === 400, "customProfessionLabel 없이 profession='custom'을 보내면 거부된다 (400)")
+    }
+    // 30자 초과 직업명도 거부된다.
+    {
+      const res = mockRes()
+      await characterHandler(
+        erinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom', customProfessionLabel: '가'.repeat(31) } }),
+        res,
+      )
+      t.assert(res.statusCode === 400, '30자를 초과하는 자유 직업명은 거부된다 (400)')
+    }
+    // 정상 입력("숲해설가")은 저장된다.
+    {
+      const res = mockRes()
+      await characterHandler(
+        erinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' } }),
+        res,
+      )
+      t.assert(res.statusCode === 200, "자유 직업 '숲해설가'를 선택하면 성공한다 (200)")
+      t.assert(res.body.character?.profession === 'custom', "응답의 profession은 sentinel 값 'custom'이다")
+      t.assert(res.body.character?.custom_profession_label === '숲해설가', '응답에 실제 입력한 직업명이 그대로 담긴다')
+      t.assert(res.body.character?.focus_percent === 90, '새 캐릭터의 집중력은 기본값 90으로 시작한다')
+    }
+
+    // 스스로 공부하기(study-generate)가 Gemini 프롬프트에 자유 직업명을
+    // 그대로 사용한다(50개 고정 라벨이 아니라 실제 입력 텍스트).
+    geminiBehavior = {
+      kind: 'json',
+      result: {
+        title: '숲 생태 관찰 팁',
+        content: '아침 시간대에 동물 발자국을 더 쉽게 볼 수 있다.',
+        status: 'appropriate',
+        explanation: 'ok',
+        relevance: 'ok',
+        issues: '',
+        suggestion: '',
+        requiredAgeTier: 'toddler',
+      },
+    }
+    const studyRes = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), studyRes)
+    t.assert(studyRes.statusCode === 200, "자유 직업('숲해설가')도 스스로 공부하기가 정상 동작한다 (200)")
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('숲해설가'),
+      'Gemini 프롬프트에 사용자가 입력한 실제 직업명("숲해설가")이 쓰인다(50개 고정 라벨이 아님)',
+    )
+
+    // 지식 카드 10종 분류(knowledgeCategory)를 저장할 수 있다.
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' } }
+    const forestVerify = mockRes()
+    await characterHandler(
+      erinReq({
+        method: 'POST',
+        query: { action: 'verify-knowledge' },
+        body: { companionType: 'nuri', title: '소나무와 잣나무 구별하기', content: '잣나무는 잎이 5개씩 뭉쳐나고 소나무는 2개씩 뭉쳐난다.' },
+      }),
+      forestVerify,
+    )
+    const focusBefore = 90
+    const forestSave = mockRes()
+    await characterHandler(
+      erinReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'nuri',
+          title: '소나무와 잣나무 구별하기',
+          originalContent: '잣나무는 잎이 5개씩 뭉쳐나고 소나무는 2개씩 뭉쳐난다.',
+          finalContent: '잣나무는 잎이 5개씩 뭉쳐나고 소나무는 2개씩 뭉쳐난다.',
+          verificationToken: forestVerify.body.verificationToken,
+          requestId: 'req-forest-1',
+          knowledgeCategory: 'personal_knowhow',
+        },
+      }),
+      forestSave,
+    )
+    t.assert(forestSave.statusCode === 201, '지식 카드 분류와 함께 저장하면 성공한다 (201)')
+    t.assert(forestSave.body.entry?.knowledge_category === 'personal_knowhow', '저장된 기록에 선택한 지식 카드 분류가 그대로 담긴다')
+    t.assert(forestSave.body.entry?.custom_profession_label === '숲해설가', '저장된 기록에도 저장 당시 직업명이 스냅샷된다')
+    t.assert(
+      typeof forestSave.body.focusPercent === 'number' && forestSave.body.focusPercent > focusBefore,
+      '지식을 실제로 완성 저장하면 집중력이 소폭 올라간다',
+    )
+
+    // 지식 카드 분류를 안 보내도(선택값) 저장 자체는 그대로 성공한다.
+    const noCategoryVerify = mockRes()
+    await characterHandler(
+      erinReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '등산로 안내', content: '등산로 초입에 안내판이 있다.' } }),
+      noCategoryVerify,
+    )
+    const noCategorySave = mockRes()
+    await characterHandler(
+      erinReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'nuri',
+          title: '등산로 안내',
+          originalContent: '등산로 초입에 안내판이 있다.',
+          finalContent: '등산로 초입에 안내판이 있다.',
+          verificationToken: noCategoryVerify.body.verificationToken,
+          requestId: 'req-forest-2',
+        },
+      }),
+      noCategorySave,
+    )
+    t.assert(noCategorySave.statusCode === 201, '지식 카드 분류 없이 저장해도 그대로 성공한다 (201, 선택값)')
+    t.assert(noCategorySave.body.entry?.knowledge_category === null, '분류를 안 보내면 null로 저장된다')
+
+    // 검증이 막히면(수정 필요/검증 불가) 집중력이 소폭 내려간다.
+    geminiBehavior = { kind: 'json', result: { status: 'needs_revision', explanation: '조금 더 구체적으로', relevance: '', issues: '모호함', suggestion: '예시 추가' } }
+    const struggleRes = mockRes()
+    await characterHandler(
+      erinReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '모호한 지식', content: '그냥 그래요' } }),
+      struggleRes,
+    )
+    t.assert(struggleRes.body.verification?.status === 'needs_revision', '수정 필요 판정이 내려온다')
+    t.assert(
+      typeof struggleRes.body.focusPercent === 'number' && struggleRes.body.focusPercent < noCategorySave.body.focusPercent,
+      '검증에서 막히면(수정 필요) 집중력이 소폭 내려간다',
+    )
+
+    // 다른 고정 직업으로 바꾸면 custom_profession_label이 사라진다.
+    {
+      const res = mockRes()
+      await characterHandler(erinReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'teacher' } }), res)
+      t.assert(res.statusCode === 200, '고정 직업(교사)으로 다시 바꾸면 성공한다 (200)')
+      t.assert(res.body.character?.profession === 'teacher', '직업이 교사로 바뀐다')
+      t.assert(res.body.character?.custom_profession_label === null, '고정 직업으로 바꾸면 이전 자유 직업명은 사라진다(null)')
+    }
+  }
+
+  // --- 지시서 #03(8~9살 시험 시스템 전면 개편): toddler(8~9살)→teen(10대)
+  // 첫 진화는 "복잡한 레벨 조건 없이" 유형별 2개씩 총 6개(예시 문제
+  // 풀이형=subjective/객관식=objective/노하우 설계형=knowhow) 확정만으로
+  // 즉시 진화해야 한다 — Lv.1(레벨 조건 AGE_TIER_MIN_LEVEL.teen=5에
+  // 한참 못 미침)인 채로도 진화하는지 전용으로 확인한다.
+  {
+    mock.seedUser(12, { email: 'leo@test.com' })
+    const leoCookie = cookieHeaderFor(auth, 12, 0, 'leo@test.com')
+    const leoReq = (overrides = {}) => ({ headers: { cookie: leoCookie }, query: {}, ...overrides })
+    await characterHandler(leoReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(leoReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const leoNuri = mock.state.characters.find((c) => c.user_id === 12 && c.companion_type === 'nuri')
+
+    const teachOnceLeo = async (n, missionType) => {
+      geminiBehavior = {
+        kind: 'json',
+        result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' },
+      }
+      const verifyRes = mockRes()
+      await characterHandler(
+        leoReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: `레오 지식 ${n}`, content: `초등 저학년도 알 수 있는 내용 ${n}` } }),
+        verifyRes,
+      )
+      const saveRes = mockRes()
+      await characterHandler(
+        leoReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: `레오 지식 ${n}`,
+            originalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            finalContent: `초등 저학년도 알 수 있는 내용 ${n}`,
+            verificationToken: verifyRes.body.verificationToken,
+            requestId: `req-leo-evolve-${n}`,
+            missionType,
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+
+    await teachOnceLeo(1, 'objective')
+    await teachOnceLeo(2, 'objective')
+    await teachOnceLeo(3, 'subjective')
+    await teachOnceLeo(4, 'subjective')
+    await teachOnceLeo(5, 'knowhow')
+    t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
+    const leoEvolved = await teachOnceLeo(6, 'knowhow')
+    t.assert(leoEvolved.statusCode === 201, '6번째(마지막) 지식 저장이 성공한다')
+    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별 2개씩 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
+    t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
+    t.assert(leoNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록된다')
+    t.assert(leoNuri.level === 1, '진화해도 레벨/경험치는 그대로다(진화가 레벨을 강제로 올리지 않는다)')
   }
 
   return t.summary()
