@@ -765,3 +765,110 @@ test('the mission progress summary shows the current tier\'s 6-slot progress, by
   await expect(page.getByTestId('mission-progress-subjective')).toContainText('0/2')
   await expect(page.getByTestId('mission-progress-knowhow')).toContainText('1/2')
 })
+
+// PR #65: 지식 카드 10종 분류 — missionType(입력 방식)과는 독립된 선택값
+// 칩이 저장 요청의 knowledgeCategory로 그대로 실려가는지 확인한다.
+test('picking a knowledge-category chip and saving tags the save request with knowledgeCategory', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-category',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: {
+            id: 1,
+            character_id: 1,
+            profession: 'accountant',
+            title: 'x',
+            original_content: 'y',
+            final_content: 'y',
+            verification_status: 'appropriate',
+            source: 'user_taught',
+            knowledge_category: 'job_tip',
+            created_at: new Date().toISOString(),
+          },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+          focusPercent: 92,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByPlaceholder('지식 제목').fill('세금 신고 팁')
+  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('마감일 전에 미리 제출하면 수정할 시간이 생긴다.')
+  await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+  await page.getByTestId('knowledge-category-chip-job_tip').click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.knowledgeCategory).toBe('job_tip')
+})
+
+// PR #65('최종 통합 개발 명령서'): 자유 직업("숲해설가")으로도 가르치기·
+// 스스로 공부하기가 그대로 동작하고, 패널 헤더에 실제 입력한 직업명이
+// 보여야 한다(고정 50개 라벨이 아님).
+test('a custom free-text profession ("숲해설가") shows its own label in the teach panel and study-generate still works', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  const NURI_FOREST_GUIDE = {
+    id: 1,
+    user_id: USER.id,
+    companion_type: 'nuri',
+    stage: 'child',
+    profession: 'custom',
+    custom_profession_label: '숲해설가',
+    created_at: new Date().toISOString(),
+  }
+  await mockCharacterApi(page, {
+    characters: [NURI_FOREST_GUIDE],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '숲 생태 관찰 팁', content: '아침 시간대에 동물 발자국을 더 쉽게 볼 수 있다.' },
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-forest-study',
+          characterReply: '스스로 공부했어요!',
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await expect(page.getByTestId('profession-badge')).toHaveText('숲해설가')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('누리 · 숲해설가와 상호작용하기')).toBeVisible()
+
+  await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숲 생태 관찰 팁')
+})

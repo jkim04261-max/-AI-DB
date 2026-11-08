@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useGrowth, type Character, type KnowledgeEntry } from '../../context/GrowthContext'
 import { levelProgress } from '../../data/characterGrowth'
-import { PROFESSION_LABEL } from '../../data/characterProfessions'
+import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS } from '../../data/characterProfessions'
 
 const VERIFICATION_LABEL: Record<KnowledgeEntry['verificationStatus'], string> = {
   appropriate: '적합',
@@ -31,7 +31,10 @@ export default function RecordsPanel({ character, variant }: { character: Charac
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '학습 기록을 불러오는 중 오류가 발생했어요.')
       })
-    if (character.profession) {
+    // PR #65: 'custom' 직업은 문제 풀기 문제은행이 없으니(EXAM_SUPPORTED_
+    // PROFESSIONS에 없음) 애초에 호출하지 않는다 — GrowPage의 같은 가드와
+    // 동일한 이유.
+    if (character.profession && EXAM_SUPPORTED_PROFESSIONS.has(character.profession)) {
       getExam(character.companionType)
         .then((result) => {
           if (!cancelled) setAlreadyPassed(result.alreadyPassed)
@@ -55,7 +58,12 @@ export default function RecordsPanel({ character, variant }: { character: Charac
             Lv.{level} · {expIntoLevel}/{expForNextLevel} XP
           </p>
           <p className="text-xs text-slate-500">
-            직업: {character.profession ? PROFESSION_LABEL[character.profession] : '미선택'}
+            직업:{' '}
+            {character.profession
+              ? character.profession === 'custom'
+                ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
+                : PROFESSION_LABEL[character.profession]
+              : '미선택'}
             {character.profession && alreadyPassed !== null && (
               <span className={alreadyPassed ? 'text-green-600' : 'text-slate-400'}>
                 {' · '}자격시험 {alreadyPassed ? '합격' : '미합격'}

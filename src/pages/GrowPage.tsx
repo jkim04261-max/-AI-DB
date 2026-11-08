@@ -64,7 +64,10 @@ export default function GrowPage() {
   const [creating, setCreating] = useState<CompanionType | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showProfessionPicker, setShowProfessionPicker] = useState(false)
-  const [pendingChange, setPendingChange] = useState<ProfessionId | null>(null)
+  // PR #65: 'custom'으로 바꾸려는 변경 확인 모달에서는 라벨이 없으니
+  // (PROFESSION_LABEL엔 'custom' 전용 고정 문구만 있다) 입력한 텍스트를
+  // 함께 들고 있어야 확인 문구에 그대로 보여줄 수 있다.
+  const [pendingChange, setPendingChange] = useState<{ profession: ProfessionId; customLabel?: string } | null>(null)
   const [savingProfession, setSavingProfession] = useState(false)
   const [openSheet, setOpenSheet] = useState<GameMenuAction | null>(null)
   const [turnTransition, setTurnTransition] = useState<GameMenuAction | null>(null)
@@ -96,7 +99,11 @@ export default function GrowPage() {
   // 다른 소스를 보여주며 어긋나는 일이 없도록 한다.
   const quest = computeActiveQuest({
     profession: character?.profession ?? null,
-    professionLabel: character?.profession ? PROFESSION_LABEL[character.profession] : null,
+    professionLabel: character?.profession
+      ? character.profession === 'custom'
+        ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
+        : PROFESSION_LABEL[character.profession]
+      : null,
     knowledgeTotal: knowledgeStats.total,
     examPassed,
   })
@@ -318,7 +325,7 @@ export default function GrowPage() {
     }
   }
 
-  const applyProfession = async (profession: ProfessionId) => {
+  const applyProfession = async (profession: ProfessionId, customLabel?: string) => {
     if (!character) return
     // PR #52 요청 2번: 처음 직업을 고르는 순간(이전까지 직업이 없었고,
     // 아직 8~9살 toddler 단계)에만 아동 말투 인사를 보여준다 — 나중에
@@ -327,10 +334,12 @@ export default function GrowPage() {
     setSavingProfession(true)
     setError(null)
     try {
-      await setProfession(character.companionType, profession)
+      await setProfession(character.companionType, profession, customLabel)
       setPendingChange(null)
       if (isFirstPick) {
-        showBubble(toddlerProfessionGreeting(PROFESSION_LABEL[profession]))
+        // PR #65: 'custom'이면 방금 입력한 텍스트를, 아니면 기존처럼
+        // PROFESSION_LABEL을 쓴다.
+        showBubble(toddlerProfessionGreeting(profession === 'custom' ? customLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '직업을 저장하는 중 오류가 발생했어요.')
@@ -557,11 +566,25 @@ export default function GrowPage() {
                     name={COMPANION_LABEL[character.companionType]}
                     stage={character.stage}
                     profession={character.profession}
+                    customProfessionLabel={character.customProfessionLabel}
                     exp={character.exp}
                     recentLine={recentLine}
                     ageStageLabel={AGE_TIER_STAGE_LABEL[ageTier]}
                   />
                   {statGauges && <StatGaugesPanel values={statGauges} />}
+                  {/* PR #65: 집중력 게이지 — 교육·장비 단계에 따른 전체
+                      반영은 PR #66에서 이어가고, 지금은 저장 성공/검증
+                      실패에 따라 소폭 오르내리는 값을 보여주기만 한다. */}
+                  <div className="flex items-center gap-1.5" data-testid="focus-gauge">
+                    <span className="w-7 shrink-0 text-[10px] font-semibold text-amber-100">집중력</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-amber-50/15">
+                      <span
+                        className="block h-full rounded-full bg-gradient-to-r from-sky-400 to-cyan-300 transition-[width] duration-500"
+                        style={{ width: `${character.focusPercent}%` }}
+                      />
+                    </span>
+                    <span className="w-8 shrink-0 text-right text-[10px] text-amber-200/70">{character.focusPercent}%</span>
+                  </div>
                   <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
                 </div>
               </div>
@@ -603,13 +626,14 @@ export default function GrowPage() {
       {showProfessionPicker && character && (
         <ProfessionPicker
           currentProfession={character.profession}
+          currentCustomLabel={character.customProfessionLabel}
           onClose={() => setShowProfessionPicker(false)}
-          onSelect={(id) => {
+          onSelect={(id, customLabel) => {
             setShowProfessionPicker(false)
             if (character.profession === null) {
-              void applyProfession(id)
+              void applyProfession(id, customLabel)
             } else {
-              setPendingChange(id)
+              setPendingChange({ profession: id, customLabel })
             }
           }}
         />
@@ -621,7 +645,9 @@ export default function GrowPage() {
             <h2 className="text-base font-bold text-amber-900">직업을 변경할까요?</h2>
             <p className="mt-1.5 text-sm text-amber-700/80">
               {COMPANION_LABEL[character.companionType]}의 직업을{' '}
-              <span className="font-semibold text-amber-900">{PROFESSION_LABEL[pendingChange]}</span>
+              <span className="font-semibold text-amber-900">
+                {pendingChange.profession === 'custom' ? pendingChange.customLabel : PROFESSION_LABEL[pendingChange.profession]}
+              </span>
               로 변경해요. 캐릭터 자체는 삭제되지 않아요.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -635,7 +661,7 @@ export default function GrowPage() {
               </button>
               <button
                 type="button"
-                onClick={() => void applyProfession(pendingChange)}
+                onClick={() => void applyProfession(pendingChange.profession, pendingChange.customLabel)}
                 disabled={savingProfession}
                 className="rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-sm font-semibold text-white hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50"
               >
