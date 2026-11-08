@@ -31,6 +31,34 @@ import { useMockWallet } from '../hooks/useMockWallet'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
+
+// 버그 수정(선택한 캐릭터·직업이 메인 화면에 반영되지 않는 문제): 두
+// 캐릭터를 모두 만든 계정은 재접속/새로고침마다 기본값('nuri')으로
+// 되돌아가 사용자가 실제로 쓰는 캐릭터(예: 두리 + 직업)가 아니라 늘
+// 누리의 "직업 미선택" 상태가 먼저 보였다 — 어느 탭을 마지막으로
+// 봤는지 저장해두는 로직이 아예 없었기 때문이다(기존 보정 로직은
+// "둘 다 있으면 아무것도 하지 않는다"고 명시돼 있었다). 계정별로 마지막
+// 선택 탭만 로컬에 저장해 재접속 시 그대로 복원한다 — 서버/DB에는
+// 아무것도 추가하지 않는 순수 UI 상태다.
+const LAST_COMPANION_STORAGE_PREFIX = 'nuri-ai:last-companion:'
+
+function readLastCompanion(userId: number): CompanionType | null {
+  try {
+    const value = window.localStorage.getItem(`${LAST_COMPANION_STORAGE_PREFIX}${userId}`)
+    return value === 'nuri' || value === 'duri' ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeLastCompanion(userId: number, companionType: CompanionType) {
+  try {
+    window.localStorage.setItem(`${LAST_COMPANION_STORAGE_PREFIX}${userId}`, companionType)
+  } catch {
+    // 저장 실패(프라이빗 모드 등)해도 탭 전환 자체는 문제없이 동작해야
+    // 하므로 조용히 무시한다 — 이 값은 편의용 복원일 뿐이다.
+  }
+}
 const SHEET_TITLE: Record<GameMenuAction, string> = {
   teach: '가르치기 · 스스로 공부하기',
   'chat-log': '함께 나눈 대화',
@@ -164,13 +192,32 @@ export default function GrowPage() {
   const questBubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 로그인한 계정이 두리만 갖고 있는 경우처럼, 기본값('nuri')과 실제
-  // 보유 캐릭터가 어긋날 수 있어 보정한다 — 둘 다 있으면 아무것도 하지
-  // 않는다(사용자가 고른 탭을 덮어쓰지 않음).
+  // 보유 캐릭터가 어긋날 수 있어 보정한다. 캐릭터 목록이 처음 로딩된
+  // 그 순간에만(didRestoreSelectionRef) 마지막으로 보던 탭을 로컬
+  // 저장소에서 복원한다 — 둘 다 있을 때도 적용되어야 하는 보정이라,
+  // 이후의 "선택한 탭이 더 이상 존재하지 않을 때만 보정" 로직과는
+  // 별도로 한 번만 돈다(사용자가 직접 고른 탭을 나중에 덮어쓰지 않음).
+  const didRestoreSelectionRef = useRef(false)
   useEffect(() => {
     if (characters.length === 0) return
+    if (!didRestoreSelectionRef.current) {
+      didRestoreSelectionRef.current = true
+      const remembered = user ? readLastCompanion(user.id) : null
+      if (remembered && remembered !== selected && characters.some((c) => c.companionType === remembered)) {
+        setSelected(remembered)
+        return
+      }
+    }
     if (characters.some((c) => c.companionType === selected)) return
     setSelected(characters[0].companionType)
-  }, [characters, selected])
+  }, [characters, selected, user])
+
+  // 탭 전환 UI(수동 클릭)와 온보딩 완료 양쪽에서 똑같이 쓰는, "선택한
+  // 캐릭터를 바꾸고 다음 재접속을 위해 기억해두는" 단일 경로.
+  const selectCompanion = (companionType: CompanionType) => {
+    setSelected(companionType)
+    if (user) writeLastCompanion(user.id, companionType)
+  }
 
   // 캐릭터를 전환할 때마다 "오늘의 목표"/"최근 기록"/4개 스탯 게이지에
   // 쓸 가벼운 데이터를 조용히 미리 불러온다 — 셋 다 이미 있는 읽기
@@ -369,7 +416,7 @@ export default function GrowPage() {
         showBubble(toddlerProfessionGreeting(profile.profession))
       }
       wallet.grantInitialAllowance()
-      setSelected(companionType)
+      selectCompanion(companionType)
       setOnboardingFor(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '캐릭터를 만드는 중 오류가 발생했어요.')
@@ -555,7 +602,7 @@ export default function GrowPage() {
               {characters.map((c) => (
                 <button
                   key={c.companionType}
-                  onClick={() => setSelected(c.companionType)}
+                  onClick={() => selectCompanion(c.companionType)}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
                     selected === c.companionType ? 'bg-white text-amber-700 shadow-sm' : 'text-amber-500/70'
                   }`}
