@@ -54,10 +54,16 @@ export default function InteractionPanel({
   character,
   profession,
   onPoseChange,
+  onKnowledgeSaved,
 }: {
   character: Character
   profession: ProfessionId
   onPoseChange?: (pose: CharacterPose) => void
+  // 지시서(가르치기 완료 후 자동 식사 이벤트): 지식 저장이 성공할
+  // 때마다 호출부(GrowPage)에 알려준다 — 몇 번째 저장인지, 식사
+  // 이벤트를 띄울지는 전부 GrowPage가 결정하고, 이 패널은 "저장
+  // 성공"이라는 사실만 알려준다.
+  onKnowledgeSaved?: () => void
 }) {
   const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
@@ -271,6 +277,7 @@ export default function InteractionPanel({
       )
       pushLine('character', result.savedReply)
       if (result.missionProgress) setMissionProgress(result.missionProgress)
+      onKnowledgeSaved?.()
       setTitle('')
       setContent('')
       setMissionType(null)

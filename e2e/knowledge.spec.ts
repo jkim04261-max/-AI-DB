@@ -37,6 +37,12 @@ async function mockCharacterApi(
     onStudyGenerate?: (route: Route) => Promise<void>
     onListMessages?: (route: Route) => Promise<void>
     onMissions?: (route: Route) => Promise<void>
+    // 지시서(가르치기 완료 후 자동 식사 이벤트): 체험판 가상 용돈
+    // 차감을 검증하려면 온보딩(캐릭터 생성 POST + 직업 저장 PATCH)도
+    // 거쳐야 한다 — 이 두 액션 없는 쿼리는 action 파라미터가 없어
+    // 기존 라우팅 분기에 없었다.
+    onCreate?: (route: Route) => Promise<void>
+    onSetProfession?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -86,6 +92,14 @@ async function mockCharacterApi(
         contentType: 'application/json',
         body: JSON.stringify({ characters: (options.characters ?? []).map((c) => withAgeTier(c as Record<string, unknown>)) }),
       })
+      return
+    }
+    if (method === 'POST' && !action && options.onCreate) {
+      await options.onCreate(route)
+      return
+    }
+    if (method === 'PATCH' && !action && options.onSetProfession) {
+      await options.onSetProfession(route)
       return
     }
     // PR #63: InteractionPanel이 열릴 때마다 6미션 진행상황을 조회한다 —
@@ -871,4 +885,151 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
 
   await page.getByRole('button', { name: '누리 스스로 공부하기' }).click()
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숲 생태 관찰 팁')
+})
+
+// 지시서(가르치기 완료 후 자동 식사 이벤트): 8~9살 단계에서 지식 저장이
+// 3번 쌓이면 패널이 자동으로 닫히고 "배고프다" → "맛있게 먹었다" 말풍선
+// 이벤트가 이어진다. NURI_ACCOUNTANT는 level을 지정하지 않아 기본값으로
+// toddler(8~9살) 단계다.
+test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach panel and shows hunger then meal speech bubbles', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  // 3번째 저장 직후 패널이 자동으로 닫히고, 캐릭터가 배고프다는 말풍선을 띄운다.
+  await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
+  await expect(page.getByTestId('speech-bubble')).toContainText('배가 고파요')
+  // 잠시 뒤 '이모네김밥'을 맛있게 먹었다는 말풍선으로 이어진다.
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+})
+
+// 위 테스트와 같은 식사 이벤트지만, Stage 1 온보딩으로 체험판 가상
+// 용돈을 먼저 받은 캐릭터라면 김밥값 10,000원이 실제로(체험판 안에서)
+// 차감되는지까지 확인한다.
+test('the meal event deducts 10,000원 from the mock allowance granted during onboarding', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-wallet',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
 })

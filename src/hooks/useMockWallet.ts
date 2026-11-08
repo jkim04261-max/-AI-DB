@@ -31,7 +31,20 @@ export function useMockWallet() {
     setBalanceWon(null)
   }, [])
 
-  return { balanceWon, grantInitialAllowance, resetWallet }
+  // 지시서(가르치기 완료 후 자동 식사 이벤트): 체험판 용돈에서 식사비
+  // 등을 차감하는 동작 — grantInitialAllowance/resetWallet과 같은
+  // 원칙으로, 실제 DB에는 전혀 반영되지 않는다. 지급 전(null)이거나
+  // 잔액이 모자라면 아무 것도 바꾸지 않고 false를 돌려준다.
+  const spend = useCallback(
+    (amountWon: number): boolean => {
+      if (balanceWon === null || balanceWon < amountWon) return false
+      setBalanceWon(balanceWon - amountWon)
+      return true
+    },
+    [balanceWon],
+  )
+
+  return { balanceWon, grantInitialAllowance, resetWallet, spend }
 }
 
 export type MockWallet = ReturnType<typeof useMockWallet>

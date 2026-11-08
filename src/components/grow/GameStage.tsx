@@ -28,6 +28,10 @@ const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
   happy: '✨',
   sad: '💧',
   studying: '📖',
+  // 지시서(가르치기 완료 후 자동 식사 이벤트): 기본 일러스트 배경은
+  // 포즈별로 다른 그림을 그리지 않고(정적 전신 이미지) 이 기분 이모지
+  // 오버레이로만 포즈를 표현하므로, 'eating'도 같은 방식으로 추가한다.
+  eating: '🍙',
 }
 
 // PR #52: 일러스트 모드에서 쓰는 연령대 배지 — CharacterSprite(CSS 모드)
