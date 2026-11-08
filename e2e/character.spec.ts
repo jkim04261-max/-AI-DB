@@ -102,6 +102,11 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  // Stage 1(오프닝 프로필): 이제 클릭 즉시 생성되지 않고, 이름·생일·
+  // 거주지역·직업을 입력받는 화면을 먼저 거친다 — 전부 선택값이라
+  // 이름(기본값 "누리")만 그대로 두고 바로 시작해도 된다.
+  await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
+  await page.getByTestId('opening-profile-start-button').click()
 
   // PR #46: 캐릭터 이름은 전환 탭과 HUD 양쪽에 보이므로, 스프라이트의
   // 고유한 접근성 이름으로 "누리가 떴다"를 확인한다(가장 모호하지 않은
@@ -110,6 +115,89 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   await expect(page.getByText('어린이', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  // Stage 1: 온보딩을 거치면 체험판 가상 용돈 1,000,000원이 즉시 뜬다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+})
+
+// Stage 1(오프닝 프로필): 취소하면 캐릭터가 생성되지 않고 그대로
+// 생성 버튼 화면으로 돌아간다.
+test('cancelling the opening profile screen creates no character', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let postCalled = false
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      postCalled = true
+      return false
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
+  await page.getByTestId('opening-profile-cancel-button').click()
+
+  await expect(page.getByTestId('opening-profile-screen')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toBeVisible()
+  expect(postCalled).toBe(false)
+})
+
+// Stage 1: 자유 입력한 직업이 실제로 PATCH(?action 없는 PATCH)에
+// profession='custom' + 입력한 라벨로 실려가는지 확인한다 — PR #65의
+// 자유 직업 입력 경로를 온보딩에서도 그대로 재사용한다는 증거.
+test('entering a profession in the opening profile screen saves it as a free-text profession', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let patchBody: { companionType?: string; profession?: string; customProfessionLabel?: string } | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    if (method === 'PATCH') {
+      patchBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: 'nuri',
+            stage: 'child',
+            profession: 'custom',
+            custom_profession_label: '숲해설가',
+            level: 1,
+            exp: 0,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  await expect(page.getByTestId('profession-badge')).toHaveText('숲해설가')
+  expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
 })
 
 test('a user who already has both characters sees no creation UI, just their cards', async ({ page }) => {
