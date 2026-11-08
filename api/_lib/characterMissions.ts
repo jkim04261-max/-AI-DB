@@ -88,9 +88,16 @@ export interface EvolveResult {
 
 // 저장/퀴즈/시험 등 XP가 바뀔 수 있는 모든 액션 뒤에 공통으로 호출한다.
 // level은 그 액션의 XP 반영이 끝난 *이후* 값을 넘겨야 한다(applyExpGain의
-// 결과) — 레벨 조건(AGE_TIER_MIN_LEVEL)과 미션 조건(6개 확정) 둘 다
-// 만족해야만 실제로 진화한다(사용자 승인: "레벨 조건 유지 + 미션 게이트
-// 추가").
+// 결과) — teen 이후 단계는 레벨 조건(AGE_TIER_MIN_LEVEL)과 미션 조건(6개
+// 확정) 둘 다 만족해야만 실제로 진화한다(사용자 승인: "레벨 조건 유지 +
+// 미션 게이트 추가").
+//
+// 지시서 #03(8~9살 시험 시스템 전면 개편): toddler(8~9살)→teen(10대) 첫
+// 진화만은 예외 — 유형별(예시 문제 풀이형=subjective/객관식=objective/
+// 노하우 설계형=knowhow) 2개씩 총 6개를 확정 저장하면, 레벨이 얼마든
+// (AGE_TIER_MIN_LEVEL.teen=5에 못 미쳐도) 그 즉시 진화한다. 그 다음
+// 단계(teen→junior_20s 이후)는 명시적으로 요청받은 범위 밖이라 기존
+// 레벨+미션 이중 게이트를 그대로 둔다.
 //
 // pinnedTier가 null(아직 한 번도 이 게이트를 평가받은 적 없는 캐릭터 —
 // 이 기능이 생기기 전부터 있던 모든 캐릭터 포함)이면, 그 "첫 평가" 시점의
@@ -117,7 +124,10 @@ export async function maybeEvolveAgeTier(userId: number, characterId: number, le
   let newTier: AgeTier | null = null
   for (;;) {
     const next = nextAgeTier(tier)
-    if (!next || level < AGE_TIER_MIN_LEVEL[next]) break
+    if (!next) break
+    // 지시서 #03: toddler → teen 진입만은 레벨 조건을 보지 않는다.
+    const levelSatisfied = tier === 'toddler' ? true : level >= AGE_TIER_MIN_LEVEL[next]
+    if (!levelSatisfied) break
     const progress = await getMissionProgress(userId, characterId, tier)
     if (!progress.allConfirmed) break
     await sql`
