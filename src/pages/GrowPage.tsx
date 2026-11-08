@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Briefcase } from 'lucide-react'
+import { Briefcase, BookOpen } from 'lucide-react'
+import GrowGuideSheet from '../components/grow/GrowGuideSheet'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType } from '../context/GrowthContext'
 import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS, type ProfessionId } from '../data/characterProfessions'
@@ -70,6 +71,11 @@ export default function GrowPage() {
   const [onboardingFor, setOnboardingFor] = useState<CompanionType | null>(null)
   const [onboardingSubmitting, setOnboardingSubmitting] = useState(false)
   const [showProfessionPicker, setShowProfessionPicker] = useState(false)
+  // 지시서("누리AI 키우기 간단 설명서"): 성장 규칙/직업 변경/미션
+  // 진행 방법을 보여주는 읽기 전용 도움말 패널 — 다른 로직과 완전히
+  // 독립된 단일 boolean 상태라, 미션/진화/직업 변경 흐름에는 전혀
+  // 영향을 주지 않는다.
+  const [showGuide, setShowGuide] = useState(false)
   // PR #65: 'custom'으로 바꾸려는 변경 확인 모달에서는 라벨이 없으니
   // (PROFESSION_LABEL엔 'custom' 전용 고정 문구만 있다) 입력한 텍스트를
   // 함께 들고 있어야 확인 문구에 그대로 보여줄 수 있다.
@@ -478,22 +484,38 @@ export default function GrowPage() {
           <img src="/assets/logo.png" alt="누리AI 로고" className="h-6 w-6 rounded-lg object-contain" />
           <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
         </div>
-        {characters.length > 0 && (
-          <div className="flex gap-1 rounded-full bg-amber-100 p-1">
-            {characters.map((c) => (
-              <button
-                key={c.companionType}
-                onClick={() => setSelected(c.companionType)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  selected === c.companionType ? 'bg-white text-amber-700 shadow-sm' : 'text-amber-500/70'
-                }`}
-              >
-                {COMPANION_LABEL[c.companionType]}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* 지시서("누리AI 키우기 간단 설명서"): 게임 규칙·직업 변경·
+              미션 진행 방법을 바로 확인할 수 있는 도움말 버튼 —
+              캐릭터 유무와 무관하게 항상 보인다. */}
+          <button
+            type="button"
+            onClick={() => setShowGuide(true)}
+            data-testid="grow-guide-button"
+            aria-label="누리AI 키우기 간단 설명서"
+            className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-300 bg-gradient-to-b from-amber-100 to-amber-200 text-amber-700 shadow-[0_2px_0_rgba(146,64,14,0.3)] transition hover:scale-[1.06] hover:border-amber-400 active:scale-95"
+          >
+            <BookOpen size={16} />
+          </button>
+          {characters.length > 0 && (
+            <div className="flex gap-1 rounded-full bg-amber-100 p-1">
+              {characters.map((c) => (
+                <button
+                  key={c.companionType}
+                  onClick={() => setSelected(c.companionType)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    selected === c.companionType ? 'bg-white text-amber-700 shadow-sm' : 'text-amber-500/70'
+                  }`}
+                >
+                  {COMPANION_LABEL[c.companionType]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {showGuide && <GrowGuideSheet onClose={() => setShowGuide(false)} />}
 
       {/* PR #01(직업 변경 버튼 전면 이동): 기존엔 화면 맨 아래 작은
           텍스트 링크였다 — 언제든 눈에 띄고 누르기 쉽도록 화면 맨
