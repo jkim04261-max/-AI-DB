@@ -1039,3 +1039,37 @@ test('other sheets (e.g. 성장 보기) keep the original fantasy-wood sheet sty
   await expect(dialog).toHaveClass(/border-\[#d4af37\]/)
   await expect(dialog).not.toHaveClass(/border-cyan-400\/50/)
 })
+
+// 지시서("누리AI 키우기 간단 설명서" UI 추가): 도움말 버튼을 누르면
+// 성장 규칙(토들러→10대 진화 조건)·직업 변경 방법·미션 진행 방법이
+// 요약된 패널이 뜨고, 닫기 버튼으로 닫힌다.
+test('the grow guide button opens a help panel explaining evolution rules, profession change, and mission steps', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+
+  await page.goto('/grow')
+  await page.getByTestId('grow-guide-button').click()
+
+  const dialog = page.getByRole('dialog', { name: '누리AI 키우기 간단 설명서', exact: false })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('예시 문제 풀이형 2개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('객관식 2개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('노하우 설계형 2개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('직업 변경', { exact: false }).first()).toBeVisible()
+
+  await dialog.getByRole('button', { name: '닫기' }).click()
+  await expect(dialog).not.toBeVisible()
+})
+
+test('the grow guide button is visible even before a character has been created', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('grow-guide-button')).toBeVisible()
+})
