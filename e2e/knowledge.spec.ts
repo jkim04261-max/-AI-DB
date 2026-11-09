@@ -1104,3 +1104,107 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
   await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0)
   await expect(page.getByTestId('speech-bubble')).toContainText('다녀왔어요')
 })
+
+// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사(1번째 3회) → 서점
+// 외출(2번째 3회)에 이어, 3번째 3회(누적 9회)는 알바 이벤트가 뜨고
+// 체험판 용돈이 늘어나야 한다. 온보딩으로 받은 1,000,000원에서 식사비
+// 10,000원이 빠지고 알바 수입 20,000원이 더해지면 1,010,000원이다
+// (서점 이벤트의 +300P는 용돈이 아닌 별도 체험판 골드라 영향 없음).
+test('a third round of 3 saves (9 total) triggers the part-time job event and adds 20,000원 to the mock allowance', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-job',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  await teachThreeTimes('round0') // 식사: -10,000원
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
+
+  await teachThreeTimes('round1') // 서점: 용돈이 아니라 체험판 골드 +300P
+  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
+  await page.getByTestId('bookstore-leave-review-button').click()
+  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 5000 })
+
+  await teachThreeTimes('round2') // 알바: +20,000원
+  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
+  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
+  await expect(page.getByTestId('speech-bubble')).toContainText('아르바이트해서')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,010,000원')
+})

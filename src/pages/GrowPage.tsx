@@ -104,6 +104,13 @@ const BOOKSTORE_NAME = '늘봄서점 자양점'
 const BOOKSTORE_REWARD_ITEM = '인체해부도 교구'
 const BOOKSTORE_POINT_REWARD = 300
 
+// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사·서점 이벤트와 같은
+// "3회 저장" 신호를 3단계로 돌려(식사 → 서점 → 알바 → 식사 → ...)
+// 세 번째 자리에 넣는다. 체험판 용돈(useMockWallet)에만 더해지고,
+// 실제 character.exp/DB는 건드리지 않는다 — 지출(식사)과 짝을 이루는
+// 수입 이벤트.
+const PART_TIME_JOB_EARNING_WON = 20_000
+
 // PR #46: /grow를 카드형 웹페이지에서 캐릭터 중심 게임 화면으로
 // 재구성. 학습·검증·퀴즈·시험·XP·DB 저장 로직은 전부 기존
 // GrowthContext/InteractionPanel/ExamPanel을 그대로 재사용하고(요청 9),
@@ -155,6 +162,11 @@ export default function GrowPage() {
   // 지시서(서점 외출 미션): 가는 길/도착/오는 길 3단계 — null이면
   // 외출 중이 아님.
   const [bookstoreOuting, setBookstoreOuting] = useState<BookstoreOutingStage | null>(null)
+  // 지시서(알바/경제 활동 이벤트): 잠깐 "일하는 중" 턴 연출 중인지 —
+  // 기존 TurnTransition을 그대로 재사용한다.
+  const [workingOnJob, setWorkingOnJob] = useState(false)
+  // 알바 보상으로 뜨는 "+N원" 팝업 — pointsPopup과 같은 순수 연출용.
+  const [moneyPopup, setMoneyPopup] = useState<number | null>(null)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -204,10 +216,11 @@ export default function GrowPage() {
   // DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면 아래 효과에서
   // 0으로 되돌린다.
   const toddlerSaveCountRef = useRef(0)
-  // 지시서(서점 외출 미션): 식사 이벤트와 서점 외출 이벤트가 매번 같은
-  // "3회 저장" 신호를 공유하므로, 둘이 번갈아 뜨도록 토글한다(0=다음은
-  // 식사, 1=다음은 서점) — 캐릭터 전환 시 함께 초기화한다.
-  const outingCycleRef = useRef<0 | 1>(0)
+  // 지시서(서점 외출 미션, 알바/경제 활동 이벤트): 식사·서점·알바
+  // 세 이벤트가 매번 같은 "3회 저장" 신호를 공유하므로, 셋이 순서대로
+  // 돌아가며 뜨도록 한다(0=다음은 식사, 1=다음은 서점, 2=다음은 알바) —
+  // 캐릭터 전환 시 함께 초기화한다.
+  const outingCycleRef = useRef<0 | 1 | 2>(0)
   // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
   // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
@@ -565,9 +578,31 @@ export default function GrowPage() {
     setBookstoreOuting('walking-back')
   }
 
+  // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 패널을 닫고 짧게
+  // "일하는 중" 연출(기존 TurnTransition 재사용)을 보여준 뒤, 체험판
+  // 용돈에 수입을 더한다. 지갑이 아직 없는 캐릭터(Stage 1 온보딩 전)는
+  // 연출만 보여주고 금액 변화는 건너뛴다(식사/서점 이벤트와 동일 원칙).
+  const triggerPartTimeJob = () => {
+    setOpenSheet(null)
+    showBubble('용돈을 벌고 싶어요! 잠깐 아르바이트하고 올게요!')
+    const t1 = setTimeout(() => {
+      setWorkingOnJob(true)
+      const t2 = setTimeout(() => {
+        setWorkingOnJob(false)
+        wallet.earn(PART_TIME_JOB_EARNING_WON)
+        setMoneyPopup(PART_TIME_JOB_EARNING_WON)
+        const t3 = setTimeout(() => setMoneyPopup(null), 1800)
+        outingTimeoutsRef.current.push(t3)
+        showBubble(`아르바이트해서 ${PART_TIME_JOB_EARNING_WON.toLocaleString('ko-KR')}원 벌었어요! 💰`)
+      }, 1800)
+      outingTimeoutsRef.current.push(t2)
+    }, 1400)
+    outingTimeoutsRef.current.push(t1)
+  }
+
   // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 8~9살
   // 단계에서만 세고, 지정된 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다
-  // 식사 이벤트와 서점 외출 이벤트를 번갈아 띄운 뒤 다시 0부터 센다.
+  // 식사 → 서점 외출 → 알바 이벤트를 순서대로 띄운 뒤 다시 0부터 센다.
   const handleKnowledgeSaved = () => {
     if (!character || character.ageTier !== 'toddler') return
     toddlerSaveCountRef.current += 1
@@ -576,9 +611,12 @@ export default function GrowPage() {
       if (outingCycleRef.current === 0) {
         outingCycleRef.current = 1
         triggerMealBreak()
+      } else if (outingCycleRef.current === 1) {
+        outingCycleRef.current = 2
+        triggerBookstoreOuting()
       } else {
         outingCycleRef.current = 0
-        triggerBookstoreOuting()
+        triggerPartTimeJob()
       }
     }
   }
@@ -616,10 +654,10 @@ export default function GrowPage() {
   // 모를 경우를 대비해 여기서도 한 번 더 막는다(방어적 가드).
   const examSupported = character?.profession ? EXAM_SUPPORTED_PROFESSIONS.has(character.profession) : false
   const handleMenuSelect = (action: GameMenuAction) => {
-    // 지시서(서점 외출 미션): 외출 중(집에 없음)에는 어떤 메뉴도 새로
-    // 열지 않는다 — 가게에 다녀오는 동안 가르치기 등을 열면 연출과
-    // 화면이 서로 겹친다.
-    if (bookstoreOuting) return
+    // 지시서(서점 외출 미션, 알바/경제 활동 이벤트): 외출·알바 중(집에
+    // 없음)에는 어떤 메뉴도 새로 열지 않는다 — 다녀오는 동안 가르치기
+    // 등을 열면 연출과 화면이 서로 겹친다.
+    if (bookstoreOuting || workingOnJob) return
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
     // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외).
     if (!character?.profession && action !== 'customize' && action !== 'market') return
@@ -805,6 +843,14 @@ export default function GrowPage() {
                       +{pointsPopup}P 적립!
                     </span>
                   )}
+                  {moneyPopup !== null && (
+                    <span
+                      data-testid="money-popup"
+                      className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl"
+                    >
+                      +{moneyPopup.toLocaleString('ko-KR')}원 💰
+                    </span>
+                  )}
                   {leveledUpTo !== null && (
                     <span
                       data-testid="level-up-banner"
@@ -821,6 +867,7 @@ export default function GrowPage() {
                     </span>
                   )}
                   {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}
+                  {workingOnJob && <TurnTransition label="아르바이트하는 중..." />}
                   {bookstoreOuting && (
                     <BookstoreOutingOverlay
                       stage={bookstoreOuting}
