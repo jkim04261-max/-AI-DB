@@ -44,7 +44,15 @@ export function useMockWallet() {
     [balanceWon],
   )
 
-  return { balanceWon, grantInitialAllowance, resetWallet, spend }
+  // 지시서(알바/경제 활동 이벤트): 체험판 용돈에 수입을 더하는 동작 —
+  // spend()의 반대 방향이지만 같은 원칙(실제 DB 미반영). 지급 전(null)
+  // 캐릭터는 아직 용돈 지갑 자체가 없으므로 그대로 null로 둔다(소비와
+  // 동일하게 "지갑이 없으면 이 이벤트의 금전 부분만 건너뛴다" 패턴).
+  const earn = useCallback((amountWon: number) => {
+    setBalanceWon((prev) => (prev === null ? prev : prev + amountWon))
+  }, [])
+
+  return { balanceWon, grantInitialAllowance, resetWallet, spend, earn }
 }
 
 export type MockWallet = ReturnType<typeof useMockWallet>
