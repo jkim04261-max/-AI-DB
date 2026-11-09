@@ -246,3 +246,33 @@ body {
     filter: brightness(1);
   }
 }
+
+/* 지시서(서점 외출 미션): 2.5D 걷기 연출 — BookstoreOutingOverlay가
+   왕복(가는 길/오는 길) 모두에 쓰는 가로 이동 + 통통 튀는 걸음걸이.
+   왼쪽→오른쪽으로 고정해두고, "오는 길"에는 overlay 쪽에서
+   scaleX(-1)로 좌우만 뒤집어 반대 방향으로 걷는 것처럼 보이게 한다. */
+@keyframes grow-walk-across {
+  0% {
+    transform: translateX(-10%) translateY(0);
+  }
+  25% {
+    transform: translateX(30%) translateY(-6px);
+  }
+  50% {
+    transform: translateX(70%) translateY(0);
+  }
+  75% {
+    transform: translateX(100%) translateY(-6px);
+  }
+  100% {
+    transform: translateX(130%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grow-walk-sprite {
+    animation: none !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+  }
+}

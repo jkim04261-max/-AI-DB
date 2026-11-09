@@ -69,6 +69,14 @@ export function useMockInventory() {
     setEquippedOutfitState((prev) => ({ ...prev, [companionType]: defaultOutfitFor(companionType) }))
   }, [])
 
+  // 지시서(서점 외출 미션): 외출 이벤트 보상("포인트 적립")에 쓰는 지급
+  // 함수 — purchaseOutfit/purchaseBackground와 같은 체험판 골드 잔액에
+  // 더한다. 실제 character.exp(ResourceBar의 "포인트")는 서버 권위값이라
+  // 건드리지 않고, 이미 분리해둔 이 체험판 재화만 늘린다.
+  const addGold = useCallback((amount: number) => {
+    setGold((g) => g + amount)
+  }, [])
+
   return {
     gold,
     ownedOutfits,
@@ -80,6 +88,7 @@ export function useMockInventory() {
     equipOutfit,
     equipBackground,
     resetOutfitToDefault,
+    addGold,
   }
 }
 
