@@ -21,6 +21,7 @@ import ProfessionPicker from '../components/grow/ProfessionPicker'
 import TurnTransition from '../components/grow/TurnTransition'
 import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
+import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
@@ -91,6 +92,18 @@ const MEAL_TRIGGER_SAVE_COUNT = 3
 const MEAL_COST_WON = 10_000
 const MEAL_RESTAURANT_LABEL = '이모네김밥'
 
+// 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
+// "8~9살 가르치기 3회 저장마다" 신호를 재사용하되, 번갈아(식사 →
+// 서점 → 식사 → 서점...) 띄워서 서로 겹치지 않게 한다. 실제 네이버
+// 스마트플레이스 API 연동이나 실제 리뷰 게시는 하지 않는다 — API 키가
+// 없고, 실제 존재하는 특정 서점 체인 이름을 그대로 쓰면서 "진짜 리뷰를
+// 남긴다"처럼 보이면 안 되기 때문에(CLAUDE.md 9번 지식재산권 지침),
+// 이 체험판 전용 가상 서점으로 구현했다 — 자세한 설계 의도는
+// BookstoreOutingOverlay.tsx 참고.
+const BOOKSTORE_NAME = '늘봄서점 자양점'
+const BOOKSTORE_REWARD_ITEM = '인체해부도 교구'
+const BOOKSTORE_POINT_REWARD = 300
+
 // PR #46: /grow를 카드형 웹페이지에서 캐릭터 중심 게임 화면으로
 // 재구성. 학습·검증·퀴즈·시험·XP·DB 저장 로직은 전부 기존
 // GrowthContext/InteractionPanel/ExamPanel을 그대로 재사용하고(요청 9),
@@ -135,6 +148,13 @@ export default function GrowPage() {
   // (InteractionPanel/ExamPanel을 전혀 건드리지 않는 기존 leveledUpTo
   // 패턴과 동일한 원칙).
   const [evolvedTo, setEvolvedTo] = useState<AgeTier | null>(null)
+  // 지시서(서점 외출 미션): 외출 보상으로 뜨는 "+300P" 팝업 — 실제
+  // character.exp(ResourceBar의 "포인트")는 서버 권위값이라 건드리지
+  // 않고, 순수 연출용 숫자다(아래 triggerBookstoreOuting 참고).
+  const [pointsPopup, setPointsPopup] = useState<number | null>(null)
+  // 지시서(서점 외출 미션): 가는 길/도착/오는 길 3단계 — null이면
+  // 외출 중이 아님.
+  const [bookstoreOuting, setBookstoreOuting] = useState<BookstoreOutingStage | null>(null)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -175,11 +195,19 @@ export default function GrowPage() {
   // 먹는 중" 두 단계로 이어지는 연출에 쓰는 타임아웃들 — 언마운트 시
   // 전부 정리해야 한다(여러 개가 쌓일 수 있어 배열로 관리).
   const mealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  // 지시서(서점 외출 미션): "가는 길 → 도착 → 오는 길" 연출에 쓰는
+  // 타임아웃들 — mealTimeoutsRef와 같은 이유로 배열 관리 + 언마운트
+  // 시 정리한다.
+  const outingTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
   // 8~9살 단계에서 가르치기/스스로 공부하기 저장이 몇 번 쌓였는지 — 화면에
   // 표시하지 않는 내부 카운터라 리렌더를 유발할 필요가 없어 ref로 둔다.
   // DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면 아래 효과에서
   // 0으로 되돌린다.
   const toddlerSaveCountRef = useRef(0)
+  // 지시서(서점 외출 미션): 식사 이벤트와 서점 외출 이벤트가 매번 같은
+  // "3회 저장" 신호를 공유하므로, 둘이 번갈아 뜨도록 토글한다(0=다음은
+  // 식사, 1=다음은 서점) — 캐릭터 전환 시 함께 초기화한다.
+  const outingCycleRef = useRef<0 | 1>(0)
   // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
   // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
@@ -232,6 +260,7 @@ export default function GrowPage() {
     setKnowledgeStats({ total: 0, aiGenerated: 0 })
     setMessageTotal(0)
     toddlerSaveCountRef.current = 0
+    outingCycleRef.current = 0
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -383,6 +412,8 @@ export default function GrowPage() {
       if (turnTransitionTimeoutRef.current) clearTimeout(turnTransitionTimeoutRef.current)
       const mealTimeouts = mealTimeoutsRef.current
       mealTimeouts.forEach(clearTimeout)
+      const outingTimeouts = outingTimeoutsRef.current
+      outingTimeouts.forEach(clearTimeout)
     }
   }, [])
 
@@ -485,15 +516,70 @@ export default function GrowPage() {
     mealTimeoutsRef.current.push(t1)
   }
 
+  // 지시서(서점 외출 미션): 패널을 닫고 "+300P" 팝업 + 서점으로 가야
+  // 하는 이유를 말풍선으로 띄운 뒤, 걸어가는 연출 → 도착(리뷰 남기기
+  // 카드) → 리뷰 제출 시 교구 획득 → 걸어오는 연출 → 귀가로 이어진다.
+  // handleBookstoreReviewSubmit이 사용자의 "리뷰 남기기" 클릭을 기다려야
+  // 하므로, 식사 이벤트(순수 타임아웃 연쇄)와 달리 중간에 사용자 입력이
+  // 섞인다.
+  const triggerBookstoreOuting = () => {
+    setOpenSheet(null)
+    inventory.addGold(BOOKSTORE_POINT_REWARD)
+    setPointsPopup(BOOKSTORE_POINT_REWARD)
+    const popupTimeout = setTimeout(() => setPointsPopup(null), 1800)
+    outingTimeoutsRef.current.push(popupTimeout)
+    showBubble('한의사가 되기 위해 인체해부도가 필요해요! 서점에 다녀올게요!')
+    const t1 = setTimeout(() => {
+      setBookstoreOuting('walking-there')
+    }, 1400)
+    outingTimeoutsRef.current.push(t1)
+  }
+
+  // "가는 길" 걷기 애니메이션이 한 바퀴(2초) 끝나면 도착 카드로 넘어간다
+  // — BookstoreOutingOverlay 쪽 CSS 애니메이션 길이와 맞춘 고정 지연.
+  useEffect(() => {
+    if (bookstoreOuting !== 'walking-there') return
+    const t = setTimeout(() => {
+      setBookstoreOuting('arrived')
+      showBubble(`${BOOKSTORE_NAME}에 도착했어요!`)
+    }, 2000)
+    outingTimeoutsRef.current.push(t)
+    return () => clearTimeout(t)
+  }, [bookstoreOuting])
+
+  // "오는 길"도 같은 길이만큼 걷고 나면 외출을 완전히 종료한다.
+  useEffect(() => {
+    if (bookstoreOuting !== 'walking-back') return
+    const t = setTimeout(() => {
+      setBookstoreOuting(null)
+      showBubble('다녀왔어요!')
+    }, 2000)
+    outingTimeoutsRef.current.push(t)
+    return () => clearTimeout(t)
+  }, [bookstoreOuting])
+
+  // 도착 카드의 "⭐ 리뷰 남기고 교구 받기" 버튼 — 실제 네이버 리뷰를
+  // 게시하지 않는, 이 체험판 안에서만 끝나는 보상 트리거다.
+  const handleBookstoreReviewSubmit = () => {
+    showBubble(`${BOOKSTORE_REWARD_ITEM}를 손에 넣었어요! 다시 집으로 돌아갈게요.`)
+    setBookstoreOuting('walking-back')
+  }
+
   // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 8~9살
-  // 단계에서만 세고, 지정된 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채우면 위
-  // 식사 이벤트를 띄우고 다시 0부터 센다.
+  // 단계에서만 세고, 지정된 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다
+  // 식사 이벤트와 서점 외출 이벤트를 번갈아 띄운 뒤 다시 0부터 센다.
   const handleKnowledgeSaved = () => {
     if (!character || character.ageTier !== 'toddler') return
     toddlerSaveCountRef.current += 1
     if (toddlerSaveCountRef.current >= MEAL_TRIGGER_SAVE_COUNT) {
       toddlerSaveCountRef.current = 0
-      triggerMealBreak()
+      if (outingCycleRef.current === 0) {
+        outingCycleRef.current = 1
+        triggerMealBreak()
+      } else {
+        outingCycleRef.current = 0
+        triggerBookstoreOuting()
+      }
     }
   }
 
@@ -530,6 +616,10 @@ export default function GrowPage() {
   // 모를 경우를 대비해 여기서도 한 번 더 막는다(방어적 가드).
   const examSupported = character?.profession ? EXAM_SUPPORTED_PROFESSIONS.has(character.profession) : false
   const handleMenuSelect = (action: GameMenuAction) => {
+    // 지시서(서점 외출 미션): 외출 중(집에 없음)에는 어떤 메뉴도 새로
+    // 열지 않는다 — 가게에 다녀오는 동안 가르치기 등을 열면 연출과
+    // 화면이 서로 겹친다.
+    if (bookstoreOuting) return
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
     // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외).
     if (!character?.profession && action !== 'customize' && action !== 'market') return
@@ -707,6 +797,14 @@ export default function GrowPage() {
                       +{xpPopup} XP
                     </span>
                   )}
+                  {pointsPopup !== null && (
+                    <span
+                      data-testid="points-popup"
+                      className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-emerald-300 drop-shadow-[0_0_10px_rgba(110,231,183,0.8)] sm:text-2xl"
+                    >
+                      +{pointsPopup}P 적립!
+                    </span>
+                  )}
                   {leveledUpTo !== null && (
                     <span
                       data-testid="level-up-banner"
@@ -723,6 +821,14 @@ export default function GrowPage() {
                     </span>
                   )}
                   {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}
+                  {bookstoreOuting && (
+                    <BookstoreOutingOverlay
+                      stage={bookstoreOuting}
+                      companionType={character.companionType}
+                      storeName={BOOKSTORE_NAME}
+                      onLeaveReview={handleBookstoreReviewSubmit}
+                    />
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2 bg-gradient-to-b from-amber-900 to-amber-950 p-3">

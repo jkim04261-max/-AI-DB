@@ -1033,3 +1033,74 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
 })
+
+// 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
+// "3회 저장" 신호를 공유하며 번갈아 뜬다 — 1번째 3회(round 0)는 식사,
+// 2번째 3회(round 1, 누적 6회)는 서점 외출이어야 한다.
+test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, walk there, review card, reward, walk back', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-bookstore',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  // 1번째 3회 — 식사 이벤트(기존 동작, 여기서는 지나가는 것만 확인).
+  await teachThreeTimes('round0')
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+
+  // 2번째 3회(누적 6회) — 서점 외출 이벤트.
+  await teachThreeTimes('round1')
+
+  await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
+  await expect(page.getByTestId('points-popup')).toContainText('+300P')
+  await expect(page.getByTestId('bookstore-outing-overlay')).toBeVisible()
+  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
+
+  await page.getByTestId('bookstore-leave-review-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('인체해부도')
+  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('speech-bubble')).toContainText('다녀왔어요')
+})
