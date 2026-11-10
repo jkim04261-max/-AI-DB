@@ -46,10 +46,10 @@ export default function CustomizationRoom({
   // 계속 SVG를 쓴다(GameStage.tsx와 같은 조건 — 정적 사진으로는 옷을
   // 갈아입혀도 반영할 수 없다).
   const outfitHasVisualOverride = Boolean(equippedOutfitId && OUTFIT_PALETTE_OVERRIDE[equippedOutfitId as OutfitId])
-  // PR #56: 연령대별 전신 원화는 아직 없어서(characterFullBody.ts 참고)
-  // ageTier는 더 이상 이미지 자체를 고르지 않는다 — "지정됐는지"만
-  // 기존처럼 실제 그림 vs SVG 전환 게이트로 쓴다.
-  const portraitSrc = ageTier && !outfitHasVisualOverride ? FULL_BODY_PORTRAIT_SRC[companionType] : null
+  // 지시서(연령대별 성장 캐릭터 이미지 적용): 이제 ageTier로 실제 그림
+  // 자체를 고른다(characterFullBody.ts 참고) — "지정됐는지"만 보던
+  // 기존 게이트는 그대로 두고, 값이 있으면 그 단계의 그림을 쓴다.
+  const portraitSrc = ageTier && !outfitHasVisualOverride ? FULL_BODY_PORTRAIT_SRC[companionType][ageTier] : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -74,7 +74,7 @@ export default function CustomizationRoom({
             data-testid="customization-age-portrait"
             src={portraitSrc}
             alt={`${companionType === 'nuri' ? '누리' : '두리'} 캐릭터`}
-            className="h-[140px] w-[140px] object-contain"
+            className="h-[140px] w-[140px] rounded-xl object-cover ring-2 ring-amber-100/80"
             style={{ filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4))' }}
           />
         ) : (

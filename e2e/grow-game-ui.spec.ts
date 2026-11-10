@@ -610,11 +610,11 @@ test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of t
 // 그림이라 배지/테두리만으로는 "캐릭터 자체가 바뀐다"는 느낌이 약했다
 // — 유저가 실제 화면에서 연령대가 안 바뀐다고 재차 확인해준 뒤,
 // 실제 초상화를 캐릭터 영역 위에 띄우도록 고쳤다.
-// PR #56: 사용자가 제공한 실제 전신 원화(누리/두리 각 한 장)로 교체—
-// 연령대별로 별도 원화는 아직 없어서(characterFullBody.ts 참고) 레벨이
-// 바뀌어도 이미지 자체는 같다(배지/숫자가 바뀌는 건 다른 테스트에서
-// 검증). 같은 전신 원화가 모든 연령대에서 그대로 보이는지 확인한다.
-test('the default (illustrated) lobby shows the real full-body character art, the same image across age tiers (no separate art per tier yet)', async ({ page }) => {
+// 지시서(연령대별 성장 캐릭터 이미지 적용): PR #56까지는 캐릭터당
+// 전신 원화가 한 장뿐이라 레벨이 바뀌어도 이미지 자체는 같았지만,
+// 이제 연령대별 실제 그림이 생겨 toddler/master_50s에서 서로 다른
+// 파일이 뜨는지 직접 검증한다.
+test('the default (illustrated) lobby shows the real character art for the current age tier, switching images as the tier changes', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -624,12 +624,12 @@ test('the default (illustrated) lobby shows the real full-body character art, th
 
   const portrait = page.getByTestId('illustrated-age-portrait-nuri')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-full/)
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
 
   await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 45, exp: 90000 }] })
   await page.reload()
 
-  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-full/)
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-master-50s/)
 })
 
 // CSS 모드(마켓 배경)에서는 캐릭터 자체의 크기가 연령대에 따라 실제로
@@ -676,7 +676,7 @@ test('in a CSS-mode (purchased) background, the character shows the real full-bo
   await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
   const portrait = page.getByTestId('age-scale-wrapper').locator('img')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-full/)
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
 })
 
 // PR #52 요청 2번: 처음 'AI 키우기'에 들어온(아직 직업이 없는) 캐릭터가
@@ -907,7 +907,7 @@ test('the customization room shows the real character portrait instead of the SV
 
   const portrait = page.getByTestId('customization-age-portrait')
   await expect(portrait).toBeVisible()
-  await expect(portrait).toHaveAttribute('src', /nuri-full/)
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
   await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
 })
 
