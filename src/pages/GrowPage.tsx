@@ -111,6 +111,17 @@ const BOOKSTORE_POINT_REWARD = 300
 // 수입 이벤트.
 const PART_TIME_JOB_EARNING_WON = 20_000
 
+// 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힐 때마다 쌓는
+// 누적 횟수로 두 가지 독립된 이벤트를 띄운다 — 3의 배수번째 정답마다
+// 보상(반복), 정확히 5번째 정답에서 간식 이벤트(1회성). 둘 다 체험판
+// 용돈(useMockWallet)에만 영향을 주고, 실제 퀴즈 채점·XP 지급(서버
+// 권위값인 character.exp)은 전혀 건드리지 않는다 — ExamPanel이 이미
+// 서버에서 정답을 채점한 "뒤에" 그 결과만 넘겨받아 반응할 뿐이다.
+const QUIZ_CORRECT_REWARD_INTERVAL = 3
+const QUIZ_CORRECT_REWARD_WON = 30_000
+const QUIZ_SNACK_TRIGGER_COUNT = 5
+const QUIZ_SNACK_COST_WON = 20_000
+
 // PR #46: /grow를 카드형 웹페이지에서 캐릭터 중심 게임 화면으로
 // 재구성. 학습·검증·퀴즈·시험·XP·DB 저장 로직은 전부 기존
 // GrowthContext/InteractionPanel/ExamPanel을 그대로 재사용하고(요청 9),
@@ -222,6 +233,10 @@ export default function GrowPage() {
   // 돌아가며 뜨도록 한다(0=다음은 식사, 1=다음은 서점, 2=다음은 알바) —
   // 캐릭터 전환 시 함께 초기화한다.
   const outingCycleRef = useRef<0 | 1 | 2>(0)
+  // 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힌 누적
+  // 횟수 — knowledgeSaveCountRef와 같은 이유(화면에 직접 안 보이는
+  // 세션 전용 카운터)로 ref에 두고, 캐릭터 전환 시 함께 초기화한다.
+  const quizCorrectCountRef = useRef(0)
   // 한 번 보여준 캐릭터는 같은 페이지 방문 동안 다시 안 보여주되, 탭을
   // 왔다갔다 전환해도(누리→두리→누리) 각자 한 번씩은 보장하기 위해
   // Set으로 추적한다(단일 ref 값이면 마지막 캐릭터만 기억해 전환 시
@@ -275,6 +290,7 @@ export default function GrowPage() {
     setMessageTotal(0)
     knowledgeSaveCountRef.current = 0
     outingCycleRef.current = 0
+    quizCorrectCountRef.current = 0
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -624,6 +640,39 @@ export default function GrowPage() {
         outingCycleRef.current = 0
         triggerPartTimeJob()
       }
+    }
+  }
+
+  // 지시서(문제 풀기 용돈 이벤트): ExamPanel이 서버 채점 결과 "정답"일
+  // 때만 호출한다 — 오답은 세지 않는다. 두 트리거는 독립적이라(3의
+  // 배수와 정확히 5는 절대 동시에 맞아떨어지지 않음) if/else로 묶지
+  // 않는다. 패널은 식사/서점/알바 이벤트와 같은 이유로 닫아서, 스테이지
+  // 위에 뜨는 팝업·말풍선이 모달에 가리지 않게 한다.
+  const handleQuizAnswerCorrect = () => {
+    if (!character) return
+    quizCorrectCountRef.current += 1
+    const count = quizCorrectCountRef.current
+
+    if (count % QUIZ_CORRECT_REWARD_INTERVAL === 0) {
+      setOpenSheet(null)
+      if (wallet.balanceWon !== null) wallet.earn(QUIZ_CORRECT_REWARD_WON)
+      setMoneyPopup(QUIZ_CORRECT_REWARD_WON)
+      const t = setTimeout(() => setMoneyPopup(null), 1800)
+      outingTimeoutsRef.current.push(t)
+      showBubble(`문제를 맞혀서 ${QUIZ_CORRECT_REWARD_WON.toLocaleString('ko-KR')}원 받았어요! 💰`)
+    }
+
+    if (count === QUIZ_SNACK_TRIGGER_COUNT) {
+      setOpenSheet(null)
+      showBubble('배가 고파요! 간식 먹고 올게요!')
+      const t1 = setTimeout(() => {
+        if (wallet.balanceWon !== null) wallet.spend(QUIZ_SNACK_COST_WON)
+        setPose('eating')
+        showBubble('냠냠, 간식 진짜 맛있어요! 🍕')
+        const t2 = setTimeout(() => setPose('idle'), 2600)
+        outingTimeoutsRef.current.push(t2)
+      }, 1400)
+      outingTimeoutsRef.current.push(t1)
     }
   }
 
@@ -1010,7 +1059,12 @@ export default function GrowPage() {
             />
           )}
           {openSheet === 'quiz' && character.profession && (
-            <ExamPanel character={character} profession={character.profession} onPoseChange={handlePoseChange} />
+            <ExamPanel
+              character={character}
+              profession={character.profession}
+              onPoseChange={handlePoseChange}
+              onCorrectAnswer={handleQuizAnswerCorrect}
+            />
           )}
           {openSheet === 'chat-log' && <ChatLogPanel character={character} />}
           {openSheet === 'growth' && <RecordsPanel character={character} variant="growth" />}

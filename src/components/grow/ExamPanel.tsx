@@ -16,10 +16,16 @@ export default function ExamPanel({
   character,
   profession,
   onPoseChange,
+  onCorrectAnswer,
 }: {
   character: Character
   profession: ProfessionId
   onPoseChange?: (pose: CharacterPose) => void
+  // 지시서(문제 풀기 용돈 이벤트): 퀴즈 정답일 때만 호출된다(오답은
+  // 아님) — 호출부(GrowPage)가 체험판 용돈 보상/간식 이벤트를 트리거
+  // 한다. 이 패널은 그 이벤트의 존재나 금액을 전혀 모른다 — 오직 "서버가
+  // 정답이라고 채점했다"는 사실만 넘겨준다.
+  onCorrectAnswer?: () => void
 }) {
   const { getQuiz, submitQuiz, getExam, submitExam } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
@@ -93,6 +99,7 @@ export default function ExamPanel({
       const result = await submitQuiz(character.companionType, quizQuestion.id, quizAnswer)
       setQuizResult({ correct: result.correct, explanation: result.explanation, message: result.message })
       flash(result.correct ? 'happy' : 'sad')
+      if (result.correct) onCorrectAnswer?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : '퀴즈 채점 중 오류가 발생했어요.')
     } finally {
