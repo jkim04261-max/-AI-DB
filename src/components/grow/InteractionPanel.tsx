@@ -429,15 +429,19 @@ export default function InteractionPanel({
 
       {/* 미션 ② AI 추천 받기 — 버튼 하나로 예시를 받아오되, 저장(완료
           처리)은 반드시 아래 "저장" 버튼을 눌러야만 일어난다(자동 완료
-          금지, PR #62 요청 2번). */}
+          금지, PR #62 요청 2번). 지시서: 버튼 문구를 "{name} 스스로
+          공부하기"에서 "✨ 예시 만들어주기"로 바꾸고, 버튼 스타일도 더
+          차분한 톤으로 바꿨다 — 기능(disabled 조건, handleSelfStudy
+          호출)은 그대로다. */}
       <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
         <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
         <button
+          type="button"
           onClick={() => void handleSelfStudy()}
           disabled={busy}
-          className="self-start rounded-xl border-2 border-purple-400/60 bg-gradient-to-b from-purple-400/30 to-purple-600/20 px-5 py-3 text-lg font-extrabold text-purple-100 shadow-[0_3px_0_rgba(192,132,252,0.35),0_0_14px_rgba(192,132,252,0.25)] transition hover:scale-[1.03] hover:border-purple-300 hover:from-purple-400/40 hover:to-purple-600/30 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+          className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
         >
-          {busyAction === 'study' ? `${name}가 스스로 공부하는 중...` : `${name} 스스로 공부하기`}
+          {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
         </button>
         <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
           AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
@@ -453,7 +457,7 @@ export default function InteractionPanel({
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
           경로. */}
       <div className="flex flex-col gap-3 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-4">
-        <p className="text-lg font-extrabold text-cyan-200/90 sm:text-xl">✏️ 직접 입력하기</p>
+        <p className="text-lg font-extrabold text-rose-400 sm:text-xl">📌 직접 입력하기</p>
         <input
           value={title}
           onChange={(e) => {
@@ -480,16 +484,21 @@ export default function InteractionPanel({
           rows={4}
           className="rounded-xl border border-cyan-400/25 bg-slate-900/60 px-4 py-3 text-lg font-medium text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
         />
+        {/* 지시서: "Gemini 검증하기"라는 특정 AI 제공사 이름을 그대로
+            노출하지 않고 "AI검증하기"로 바꿨다 — 실제 호출 대상
+            (handleTeach → Gemini)과 비용 발생 가능성은 그대로지만, 어떤
+            모델을 쓰는지는 화면에 직접 드러내지 않는다. */}
         <div className="flex flex-col items-start gap-1.5">
           <button
+            type="button"
             onClick={() => void handleTeach()}
             disabled={busy || !title.trim() || !content.trim()}
-            className="rounded-xl border-2 border-cyan-300/50 bg-gradient-to-b from-cyan-400 to-blue-600 px-5 py-3 text-lg font-extrabold text-white shadow-[0_3px_0_rgba(8,47,73,0.5),0_0_14px_rgba(56,189,248,0.45)] transition hover:scale-[1.03] hover:from-cyan-300 hover:to-blue-500 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
+            className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 text-sm font-bold text-slate-200 shadow-md transition-all hover:bg-slate-700 disabled:opacity-50 sm:w-auto"
           >
-            {busyAction === 'teach' ? 'Gemini 검증 중...' : 'Gemini 검증하기'}
+            {busyAction === 'teach' ? 'AI 검증 중...' : 'AI검증하기'}
           </button>
-          <p className="text-sm font-semibold text-cyan-200/60 sm:text-base">
-            입력한 지식을 Gemini가 검토해요. 검증 성공 후 저장해야 경험치가 지급되고, Gemini API 호출에 따른 비용이 발생할 수 있어요.
+          <p className="text-sm font-semibold text-slate-400 sm:text-base">
+            입력한 지식을 AI가 검토해요. 검증 성공 후 저장해야 경험치가 지급됩니다.
           </p>
         </div>
       </div>
