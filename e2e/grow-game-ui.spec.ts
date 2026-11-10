@@ -1016,7 +1016,7 @@ test('the teach/study panel shows three distinct gamified mission cards inside a
   // placeholder를 채우는 흐름에 의존하기 때문에, 이 계약이 깨지면 그
   // 테스트들이 전부 실패한다.
   await expect(page.getByPlaceholder('지식 제목')).toBeVisible()
-  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).toBeVisible()
+  await expect(page.getByTestId('knowledge-content-textarea')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeVisible()
   await expect(page.getByRole('button', { name: '누리 스스로 공부하기' })).toBeVisible()
 
