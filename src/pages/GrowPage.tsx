@@ -1020,6 +1020,7 @@ export default function GrowPage() {
               companionType={character.companionType}
               tier={tier}
               ageTier={ageTier}
+              ageNumber={ageNumber}
               inventory={inventory}
               onOpenMarket={() => setOpenSheet('market')}
             />

@@ -4,7 +4,7 @@ import CharacterSprite, { OUTFIT_PALETTE_OVERRIDE } from './CharacterSprite'
 import type { CompanionType } from '../../context/GrowthContext'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { AgeTier } from '../../data/characterAge'
-import { FULL_BODY_PORTRAIT_SRC } from '../../data/characterFullBody'
+import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import {
   CUSTOMIZATION_CATALOG,
   CATEGORY_LABEL,
@@ -24,6 +24,7 @@ export default function CustomizationRoom({
   companionType,
   tier,
   ageTier,
+  ageNumber,
   inventory,
   onOpenMarket,
 }: {
@@ -32,6 +33,11 @@ export default function CustomizationRoom({
   // PR #53 요청 5번: 연령대별 실제 초상화 미리보기용. 지정하지 않으면
   // (호출부가 아직 안 넘기면) 기존처럼 SVG만 보여준다.
   ageTier?: AgeTier
+  // 지시서(연령대별 성장 캐릭터 이미지 적용, 원본 14장 적용): master_50s
+  // (50~60대) 구간에서 50대/60대 그림을 가르는 데 쓴다. GameStage.tsx와
+  // 같은 값을 그대로 넘겨받는다 — 없으면 fullBodyPortraitSrc가 50대
+  // 그림으로 처리한다.
+  ageNumber?: number
   inventory: MockInventory
   onOpenMarket: () => void
 }) {
@@ -49,7 +55,7 @@ export default function CustomizationRoom({
   // 지시서(연령대별 성장 캐릭터 이미지 적용): 이제 ageTier로 실제 그림
   // 자체를 고른다(characterFullBody.ts 참고) — "지정됐는지"만 보던
   // 기존 게이트는 그대로 두고, 값이 있으면 그 단계의 그림을 쓴다.
-  const portraitSrc = ageTier && !outfitHasVisualOverride ? FULL_BODY_PORTRAIT_SRC[companionType][ageTier] : null
+  const portraitSrc = ageTier && !outfitHasVisualOverride ? fullBodyPortraitSrc(companionType, ageTier, ageNumber) : null
 
   return (
     <div className="flex flex-col gap-4">
