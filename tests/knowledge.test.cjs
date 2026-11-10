@@ -874,25 +874,39 @@ async function run() {
     // teen 자신의 미션 집계가 0부터 다시 시작한다.
     const teenMissions = mockRes()
     await characterHandler(kateReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), teenMissions)
-    t.assert(teenMissions.body.missionProgress.ageTier === 'teen' && teenMissions.body.missionProgress.confirmedTotal === 0, 'teen 단계는 toddler 때 저장을 재사용하지 않고 0/6부터 새로 시작한다')
+    t.assert(
+      teenMissions.body.missionProgress.ageTier === 'teen' &&
+        teenMissions.body.missionProgress.confirmedTotal === 0 &&
+        teenMissions.body.missionProgress.requiredTotal === 10,
+      '지시서(연령대별 스테이지 볼륨업): teen 단계는 toddler 때 저장을 재사용하지 않고 0/10(유형별 4+3+3)부터 새로 시작한다',
+    )
 
-    // 5) 미션은 이미 다 끝났는데 레벨만 모자란 경우 — 순수 XP 액션만으로도
-    // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
-    // 판정을 공유한다는 뜻). 지금까지 이미 지식 검증을 9회 썼으므로(하루
-    // 10회 제한), 이 구간에서 더 쓰기 전에 날짜를 넘겨 리셋한다 — 하루
-    // 제한 자체를 테스트하는 게 아니라 진화 로직을 테스트하는 구간이므로
-    // teachOnce(5)/(7~8)의 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
+    // 5) 지시서(연령대별 스테이지 볼륨업): teen은 toddler(6개)보다 많은
+    // 10개(객관식4+주관식3+노하우3)를 요구한다. 지금까지 이미 지식
+    // 검증을 10회 썼으므로(하루 10회 제한), 이 구간에서 더 쓰기 전에
+    // 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게 아니라
+    // 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의 1회성
+    // 제한 소비 테스트(요청 2번)와는 무관하다.
     mock.setFakeDate('2026-03-02')
     await teachOnce(11, 'objective')
     await teachOnce(12, 'objective')
-    await teachOnce(13, 'subjective')
-    await teachOnce(14, 'subjective')
-    await teachOnce(15, 'knowhow')
-    const sixthTeenMission = await teachOnce(16, 'knowhow')
-    t.assert(sixthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 6미션도 모두 채웠다')
-    t.assert(sixthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
+    await teachOnce(13, 'objective')
+    await teachOnce(14, 'objective')
+    await teachOnce(15, 'subjective')
+    await teachOnce(16, 'subjective')
+    await teachOnce(17, 'subjective')
+    await teachOnce(18, 'knowhow')
+    await teachOnce(19, 'knowhow')
+    const tenthTeenMission = await teachOnce(20, 'knowhow')
+    t.assert(tenthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 10미션(4+3+3)도 모두 채웠다')
+    t.assert(tenthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'teen', '미션은 끝났지만 레벨이 부족해 teen에 고정된 채다')
 
+    // 6) 미션은 이미 다 끝났는데 레벨만 모자란 경우 — 순수 XP 액션만으로도
+    // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
+    // 판정을 공유한다는 뜻). teen의 10회로 당일 하루 제한을 이미 다
+    // 썼으므로, 다시 날짜를 넘긴다.
+    mock.setFakeDate('2026-03-03')
     kateNuri.level = 10
     kateNuri.exp = 4500
     geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' } }
@@ -1121,6 +1135,37 @@ async function run() {
     t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(leoNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록된다')
     t.assert(leoNuri.level === 1, '진화해도 레벨/경험치는 그대로다(진화가 레벨을 강제로 올리지 않는다)')
+  }
+
+  // --- 지시서(연령대별 스테이지 볼륨업): 연령대별 필요 지식 개수
+  // (8~9살=6, 10대=10, 20대=20, 30대=30, 40대=40, 50~60대=50)가
+  // characterAge.ts에 정확히 세팅되어 있는지 직접 확인한다. 단계별로
+  // 실제 지식을 전부 저장해보는 end-to-end 시뮬레이션은(특히 30~50개
+  // 저장) 비현실적으로 느려지므로, 순수 데이터 테이블을 직접 검증한다
+  // (teen=10까지는 위에서 이미 end-to-end로 검증됨).
+  {
+    const characterAge = bundle('api/_lib/characterAge.ts')
+    const EXPECTED_TOTAL_BY_TIER = {
+      toddler: 6,
+      teen: 10,
+      junior_20s: 20,
+      career_30s: 30,
+      veteran_40s: 40,
+      master_50s: 50,
+    }
+    for (const [tier, expectedTotal] of Object.entries(EXPECTED_TOTAL_BY_TIER)) {
+      t.assert(
+        characterAge.MISSIONS_REQUIRED_TOTAL_BY_TIER[tier] === expectedTotal,
+        `${tier} 단계의 필요 지식 총합은 ${expectedTotal}개다`,
+      )
+      const perType = characterAge.MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
+      const sum = perType.objective + perType.subjective + perType.knowhow
+      t.assert(sum === expectedTotal, `${tier} 단계의 유형별(객관식/주관식/노하우) 필요 개수 합도 정확히 ${expectedTotal}개다(현재 ${perType.objective}+${perType.subjective}+${perType.knowhow})`)
+      t.assert(
+        perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0,
+        `${tier} 단계는 세 유형 모두 최소 1개 이상을 요구한다(한쪽으로 쏠리지 않음)`,
+      )
+    }
   }
 
   return t.summary()
