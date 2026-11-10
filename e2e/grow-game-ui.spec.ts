@@ -1009,7 +1009,7 @@ test('the teach/study panel shows three distinct gamified mission cards inside a
   // 일치하는 요소)만 집도록 exact: true로 좁힌다.
   await expect(dialog.getByText('🎯 선택지에서 고르기', { exact: true })).toBeVisible()
   await expect(dialog.getByText('✨ AI 추천 받기', { exact: true })).toBeVisible()
-  await expect(dialog.getByText('✏️ 직접 입력하기', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('📌 직접 입력하기', { exact: true })).toBeVisible()
 
   // 기존 입력 경로(입력칸·버튼)는 토글 없이 그대로 바로 쓸 수 있어야
   // 한다 — knowledge.spec.ts의 모든 시나리오가 패널을 열자마자 바로
@@ -1017,8 +1017,8 @@ test('the teach/study panel shows three distinct gamified mission cards inside a
   // 테스트들이 전부 실패한다.
   await expect(page.getByPlaceholder('지식 제목')).toBeVisible()
   await expect(page.getByTestId('knowledge-content-textarea')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Gemini 검증하기' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '누리 스스로 공부하기' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'AI검증하기' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '✨ 예시 만들어주기' })).toBeVisible()
 
   // 미션 창 전용 테두리 색(청록 홀로그램)이 적용됐는지 확인 — 다른
   // 화면(성장 보기 등)은 기존 호박목재 테두리를 그대로 유지해야 한다.
