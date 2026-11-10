@@ -6,12 +6,12 @@ import {
   type ClipboardEvent,
   type FormEvent,
 } from 'react'
-import { AlertCircle, ArrowRight, Mic, Paperclip, X } from 'lucide-react'
+import { AlertCircle, ArrowRight, FileText, Mic, Paperclip, X } from 'lucide-react'
 import {
-  ALLOWED_IMAGE_TYPES,
+  ALLOWED_ATTACHMENT_TYPES,
+  MAX_ATTACHMENT_BYTES,
   MAX_FILE_COUNT,
-  MAX_IMAGE_BYTES,
-  MAX_TOTAL_IMAGE_BYTES,
+  MAX_TOTAL_ATTACHMENT_BYTES,
 } from '../lib/attachments'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 
@@ -75,12 +75,12 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
     if (newFiles.length === 0) return
 
     const validFiles = newFiles.filter((file) => {
-      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-        setErrorMsg('PNG, JPEG, WEBP, GIF 이미지만 첨부할 수 있어요.')
+      if (!ALLOWED_ATTACHMENT_TYPES.includes(file.type)) {
+        setErrorMsg('PNG, JPEG, WEBP, GIF 이미지 또는 PDF 파일만 첨부할 수 있어요.')
         return false
       }
-      if (file.size > MAX_IMAGE_BYTES) {
-        setErrorMsg(`이미지는 ${MAX_IMAGE_BYTES / (1024 * 1024)}MB 이하만 첨부할 수 있어요.`)
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setErrorMsg(`파일은 ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB 이하만 첨부할 수 있어요.`)
         return false
       }
       return true
@@ -89,7 +89,7 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
 
     const availableSlots = MAX_FILE_COUNT - selected.length
     if (availableSlots <= 0) {
-      setErrorMsg(`이미지는 최대 ${MAX_FILE_COUNT}장까지만 첨부할 수 있어요.`)
+      setErrorMsg(`파일은 최대 ${MAX_FILE_COUNT}장까지만 첨부할 수 있어요.`)
       return
     }
 
@@ -103,9 +103,9 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
     // the combined cap — matches the backend's MAX_TOTAL_ATTACHMENT_BYTES,
     // so a rejection here doesn't just surface later as a failed send.
     const existingBytes = sumBytes(selected.map((s) => s.file))
-    while (filesToAdd.length > 0 && existingBytes + sumBytes(filesToAdd) > MAX_TOTAL_IMAGE_BYTES) {
+    while (filesToAdd.length > 0 && existingBytes + sumBytes(filesToAdd) > MAX_TOTAL_ATTACHMENT_BYTES) {
       setErrorMsg(
-        `첨부 이미지 전체 용량은 ${MAX_TOTAL_IMAGE_BYTES / (1024 * 1024)}MB를 넘을 수 없어요.`,
+        `첨부 파일 전체 용량은 ${MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024)}MB를 넘을 수 없어요.`,
       )
       filesToAdd = filesToAdd.slice(0, -1)
     }
@@ -188,11 +188,25 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
         <div className="mb-2 flex flex-wrap gap-2">
           {selected.map((s, idx) => (
             <div key={s.previewUrl} className="relative">
-              <img
-                src={s.previewUrl}
-                alt={s.file.name}
-                className="h-16 w-16 rounded-lg object-cover"
-              />
+              {s.file.type.startsWith('image/') ? (
+                <img
+                  src={s.previewUrl}
+                  alt={s.file.name}
+                  className="h-16 w-16 rounded-lg object-cover"
+                />
+              ) : (
+                // PDF 등 이미지가 아닌 파일은 썸네일 대신 아이콘 + 파일명
+                // 칩으로 보여준다(이미지처럼 object-cover로 잘라 보여줄
+                // 수 없으므로).
+                <div
+                  role="img"
+                  aria-label={s.file.name}
+                  className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-lg bg-slate-100 p-1 text-slate-500"
+                >
+                  <FileText size={20} />
+                  <span className="w-full truncate text-center text-[9px] leading-tight">{s.file.name}</span>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => removeFile(idx)}
@@ -217,7 +231,7 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
           ref={fileInputRef}
           type="file"
           multiple
-          accept={ALLOWED_IMAGE_TYPES.join(',')}
+          accept={ALLOWED_ATTACHMENT_TYPES.join(',')}
           onChange={handleFileChange}
           className="hidden"
           disabled={isLoading || selected.length >= MAX_FILE_COUNT}
@@ -226,7 +240,7 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={isLoading || selected.length >= MAX_FILE_COUNT}
-          aria-label="이미지 첨부"
+          aria-label="파일 첨부"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40"
         >
           <Paperclip size={18} />

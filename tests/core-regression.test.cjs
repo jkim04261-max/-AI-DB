@@ -147,7 +147,7 @@ async function run() {
   {
     const res = mockRes()
     const cookie = cookieHeaderFor(auth, 6, 0)
-    const tooMany = Array.from({ length: 6 }, (_, i) => ({
+    const tooMany = Array.from({ length: 11 }, (_, i) => ({
       url: `https://x.public.blob.vercel-storage.com/${i}.png`,
       mimeType: 'image/png',
       name: `${i}.png`,
@@ -156,7 +156,30 @@ async function run() {
       { method: 'POST', query: { id: '600' }, body: { text: 'too many', attachments: tooMany }, headers: { cookie, host: 'test.local' } },
       res,
     )
-    t.assert(res.statusCode === 400, 'more than 5 attachments is rejected (400)')
+    t.assert(res.statusCode === 400, 'more than 10 attachments is rejected (400)')
+  }
+  {
+    // 지시서(첨부 파일 확장): .doc/.docx는 Gemini가 바이너리로 직접
+    // 읽을 수 없어 허용 목록 밖이다 — 거부되는지 직접 확인한다.
+    const res = mockRes()
+    const cookie = cookieHeaderFor(auth, 6, 0)
+    await convHandler(
+      {
+        method: 'POST',
+        query: { id: '600' },
+        body: {
+          text: 'word doc',
+          attachments: [{
+            url: `${TRUSTED_BLOB_HOST}/a.docx`,
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            name: 'a.docx',
+          }],
+        },
+        headers: { cookie, host: 'test.local' },
+      },
+      res,
+    )
+    t.assert(res.statusCode === 400, 'a .docx attachment (unsupported by Gemini) is rejected (400)')
   }
 
   // --- successful attachment: accepted, stored, and retrievable afterward ---
@@ -188,6 +211,42 @@ async function run() {
     t.assert(res.statusCode === 200, 'the conversation can be read back (200)')
     const userMsg = res.body.conversation.messages.find((m) => m.role === 'user')
     t.assert(userMsg?.attachments?.[0]?.url === `${TRUSTED_BLOB_HOST}/a.png`, 'the stored attachment survives a GET round trip')
+  }
+  {
+    // 지시서(첨부 파일 확장): PDF도 이미지와 똑같은 경로(Blob fetch →
+    // base64 → Gemini inlineData)를 타는지 확인한다.
+    const res = mockRes()
+    const cookie = cookieHeaderFor(auth, 7, 0)
+    await convHandler(
+      {
+        method: 'POST',
+        query: { id: '700' },
+        body: {
+          text: 'here is a pdf',
+          attachments: [{ url: `${TRUSTED_BLOB_HOST}/b.pdf`, mimeType: 'application/pdf', name: 'b.pdf' }],
+        },
+        headers: { cookie, host: 'test.local' },
+      },
+      res,
+    )
+    t.assert(res.statusCode === 201, 'a PDF attachment from the trusted Blob host is accepted (201)')
+    t.assert(res.body.userMessage.attachments[0]?.mimeType === 'application/pdf', 'the accepted PDF attachment keeps its mime type')
+  }
+  {
+    // 경계값: 정확히 10개(상한)는 통과해야 한다.
+    const res = mockRes()
+    const cookie = cookieHeaderFor(auth, 7, 0)
+    const exactlyMax = Array.from({ length: 10 }, (_, i) => ({
+      url: `${TRUSTED_BLOB_HOST}/${i}.png`,
+      mimeType: 'image/png',
+      name: `${i}.png`,
+    }))
+    await convHandler(
+      { method: 'POST', query: { id: '700' }, body: { text: 'exactly ten', attachments: exactlyMax }, headers: { cookie, host: 'test.local' } },
+      res,
+    )
+    t.assert(res.statusCode === 201, 'exactly 10 attachments (the new limit) is accepted (201)')
+    t.assert(res.body.userMessage.attachments.length === 10, 'all 10 accepted attachments are echoed back')
   }
 
   // --- conversation list and creation (api/conversations/index.ts) ---
