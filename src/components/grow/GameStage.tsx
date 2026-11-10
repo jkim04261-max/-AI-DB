@@ -7,7 +7,7 @@ import type { ProfessionId } from '../../data/characterProfessions'
 import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
 import type { AgeTier } from '../../data/characterAge'
-import { FULL_BODY_PORTRAIT_SRC } from '../../data/characterFullBody'
+import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -151,11 +151,12 @@ export default function GameStage({
   // 계속 SVG를 쓴다 — 정적 그림 한 장으로는 옷 갈아입히기를 반영할 수
   // 없기 때문이다.
   // 지시서(연령대별 성장 캐릭터 이미지 적용): 연령대별 실제 그림이
-  // 생겨서 이제 ageTier로 이미지 자체를 고른다(characterFullBody.ts
-  // 참고). ageTier가 없는 호출부는 'junior_20s'(기존 "기본 모습"과 같은
-  // 뜻으로 쓰던 단계)를 기본값으로 쓴다.
+  // 생겨서 이제 ageTier(+ ageNumber)로 이미지 자체를 고른다
+  // (characterFullBody.ts 참고). ageTier가 없는 호출부는
+  // 'junior_20s'(기존 "기본 모습"과 같은 뜻으로 쓰던 단계)를 기본값으로
+  // 쓴다.
   const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
-  const portraitSrc = outfitHasVisualOverride ? null : FULL_BODY_PORTRAIT_SRC[companionType][ageTier ?? 'junior_20s']
+  const portraitSrc = outfitHasVisualOverride ? null : fullBodyPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
   const name = COMPANION_NAME[companionType]
   const moodIcon = MOOD_ICON[pose]
 
