@@ -465,12 +465,17 @@ export default function InteractionPanel({
           className="rounded-xl border border-cyan-400/25 bg-slate-900/60 px-4 py-3 text-lg font-medium text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
         />
         <textarea
+          data-testid="knowledge-content-textarea"
           value={content}
           onChange={(e) => {
             setContent(e.target.value)
             markManualEdit()
           }}
-          placeholder="가르칠 지식 내용을 입력해주세요."
+          // 지시서: 연령대마다 "8살 수준으로" 같은 고정 문구 대신, 지금
+          // 캐릭터의 실제 연령대(AGE_TIER_LABEL)를 넣어준다 — e2e는
+          // placeholder 문구가 아니라 위 data-testid로 이 입력창을 찾는다
+          // (문구가 연령대별로 달라져 더 이상 안정적인 선택자가 아니다).
+          placeholder={`이 직업을 가진 사람이 되어 ${AGE_TIER_LABEL[characterAgeTier]} 수준으로 나에게 가르쳐주세요`}
           maxLength={2000}
           rows={4}
           className="rounded-xl border border-cyan-400/25 bg-slate-900/60 px-4 py-3 text-lg font-medium text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"

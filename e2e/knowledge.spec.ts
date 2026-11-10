@@ -180,7 +180,7 @@ test('the teach form suggests age-appropriate example topics for a toddler-stage
   await page.getByTestId('topic-suggestion-chip').filter({ hasText: '이 직업이 하는 일' }).click()
 
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
-  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).not.toHaveValue('')
+  await expect(page.getByTestId('knowledge-content-textarea')).not.toHaveValue('')
 })
 
 // PR #52: 연령 제한 지식 흡수 — 내용은 적합해도 캐릭터가 아직 너무 어리면
@@ -213,7 +213,7 @@ test('teaching a knowledge item too advanced for the character\'s current age ti
   await page.getByRole('button', { name: '가르치기' }).click()
 
   await page.getByPlaceholder('지식 제목').fill('공인회계사 자격증 취득 절차')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('시험 과목과 응시 자격을 포함한 절차.')
+  await page.getByTestId('knowledge-content-textarea').fill('시험 과목과 응시 자격을 포함한 절차.')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
 
   await expect(page.getByText('아직은 너무 어려워서 이해하기 힘들어요! 20대가 되면 다시 가르쳐 주세요~')).toBeVisible()
@@ -284,7 +284,7 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('복식부기')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('거래를 두 번 기록한다')
+  await page.getByTestId('knowledge-content-textarea').fill('거래를 두 번 기록한다')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
 
   await expect(page.getByText('적합', { exact: true })).toBeVisible()
@@ -342,7 +342,7 @@ test('needs_revision disables 저장 and shows guidance to revise and re-verify'
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('틀린지식')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('잘못된 내용')
+  await page.getByTestId('knowledge-content-textarea').fill('잘못된 내용')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
 
   await expect(page.getByText('수정 필요', { exact: true })).toBeVisible()
@@ -377,7 +377,7 @@ test('editing content after a result makes it stale and requires re-verifying be
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('복식부기')
-  const contentBox = page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')
+  const contentBox = page.getByTestId('knowledge-content-textarea')
   await contentBox.fill('거래를 두 번 기록한다')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
   await expect(page.getByRole('button', { name: '저장' })).toBeEnabled()
@@ -487,7 +487,7 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
   // The composer is filled with what the character generated, so the user
   // can review it before saving — self-study never auto-saves either.
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('복식부기')
-  await expect(page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.')).toHaveValue('거래를 차변과 대변에 동시에 기록한다.')
+  await expect(page.getByTestId('knowledge-content-textarea')).toHaveValue('거래를 차변과 대변에 동시에 기록한다.')
   // The character "explains in its own words" what it studied.
   await expect(page.getByText(/오늘은 '복식부기'에 대해 혼자 공부해봤어요/)).toBeVisible()
   await expect(page.getByText('오늘 남은 스스로 공부하기 횟수: 2/3')).toBeVisible()
@@ -541,7 +541,7 @@ test('teaching and self-study both happen in the same panel, building one shared
 
   // Teach first.
   await page.getByPlaceholder('지식 제목').fill('복식부기')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('거래를 두 번 기록한다')
+  await page.getByTestId('knowledge-content-textarea').fill('거래를 두 번 기록한다')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
   await expect(page.getByText('알려주셔서 고마워요!', { exact: false })).toBeVisible()
 
@@ -732,7 +732,7 @@ test('typing the title/content directly and saving tags the save request as miss
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('나만의 노하우')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('현장에서만 배울 수 있는 내용')
+  await page.getByTestId('knowledge-content-textarea').fill('현장에서만 배울 수 있는 내용')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
   await page.getByRole('button', { name: '저장' }).click()
 
@@ -834,7 +834,7 @@ test('picking a knowledge-category chip and saving tags the save request with kn
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByPlaceholder('지식 제목').fill('세금 신고 팁')
-  await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill('마감일 전에 미리 제출하면 수정할 시간이 생긴다.')
+  await page.getByTestId('knowledge-content-textarea').fill('마감일 전에 미리 제출하면 수정할 시간이 생긴다.')
   await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
   await page.getByTestId('knowledge-category-chip-job_tip').click()
   await page.getByRole('button', { name: '저장' }).click()
@@ -933,7 +933,7 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
 
   for (let i = 0; i < 3; i++) {
     await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
-    await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
     await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
     await page.getByRole('button', { name: '저장' }).click()
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
@@ -1024,7 +1024,7 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await page.getByRole('button', { name: '가르치기' }).click()
   for (let i = 0; i < 3; i++) {
     await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
-    await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
     await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
     await page.getByRole('button', { name: '저장' }).click()
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
@@ -1080,7 +1080,7 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
     await page.getByRole('button', { name: '가르치기' }).click()
     for (let i = 0; i < 3; i++) {
       await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
-      await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
       await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
       await page.getByRole('button', { name: '저장' }).click()
       if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
@@ -1186,7 +1186,7 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
     await page.getByRole('button', { name: '가르치기' }).click()
     for (let i = 0; i < 3; i++) {
       await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
-      await page.getByPlaceholder('가르칠 지식 내용을 입력해주세요.').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
       await page.getByRole('button', { name: 'Gemini 검증하기' }).click()
       await page.getByRole('button', { name: '저장' }).click()
       if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
