@@ -22,14 +22,21 @@ import {
   type ReserveResult,
 } from '../_lib/dailyLimit'
 
+// 지시서(첨부 파일 확장): 이미지 외에 PDF도 허용한다 — Gemini의
+// generateContent가 inlineData로 직접 받는 타입이라(이미지·PDF·오디오·
+// 비디오만 지원), 다른 코드 변경 없이 이 목록에만 추가하면 기존 흐름
+// (blob 업로드 → base64 인코딩 → inlineData)을 그대로 탄다. .doc/.docx는
+// Gemini가 바이너리를 못 읽어 의미 없이 들어가므로 포함하지 않는다(
+// src/lib/attachments.ts 참고).
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif',
+  'application/pdf',
 ])
 
-const MAX_ATTACHMENTS_PER_MESSAGE = 5
+const MAX_ATTACHMENTS_PER_MESSAGE = 10
 
 interface IncomingAttachment {
   url: string
@@ -103,18 +110,18 @@ async function fetchImageAttachment(
     const isTimeout = err instanceof Error && err.name === 'AbortError'
     console.error('[api/conversations/[id]] attachment fetch failed', err)
     throw new Error(
-      isTimeout ? '첨부 이미지를 불러오는 데 시간이 너무 오래 걸려요.' : '첨부 이미지를 불러오지 못했어요.',
+      isTimeout ? '첨부 파일을 불러오는 데 시간이 너무 오래 걸려요.' : '첨부 파일을 불러오지 못했어요.',
     )
   } finally {
     clearTimeout(timeout)
   }
 
   if (!res.ok) {
-    throw new Error('첨부 이미지를 불러오지 못했어요.')
+    throw new Error('첨부 파일을 불러오지 못했어요.')
   }
   const buffer = await res.arrayBuffer()
   if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
-    throw new Error('첨부 이미지가 너무 커요.')
+    throw new Error('첨부 파일이 너무 커요.')
   }
   return {
     attachment: { mimeType: attachment.mimeType, data: Buffer.from(buffer).toString('base64') },
@@ -134,7 +141,7 @@ async function fetchImageAttachments(
   const totalBytes = fetched.reduce((sum, f) => sum + f.byteLength, 0)
   if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
     throw new Error(
-      `첨부 이미지 전체 용량이 너무 커요 (최대 ${Math.floor(MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024))}MB). 이미지 수를 줄이거나 더 작은 파일로 시도해주세요.`,
+      `첨부 파일 전체 용량이 너무 커요 (최대 ${Math.floor(MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024))}MB). 파일 수를 줄이거나 더 작은 파일로 시도해주세요.`,
     )
   }
   return fetched.map((f) => f.attachment)

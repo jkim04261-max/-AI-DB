@@ -21,8 +21,8 @@ export default function PrivacyPage() {
             생성한 응답, 대화 제목, 대화/메시지 생성·수정 시각
           </li>
           <li>
-            <span className="font-medium text-slate-700">첨부 이미지 정보</span> — 대화에 첨부한 이미지
-            파일(최대 5장, 장당 8MB 이하) 자체와, 해당 파일의 저장 위치(URL)·형식·파일명 등 메타데이터
+            <span className="font-medium text-slate-700">첨부 파일 정보</span> — 대화에 첨부한 이미지·PDF
+            파일(최대 10장, 장당 8MB 이하) 자체와, 해당 파일의 저장 위치(URL)·형식·파일명 등 메타데이터
           </li>
           <li>
             <span className="font-medium text-slate-700">AI 키우기(누리·두리) 정보</span> — 생성한 캐릭터(누리/두리)와
@@ -81,11 +81,11 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>
             <span className="font-medium text-slate-700">Google Gemini API</span> — AI 응답을 생성하기 위해
-            이용자가 입력한 메시지 내용과 첨부 이미지가 Google의 Gemini API로 전달됩니다.
+            이용자가 입력한 메시지 내용과 첨부 파일(이미지·PDF)이 Google의 Gemini API로 전달됩니다.
           </li>
           <li>
             <span className="font-medium text-slate-700">Vercel</span> — 서비스 호스팅, 서버 실행(서버리스
-            함수), 회원·대화 데이터가 저장되는 데이터베이스(Vercel Postgres), 첨부 이미지 파일이 저장되는
+            함수), 회원·대화 데이터가 저장되는 데이터베이스(Vercel Postgres), 첨부 파일이 저장되는
             스토리지(Vercel Blob)를 제공하는 인프라 사업자입니다.
           </li>
         </ul>

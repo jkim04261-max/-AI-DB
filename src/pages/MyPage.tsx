@@ -197,7 +197,7 @@ export default function MyPage() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
             <h2 className="text-base font-bold text-slate-900">정말 회원탈퇴 하시겠어요?</h2>
             <p className="mt-1.5 text-sm text-slate-500">
-              계정과 저장된 모든 대화, 첨부 이미지가 영구적으로 삭제되며 되돌릴 수 없어요.
+              계정과 저장된 모든 대화, 첨부 파일이 영구적으로 삭제되며 되돌릴 수 없어요.
             </p>
             {deleteError && <p className="mt-2 text-xs text-red-500">{deleteError}</p>}
             <div className="mt-4 flex justify-end gap-2">

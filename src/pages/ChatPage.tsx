@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { MoreHorizontal, RotateCcw, Trash2, User } from 'lucide-react'
+import { FileText, MoreHorizontal, RotateCcw, Trash2, User } from 'lucide-react'
 import { upload } from '@vercel/blob/client'
 import { useChats } from '../context/ChatContext'
 import { useAuth } from '../context/AuthContext'
@@ -54,7 +54,7 @@ export default function ChatPage() {
           name: files[i].name,
         }))
       } catch {
-        setAttachError('이미지 업로드에 실패했어요. 다시 시도해주세요.')
+        setAttachError('파일 업로드에 실패했어요. 다시 시도해주세요.')
         setIsUploading(false)
         return
       }
@@ -153,14 +153,30 @@ export default function ChatPage() {
                 )}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <div className={`mb-2 flex flex-wrap gap-1 ${msg.text ? '' : 'mb-0'}`}>
-                    {msg.attachments.map((attachment, ai) => (
-                      <img
-                        key={ai}
-                        src={attachment.url}
-                        alt={attachment.name ?? '첨부 이미지'}
-                        className="max-h-48 max-w-full rounded-lg object-contain"
-                      />
-                    ))}
+                    {msg.attachments.map((attachment, ai) =>
+                      attachment.mimeType?.startsWith('image/') ? (
+                        <img
+                          key={ai}
+                          src={attachment.url}
+                          alt={attachment.name ?? '첨부 이미지'}
+                          className="max-h-48 max-w-full rounded-lg object-contain"
+                        />
+                      ) : (
+                        // PDF 등 이미지가 아닌 첨부는 썸네일을 만들 수
+                        // 없으니 원본 Blob URL을 새 탭으로 여는 파일
+                        // 칩으로 보여준다.
+                        <a
+                          key={ai}
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1.5 rounded-lg bg-black/10 px-2 py-1.5 text-xs underline"
+                        >
+                          <FileText size={14} className="shrink-0" />
+                          <span className="max-w-[160px] truncate">{attachment.name ?? '첨부 파일'}</span>
+                        </a>
+                      ),
+                    )}
                   </div>
                 )}
                 {msg.text &&
