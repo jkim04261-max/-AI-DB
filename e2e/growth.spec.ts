@@ -252,3 +252,83 @@ test('XP earned from a quiz survives a full page reload (re-fetched from the ser
   await expect(page.getByText('45/100 XP')).toBeVisible()
   await expect(page.getByText('Lv.1', { exact: true })).toBeVisible()
 })
+
+// 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힐 때마다
+// 쌓는 누적 횟수로 3의 배수번째마다 체험판 용돈 보상(+30,000원, 반복)을,
+// 정확히 5번째에서 간식 이벤트(1회성)를 띄운다. 이 테스트는 식사·서점·
+// 알바 이벤트의 "가르치기" 트리거와 독립된 "문제 풀기" 트리거를 검증
+// 한다. NURI_ACCOUNTANT_LV1은 Stage 1 온보딩을 거치지 않은 기존
+// 캐릭터라 wallet.balanceWon이 null이므로(지갑 지급 전), 여기서는
+// 팝업·말풍선 UI만 검증하고 정확한 원화 차감/지급 금액은 검증하지
+// 않는다(식사/알바 이벤트 테스트가 이미 그 금액 계산 경로를 검증함).
+test('answering quiz questions correctly triggers a 3-answer reward popup and a one-time 5th-answer snack event', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT_LV1],
+    onQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          question: { id: 'accountant-1', text: '회계의 기본 등식은?', choices: ['자산 = 부채 + 자본', '수익 = 비용', '자산 = 자본', '부채 = 자본'] },
+        }),
+      })
+    },
+    onQuizSubmit: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          correct: true,
+          explanation: '자산은 부채와 자본의 합이에요.',
+          expAwarded: 5,
+          exp: 45,
+          level: 1,
+          leveledUp: false,
+          message: '정답이에요! (+5XP)',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  // 매 라운드 시작 전에 이전 패널이 "저절로 닫혔는지"(3번째/5번째 정답
+  // 보상 트리거)를 먼저 잠깐 기다려보고, 그래도 열려 있으면 직접
+  // 닫는다 — "다른 문제 풀기" 버튼이 보이는지로 패널이 열려 있는지
+  // 추측하면(isVisible/count는 재시도 없이 그 순간 DOM만 보므로) 방금
+  // 끝난 제출의 상태 반영과 타이밍이 겹쳐 레이스 컨디션이 생긴다.
+  const closeQuizPanelIfOpen = async () => {
+    const dialog = page.getByRole('dialog', { name: '문제 풀기' })
+    await dialog.waitFor({ state: 'detached', timeout: 1000 }).catch(() => {})
+    if ((await dialog.count()) > 0) {
+      await dialog.getByRole('button', { name: '닫기' }).first().click()
+      await expect(dialog).toHaveCount(0)
+    }
+  }
+
+  const answerCorrectly = async () => {
+    await closeQuizPanelIfOpen()
+    await page.getByRole('button', { name: '문제 풀기', exact: true }).click()
+    await page.getByRole('button', { name: /퀴즈 풀기/ }).click()
+    await expect(page.getByText('회계의 기본 등식은?')).toBeVisible()
+    await page.getByRole('button', { name: '자산 = 부채 + 자본' }).click()
+    await page.getByRole('button', { name: '제출' }).click()
+    await expect(page.getByRole('button', { name: '제출' })).toHaveCount(0)
+  }
+
+  await answerCorrectly() // 1번째 정답
+  await answerCorrectly() // 2번째 정답
+  await answerCorrectly() // 3번째 정답 → 용돈 보상 트리거 (패널도 닫힌다)
+
+  await expect(page.getByTestId('money-popup')).toContainText('30,000원')
+  await expect(page.getByTestId('speech-bubble')).toContainText('문제를 맞혀서 30,000원 받았어요')
+
+  await answerCorrectly() // 4번째 정답
+  await answerCorrectly() // 5번째 정답 → 간식 이벤트 트리거 (1회성)
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('배가 고파요! 간식 먹고 올게요')
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠, 간식 진짜 맛있어요')
+})
