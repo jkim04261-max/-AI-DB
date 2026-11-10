@@ -67,10 +67,41 @@ export function nextAgeTier(tier: AgeTier): AgeTier | null {
 // 로직은 api/_lib/characterMissions.ts에 있다(이 파일은 상수만 둔다).
 export type MissionType = 'objective' | 'subjective' | 'knowhow'
 export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow']
-// 한 연령대를 "졸업"하려면 유형마다 이 개수만큼 확정해야 한다(2개씩 x
-// 3유형 = 총 6개) — 모든 연령대에 동일하게 적용되는 고정값.
-export const MISSIONS_REQUIRED_PER_TYPE = 2
-export const MISSIONS_REQUIRED_TOTAL = MISSIONS_REQUIRED_PER_TYPE * MISSION_TYPES.length
+
+// 지시서(연령대별 스테이지 볼륨업): "한 연령대를 졸업하려면 유형별
+// 균형(PR #63)을 갖춘 지식을 몇 개 확정해야 하는지"가 더 이상 모든
+// 연령대에 똑같이 6개가 아니라, 연령대가 올라갈수록 늘어난다 —
+// 8~9살(toddler)=6, 10대(teen)=10, 20대(junior_20s)=20,
+// 30대(career_30s)=30, 40대(veteran_40s)=40, 50~60대(master_50s)=50.
+// master_50s는 다음 연령대가 없으므로(nextAgeTier가 null) 이 50개는
+// "다음 단계로의 진화 조건"이 아니라 "60대 최종 마스터 시험"
+// 자체를 뜻한다 — allConfirmed가 true가 되는 순간이 곧 마스터 시험
+// 통과 시점이다(src/components/grow/InteractionPanel.tsx 참고).
+export const MISSIONS_REQUIRED_TOTAL_BY_TIER: Record<AgeTier, number> = {
+  toddler: 6,
+  teen: 10,
+  junior_20s: 20,
+  career_30s: 30,
+  veteran_40s: 40,
+  master_50s: 50,
+}
+
+// 유형별(객관식/주관식/노하우) 균형 요구는 그대로 유지하면서, 총합이
+// 위 표와 정확히 일치하도록 3유형에 최대한 고르게 나눈다(나머지는
+// MISSION_TYPES 순서대로 +1씩) — 예: teen(10) → [4, 3, 3].
+function splitMissionsRequiredByType(total: number): Record<MissionType, number> {
+  const base = Math.floor(total / MISSION_TYPES.length)
+  const remainder = total - base * MISSION_TYPES.length
+  const result = {} as Record<MissionType, number>
+  MISSION_TYPES.forEach((type, i) => {
+    result[type] = base + (i < remainder ? 1 : 0)
+  })
+  return result
+}
+
+export const MISSIONS_REQUIRED_PER_TYPE_BY_TIER: Record<AgeTier, Record<MissionType, number>> = Object.fromEntries(
+  AGE_TIER_ORDER.map((tier) => [tier, splitMissionsRequiredByType(MISSIONS_REQUIRED_TOTAL_BY_TIER[tier])]),
+) as Record<AgeTier, Record<MissionType, number>>
 
 // 지금 연령대가 특정 연령대"이상"인지 — 지식 난이도 게이팅(가르치기 검증)
 // 에 쓴다. 캐릭터의 실제 연령대가 지식이 요구하는 연령대보다 낮으면

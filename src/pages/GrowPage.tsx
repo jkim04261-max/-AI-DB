@@ -211,11 +211,12 @@ export default function GrowPage() {
   // 타임아웃들 — mealTimeoutsRef와 같은 이유로 배열 관리 + 언마운트
   // 시 정리한다.
   const outingTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
-  // 8~9살 단계에서 가르치기/스스로 공부하기 저장이 몇 번 쌓였는지 — 화면에
-  // 표시하지 않는 내부 카운터라 리렌더를 유발할 필요가 없어 ref로 둔다.
-  // DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면 아래 효과에서
-  // 0으로 되돌린다.
-  const toddlerSaveCountRef = useRef(0)
+  // 지시서(연령대별 스테이지 볼륨업): 가르치기/스스로 공부하기 저장이
+  // 몇 번 쌓였는지 — 연령대 전용 제한 없이 모든 단계에서 똑같이 센다.
+  // 화면에 표시하지 않는 내부 카운터라 리렌더를 유발할 필요가 없어
+  // ref로 둔다. DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면
+  // 아래 효과에서 0으로 되돌린다.
+  const knowledgeSaveCountRef = useRef(0)
   // 지시서(서점 외출 미션, 알바/경제 활동 이벤트): 식사·서점·알바
   // 세 이벤트가 매번 같은 "3회 저장" 신호를 공유하므로, 셋이 순서대로
   // 돌아가며 뜨도록 한다(0=다음은 식사, 1=다음은 서점, 2=다음은 알바) —
@@ -272,7 +273,7 @@ export default function GrowPage() {
     setRecentLine(null)
     setKnowledgeStats({ total: 0, aiGenerated: 0 })
     setMessageTotal(0)
-    toddlerSaveCountRef.current = 0
+    knowledgeSaveCountRef.current = 0
     outingCycleRef.current = 0
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
@@ -600,14 +601,19 @@ export default function GrowPage() {
     outingTimeoutsRef.current.push(t1)
   }
 
-  // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 8~9살
-  // 단계에서만 세고, 지정된 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다
-  // 식사 → 서점 외출 → 알바 이벤트를 순서대로 띄운 뒤 다시 0부터 센다.
+  // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 지정된
+  // 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다 식사 → 서점 외출 →
+  // 알바 이벤트를 순서대로 띄운 뒤 다시 0부터 센다. 지시서(연령대별
+  // 스테이지 볼륨업: "경제 전략 루틴이 각 스테이지에 자연스럽게
+  // 녹아들도록")에 따라 8~9살 전용이던 제한을 없애고 모든 연령대에서
+  // 똑같이 동작한다 — 연령대가 올라가 한 단계를 졸업하는 데 필요한
+  // 지식 개수가 늘어날수록(6→10→...→50) 이 3회 단위 휴식 이벤트도
+  // 자연히 더 자주 끼어든다.
   const handleKnowledgeSaved = () => {
-    if (!character || character.ageTier !== 'toddler') return
-    toddlerSaveCountRef.current += 1
-    if (toddlerSaveCountRef.current >= MEAL_TRIGGER_SAVE_COUNT) {
-      toddlerSaveCountRef.current = 0
+    if (!character) return
+    knowledgeSaveCountRef.current += 1
+    if (knowledgeSaveCountRef.current >= MEAL_TRIGGER_SAVE_COUNT) {
+      knowledgeSaveCountRef.current = 0
       if (outingCycleRef.current === 0) {
         outingCycleRef.current = 1
         triggerMealBreak()

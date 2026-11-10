@@ -335,8 +335,11 @@ export default function InteractionPanel({
         {name} · {professionLabel}와 상호작용하기
       </p>
 
-      {/* PR #63: 6단계 카드형 미션 진행 현황 — 유형별(객관식/주관식/
-          노하우) 2개씩, 총 6개를 확정해야 다음 연령대로 진화한다. */}
+      {/* PR #63, 지시서(연령대별 스테이지 볼륨업): 카드형 미션 진행
+          현황 — 유형별(객관식/주관식/노하우)로 고르게 확정해야 다음
+          연령대로 진화한다. 연령대별 필요 개수(6/10/20/30/40/50)는
+          서버(MissionProgress.requiredTotal 등)가 내려주므로 이
+          컴포넌트는 그 값을 그대로 보여줄 뿐이다. */}
       {missionProgress && (
         <div
           className="flex flex-col gap-2 rounded-2xl border border-indigo-400/20 bg-indigo-400/5 p-3.5"
@@ -349,6 +352,14 @@ export default function InteractionPanel({
             {missionProgress.allConfirmed && missionProgress.nextAgeTierLabel && (
               <span className="text-sm font-bold text-emerald-300">
                 레벨만 채우면 {missionProgress.nextAgeTierLabel}로 진화해요!
+              </span>
+            )}
+            {/* master_50s(50~60대)는 다음 연령대가 없으므로, 여기서
+                allConfirmed가 되는 순간이 곧 "60대 최종 마스터 시험"
+                통과다 — 별도 DB 플래그 없이 기존 미션 집계만으로 판정. */}
+            {missionProgress.allConfirmed && missionProgress.ageTier === 'master_50s' && (
+              <span data-testid="master-exam-passed" className="text-sm font-bold text-amber-300">
+                🏆 최종 마스터 시험을 통과했어요!
               </span>
             )}
           </div>

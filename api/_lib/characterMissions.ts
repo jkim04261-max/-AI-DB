@@ -3,7 +3,7 @@ import {
   type AgeTier,
   type MissionType,
   MISSION_TYPES,
-  MISSIONS_REQUIRED_PER_TYPE,
+  MISSIONS_REQUIRED_PER_TYPE_BY_TIER,
   AGE_TIER_MIN_LEVEL,
   AGE_TIER_LABEL,
   AGE_TIER_STAGE_LABEL,
@@ -55,14 +55,20 @@ export async function getMissionProgress(userId: number, characterId: number, ti
   `
   const counts = new Map(result.rows.map((r) => [r.mission_type, r.count]))
 
+  // 지시서(연령대별 스테이지 볼륨업): 유형별 필요 개수가 더 이상 모든
+  // 연령대에 동일하지 않고 이 tier 기준으로 결정된다(characterAge.ts의
+  // MISSIONS_REQUIRED_PER_TYPE_BY_TIER 참고).
+  const requiredPerType = MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
   const byType = {} as Record<MissionType, MissionTypeProgress>
   let confirmedTotal = 0
+  let requiredTotal = 0
   for (const type of MISSION_TYPES) {
-    const confirmed = Math.min(counts.get(type) ?? 0, MISSIONS_REQUIRED_PER_TYPE)
+    const required = requiredPerType[type]
+    const confirmed = Math.min(counts.get(type) ?? 0, required)
     confirmedTotal += confirmed
-    byType[type] = { type, confirmed, required: MISSIONS_REQUIRED_PER_TYPE, complete: confirmed >= MISSIONS_REQUIRED_PER_TYPE }
+    requiredTotal += required
+    byType[type] = { type, confirmed, required, complete: confirmed >= required }
   }
-  const requiredTotal = MISSIONS_REQUIRED_PER_TYPE * MISSION_TYPES.length
   const next = nextAgeTier(tier)
 
   return {
