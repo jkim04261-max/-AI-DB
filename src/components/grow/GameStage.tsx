@@ -195,12 +195,14 @@ export default function GameStage({
             레이어를 명시적으로 분리해 서로 가리는 일이 없게 했다.
             PR #56 때는 전신 원화가 배경을 제거한 투명 PNG라, 사각형
             카드 테두리를 없애고 실루엣만 따라가는 drop-shadow로
-            탭 피드백을 줬다.
-            지시서(연령대별 성장 캐릭터 이미지 적용): 연령대별 그림은
-            배경이 살아있는 사각형 컷이라, 테두리 없이 두면 다시 빈
-            네모가 떠 보이는 문제가 재발한다 — rounded-2xl + ring으로
-            액자 느낌을 주어 자연스럽게 만들되, 탭 피드백은 기존처럼
-            drop-shadow 글로우를 그대로 쓴다. */}
+            탭 피드백을 줬다. 지시서(연령대별 성장 캐릭터 이미지 적용)
+            중간에 배경이 안 지워진 중간 산출물을 썼을 때는 rounded-2xl
+            + ring 액자로 임시로 가렸지만, 지시서(배경 제거 요청: "캐릭터
+            뒤에 배경없이 단독으로... 사진 겹침없이 뒤에 배경 없애주세요")
+            이후 모든 연령대 그림이 다시 투명 PNG(배경 제거 모델로 직접
+            제거)가 되어, PR #56의 원래 방식(액자 없이 drop-shadow만)으로
+            되돌린다 — 그래야 스테이지 자체 배경과 캐릭터가 겹쳐 보이지
+            않는다. */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -224,7 +226,7 @@ export default function GameStage({
               // 캐릭터와 '○세' 나이 배지 겹침 수정: 92%였던 높이를 줄여서
               // (items-center로 세로 가운데 정렬되므로 위아래 여백이
               // 똑같이 늘어난다) 머리 위에 배지가 들어갈 여백을 확보한다.
-              className="pointer-events-none h-[78%] w-auto rounded-2xl object-contain ring-2 ring-amber-100/80 transition-[filter] duration-200"
+              className="pointer-events-none h-[78%] w-auto object-contain transition-[filter] duration-200"
               style={{
                 filter: tapped
                   ? 'drop-shadow(0 0 20px rgba(212, 175, 55, 0.85)) drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35))'
@@ -398,12 +400,9 @@ export default function GameStage({
               // PR #54 요청 2번: 프레임 자체가 더 커졌으니(위 frameClassName
               // 참고) 카드도 같이 키워서 "더 꽉 차고 눈에 잘 들어오는" 느낌을
               // 살렸다 — 비율/스케일 로직은 그대로.
-              // 지시서(연령대별 성장 캐릭터 이미지 적용): PR #56의 전신
-              // 일러스트는 배경을 제거한 투명 PNG라 카드 없이 drop-shadow만
-              // 썼지만, 이번 연령대별 그림은 배경이 그대로 살아있는
-              // 사각형 컷이라 카드 없이 띄우면 경계가 어색하게 떠 보인다 —
-              // rounded-2xl + ring + shadow로 "액자" 느낌을 주어 자연스럽게
-              // 만든다(일러스트 모드의 전체 프레임 톤과 같은 amber 계열).
+              // 지시서(배경 제거 요청): 연령대별 그림이 다시 배경 제거된
+              // 투명 PNG가 되어, PR #56과 같은 방식(카드 없이
+              // drop-shadow만)으로 되돌린다.
               <span
                 data-testid="age-scale-wrapper"
                 className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 sm:w-[230px] lg:w-[320px]"
@@ -413,7 +412,7 @@ export default function GameStage({
                   src={portraitSrc}
                   alt=""
                   aria-hidden
-                  className="h-auto w-full rounded-2xl object-contain ring-2 ring-amber-100/80"
+                  className="h-auto w-full object-contain"
                   style={{ filter: 'drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35))' }}
                 />
               </span>

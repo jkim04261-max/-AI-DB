@@ -80,7 +80,7 @@ export default function CustomizationRoom({
             data-testid="customization-age-portrait"
             src={portraitSrc}
             alt={`${companionType === 'nuri' ? '누리' : '두리'} 캐릭터`}
-            className="h-[140px] w-[140px] rounded-xl object-cover ring-2 ring-amber-100/80"
+            className="h-[140px] w-[140px] object-contain"
             style={{ filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4))' }}
           />
         ) : (
