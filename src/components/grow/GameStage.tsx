@@ -149,12 +149,13 @@ export default function GameStage({
   // 그림에 실제로 색이 반영되는 옷(OUTFIT_PALETTE_OVERRIDE에 있는
   // outfitId)을 장착한 경우에는 커스터마이징이 눈에 안 보이게 되므로
   // 계속 SVG를 쓴다 — 정적 그림 한 장으로는 옷 갈아입히기를 반영할 수
-  // 없기 때문이다. PR #56: 연령대별 전신 원화는 아직 없어서(캐릭터당
-  // 한 장뿐, characterFullBody.ts 참고) 더 이상 ageTier로 이미지 자체를
-  // 고르지 않는다 — 연령대 구분은 기존처럼 AGE_TIER_SCALE(크기)과
-  // 나이 배지로만 표현한다.
+  // 없기 때문이다.
+  // 지시서(연령대별 성장 캐릭터 이미지 적용): 연령대별 실제 그림이
+  // 생겨서 이제 ageTier로 이미지 자체를 고른다(characterFullBody.ts
+  // 참고). ageTier가 없는 호출부는 'junior_20s'(기존 "기본 모습"과 같은
+  // 뜻으로 쓰던 단계)를 기본값으로 쓴다.
   const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
-  const portraitSrc = outfitHasVisualOverride ? null : FULL_BODY_PORTRAIT_SRC[companionType]
+  const portraitSrc = outfitHasVisualOverride ? null : FULL_BODY_PORTRAIT_SRC[companionType][ageTier ?? 'junior_20s']
   const name = COMPANION_NAME[companionType]
   const moodIcon = MOOD_ICON[pose]
 
@@ -191,14 +192,14 @@ export default function GameStage({
             포맷이라 포즈 검증 e2e가 그대로 통한다.
             z-0(배경+ambient dim) < z-10(전신 일러스트) < z-20(말풍선·뱃지)로
             레이어를 명시적으로 분리해 서로 가리는 일이 없게 했다.
-            PR #56: 전신 원화는 배경을 제거한 투명 PNG라, PR #54까지
-            쓰던 사각형 카드 테두리(rounded-2xl + boxShadow)를 그대로
-            두면 캐릭터 주위에 빈 네모 테두리만 둥둥 떠 보인다("카드
-            형태를 없애라"는 PR #55 피드백과도 정면으로 어긋난다) —
-            그래서 테두리 없이 그림만 두고, 탭 피드백도 사각 박스가
-            아니라 실루엣 모양을 그대로 따라가는 drop-shadow 글로우로
-            바꿨다(box-shadow와 달리 drop-shadow는 투명 영역을 무시하고
-            알파 채널 윤곽만 따라간다). */}
+            PR #56 때는 전신 원화가 배경을 제거한 투명 PNG라, 사각형
+            카드 테두리를 없애고 실루엣만 따라가는 drop-shadow로
+            탭 피드백을 줬다.
+            지시서(연령대별 성장 캐릭터 이미지 적용): 연령대별 그림은
+            배경이 살아있는 사각형 컷이라, 테두리 없이 두면 다시 빈
+            네모가 떠 보이는 문제가 재발한다 — rounded-2xl + ring으로
+            액자 느낌을 주어 자연스럽게 만들되, 탭 피드백은 기존처럼
+            drop-shadow 글로우를 그대로 쓴다. */}
         <div
           data-testid="character-tap-target"
           role="img"
@@ -222,7 +223,7 @@ export default function GameStage({
               // 캐릭터와 '○세' 나이 배지 겹침 수정: 92%였던 높이를 줄여서
               // (items-center로 세로 가운데 정렬되므로 위아래 여백이
               // 똑같이 늘어난다) 머리 위에 배지가 들어갈 여백을 확보한다.
-              className="pointer-events-none h-[78%] w-auto object-contain transition-[filter] duration-200"
+              className="pointer-events-none h-[78%] w-auto rounded-2xl object-contain ring-2 ring-amber-100/80 transition-[filter] duration-200"
               style={{
                 filter: tapped
                   ? 'drop-shadow(0 0 20px rgba(212, 175, 55, 0.85)) drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35))'
@@ -396,10 +397,12 @@ export default function GameStage({
               // PR #54 요청 2번: 프레임 자체가 더 커졌으니(위 frameClassName
               // 참고) 카드도 같이 키워서 "더 꽉 차고 눈에 잘 들어오는" 느낌을
               // 살렸다 — 비율/스케일 로직은 그대로.
-              // PR #56: 전신 원화는 배경을 제거한 투명 PNG라 더 이상 사각형
-              // 카드(overflow-hidden rounded-2xl + ring + shadow)로 감싸지
-              // 않는다 — 일러스트 모드와 같은 이유로 "카드 형태"를 없애고
-              // drop-shadow로만 바닥에 그림자를 살짝 준다.
+              // 지시서(연령대별 성장 캐릭터 이미지 적용): PR #56의 전신
+              // 일러스트는 배경을 제거한 투명 PNG라 카드 없이 drop-shadow만
+              // 썼지만, 이번 연령대별 그림은 배경이 그대로 살아있는
+              // 사각형 컷이라 카드 없이 띄우면 경계가 어색하게 떠 보인다 —
+              // rounded-2xl + ring + shadow로 "액자" 느낌을 주어 자연스럽게
+              // 만든다(일러스트 모드의 전체 프레임 톤과 같은 amber 계열).
               <span
                 data-testid="age-scale-wrapper"
                 className="mx-auto block w-[190px] origin-bottom transition-transform duration-300 sm:w-[230px] lg:w-[320px]"
@@ -409,7 +412,7 @@ export default function GameStage({
                   src={portraitSrc}
                   alt=""
                   aria-hidden
-                  className="h-auto w-full object-contain"
+                  className="h-auto w-full rounded-2xl object-contain ring-2 ring-amber-100/80"
                   style={{ filter: 'drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35))' }}
                 />
               </span>
