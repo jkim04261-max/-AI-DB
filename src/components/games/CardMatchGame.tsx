@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { useMockWallet } from '../../hooks/useMockWallet'
 import { JOB_CARDS, type JobCardEntry } from '../../data/jobCards'
 
@@ -56,7 +56,11 @@ function speak(text: string) {
 // 성공 여부와 무관하게 항상 카드 아래에 따로 보여주고, 이미지
 // 영역만 실패 시 텍스트 블록으로 바뀐다. 실제 이미지 파일은 만들지
 // 않았으므로(지시서) 지금은 항상 이 fallback 경로를 탄다.
-function CardArt({ src, label }: { src: string; label: string }) {
+// 리팩터링(성능): props(src/label)가 원시값(string)뿐이고 부모
+// CardMatchGame의 잦은 상태 변화(flipped/busy 등)마다 전체 그리드가
+// 리렌더될 때 이미 뒤집힌/맞춘 카드까지 불필요하게 다시 그려지는 것을
+// 막기 위해 memo 적용 — 렌더 결과·동작은 동일하다.
+const CardArt = memo(function CardArt({ src, label }: { src: string; label: string }) {
   const [failed, setFailed] = useState(false)
   if (failed) {
     return (
@@ -65,8 +69,18 @@ function CardArt({ src, label }: { src: string; label: string }) {
       </div>
     )
   }
-  return <img src={src} alt={label} className="h-16 w-16 object-contain" onError={() => setFailed(true)} />
-}
+  return (
+    <img
+      src={src}
+      alt={label}
+      width={64}
+      height={64}
+      loading="lazy"
+      className="h-16 w-16 object-contain"
+      onError={() => setFailed(true)}
+    />
+  )
+})
 
 export default function CardMatchGame() {
   const wallet = useMockWallet()
