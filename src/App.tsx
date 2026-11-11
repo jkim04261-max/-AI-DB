@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage'
 import ChatListPage from './pages/ChatListPage'
 import ChatPage from './pages/ChatPage'
 import GrowPage from './pages/GrowPage'
+import CardMatchPage from './pages/CardMatchPage'
 import CategoryPage from './pages/CategoryPage'
 import TemplatesPage from './pages/TemplatesPage'
 import FavoritesPage from './pages/FavoritesPage'
@@ -32,6 +33,11 @@ export default function App() {
             <Route path="/chat" element={<ChatListPage />} />
             <Route path="/chat/:id" element={<ChatPage />} />
             <Route path="/grow" element={<GrowPage />} />
+            {/* 지시서(직업 카드 맞추기 미니게임): 신규 라우트. 새 라우트가
+                실제로 접근 가능하려면 이 테이블에 등록하는 것 말고는
+                방법이 없어, "기존 파일 수정 금지" 중 이 한 줄만
+                예외로 두었다(사용자 확인). */}
+            <Route path="/card-match" element={<CardMatchPage />} />
             <Route path="/category/:id" element={<CategoryPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
