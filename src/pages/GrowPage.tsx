@@ -682,7 +682,7 @@ export default function GrowPage() {
     return (
       <div className="mx-auto flex max-w-xl flex-col gap-6 px-4 py-8">
         <div className="flex items-center gap-2">
-          <img src="/assets/logo.png" alt="누리AI 로고" className="h-7 w-7 rounded-lg object-contain" />
+          <img src="/assets/logo.png" alt="누리AI 로고" width={28} height={28} className="h-7 w-7 rounded-lg object-contain" />
           <h1 className="text-xl font-bold text-amber-900">AI 키우기</h1>
         </div>
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-8 text-center">
@@ -767,7 +767,7 @@ export default function GrowPage() {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <img src="/assets/logo.png" alt="누리AI 로고" className="h-6 w-6 rounded-lg object-contain" />
+          <img src="/assets/logo.png" alt="누리AI 로고" width={24} height={24} className="h-6 w-6 rounded-lg object-contain" />
           <h1 className="text-lg font-bold text-amber-900">AI 키우기</h1>
         </div>
         <div className="flex items-center gap-2">

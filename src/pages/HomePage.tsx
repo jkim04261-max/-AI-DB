@@ -11,6 +11,8 @@ export default function HomePage() {
         <img
           src="/assets/logo.png"
           alt="누리AI 로고"
+          width={56}
+          height={56}
           className="h-14 w-14 rounded-2xl object-contain shadow-lg shadow-indigo-100"
         />
         <div>
