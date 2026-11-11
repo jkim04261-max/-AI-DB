@@ -1,6 +1,7 @@
 import { Star } from 'lucide-react'
-import CharacterSprite from './CharacterSprite'
 import type { CompanionType } from '../../context/GrowthContext'
+import type { AgeTier } from '../../data/characterAge'
+import { walkingPortraitSrc } from '../../data/characterWalking'
 
 // 지시서(8~9살 기초지식 3문제 완료 후 서점 외출 미션): 가르치기 완료
 // 보상 중 하나로 "서점에 다녀오는" 짧은 외출 이벤트를 보여주는 전용
@@ -24,11 +25,15 @@ export default function BookstoreOutingOverlay({
   companionType,
   storeName,
   onLeaveReview,
+  ageTier,
+  ageNumber,
 }: {
   stage: BookstoreOutingStage
   companionType: CompanionType
   storeName: string
   onLeaveReview: () => void
+  ageTier?: AgeTier
+  ageNumber?: number
 }) {
   const name = COMPANION_LABEL[companionType]
 
@@ -75,7 +80,13 @@ export default function BookstoreOutingOverlay({
         className="grow-walk-sprite motion-safe:animate-[grow-walk-across_2s_linear_infinite] absolute bottom-6 left-0"
         style={stage === 'walking-back' ? { transform: 'scaleX(-1)' } : undefined}
       >
-        <CharacterSprite companionType={companionType} pose="idle" size={64} />
+        <img
+          src={walkingPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)}
+          alt=""
+          aria-hidden
+          className="h-24 w-auto object-contain"
+          style={{ filter: 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35))' }}
+        />
       </div>
       <p className="absolute inset-x-0 top-4 text-center text-sm font-bold text-amber-900">{walkingLabel}</p>
     </div>
