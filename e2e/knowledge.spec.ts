@@ -231,6 +231,52 @@ test('teaching a knowledge item too advanced for the character\'s current age ti
   await expect(page.getByRole('button', { name: 'AI검증하기' })).toBeEnabled()
 })
 
+// 지시서(가르치기 입력 화면 즉각 피드백): 직접 입력 텍스트 영역에
+// 타이핑할 때마다 옆의 아이콘이 짧게 끄덕이고, AI검증이 "적합"으로
+// 끝나면 미션 결과 카드 위로 별 파티클 8개가 뜬다. 둘 다 순수 시각
+// 효과이며, 검증·저장 로직 자체(버튼 활성화, 저장 호출 시점 등)는
+// 기존 테스트가 이미 검증하므로 여기서는 새 시각 효과만 확인한다.
+test('typing in the teach textarea nods the icon, and an appropriate verification pops star particles', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+          verificationToken: 'mock-token-appropriate',
+          characterReply: '정확해요! 알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('📌 직접 입력하기', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('teach-input-nod-icon')).toHaveCount(0)
+  await page.getByTestId('knowledge-content-textarea').fill('거래를 두 번 기록한다')
+  await expect(page.getByTestId('teach-input-nod-icon')).toBeVisible()
+  // 문구 자체는 바뀌지 않아야 한다(e2e가 exact:true로 이 문구를 찾는
+  // 기존 셀렉터에 영향 없어야 함).
+  await expect(page.getByText('📌 직접 입력하기', { exact: true })).toBeVisible()
+
+  await expect(page.getByTestId('teach-success-particle')).toHaveCount(0)
+  await page.getByPlaceholder('지식 제목').fill('복식부기')
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+
+  await expect(page.getByText('적합', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('teach-success-particle').first()).toBeVisible()
+  expect(await page.getByTestId('teach-success-particle').count()).toBe(8)
+})
+
 test('verifying appropriate knowledge shows the result and enables 저장, which is not sent until clicked', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })

@@ -269,6 +269,44 @@ body {
   }
 }
 
+/* 지시서(가르치기 입력 화면 즉각 피드백): 직접 입력 텍스트 영역에
+   타이핑할 때마다 옆의 작은 아이콘이 한 번 "끄덕이는" 느낌을 준다 —
+   키 입력마다 아이콘을 다시 마운트해(React key) 애니메이션을 재시작
+   시키는 방식이라 별도 상태 토글 없이 가볍다. */
+@keyframes grow-input-nod {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  30% {
+    transform: rotate(-14deg) scale(1.15);
+  }
+  60% {
+    transform: rotate(10deg) scale(1.1);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+/* 지시서(가르치기 입력 화면 즉각 피드백): AI검증 결과가 "적합"일 때
+   미션 결과 카드 위로 별 파티클(최대 8개)이 터지는 연출 — 순수 CSS만
+   쓴다(라이브러리 추가 없음). 각 파티클의 목표 위치는 --tx/--ty로
+   JS에서 미리 계산해 넘기고, 이 keyframe은 중심에서 그 위치까지
+   옅어지며 퍼지는 것만 담당한다. */
+@keyframes grow-star-particle {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--tx) * 0.4), calc(-50% + var(--ty) * 0.4)) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0.5);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .grow-walk-sprite {
     animation: none !important;

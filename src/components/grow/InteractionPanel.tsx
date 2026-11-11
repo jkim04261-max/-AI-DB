@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import {
   useGrowth,
@@ -33,6 +33,15 @@ const SOURCE_LABEL: Record<KnowledgeEntry['source'], string> = {
   user_taught: '직접 가르침',
   ai_generated: '스스로 학습',
 }
+
+// 지시서(가르치기 입력 화면 즉각 피드백): AI검증이 "적합"으로 끝났을
+// 때 터지는 별 파티클 8개의 목표 위치 — 원 둘레에 고르게 배치한다.
+// 컴포넌트 밖에 두어 렌더마다 다시 계산하지 않는다.
+const STAR_PARTICLE_OFFSETS = Array.from({ length: 8 }, (_, i) => {
+  const angle = (i / 8) * Math.PI * 2
+  const radius = 56
+  return { tx: Math.round(Math.cos(angle) * radius), ty: Math.round(Math.sin(angle) * radius) }
+})
 
 interface DialogueLine {
   id: string
@@ -183,6 +192,14 @@ export default function InteractionPanel({
   const [recordsTotal, setRecordsTotal] = useState(0)
   const [expandedRecordId, setExpandedRecordId] = useState<number | null>(null)
 
+  // 지시서(가르치기 입력 화면 즉각 피드백): 타이핑마다 nodCount를
+  // 올려서 끄덕이는 아이콘을 매번 새로 마운트시키고(React key로
+  // 애니메이션 재시작), AI검증이 "적합"으로 끝날 때마다 celebrateCount를
+  // 올려 별 파티치 묶음을 새로 마운트한다. 둘 다 순수 시각 효과일 뿐,
+  // 기존 검증·저장·스탯/경제 로직에는 전혀 관여하지 않는다.
+  const [nodCount, setNodCount] = useState(0)
+  const [celebrateCount, setCelebrateCount] = useState(0)
+
   const isStale = verification !== null && (verifiedSnapshot?.title !== title || verifiedSnapshot?.content !== content)
 
   const handleTeach = async () => {
@@ -203,7 +220,9 @@ export default function InteractionPanel({
       // server-side (character_messages) — display exactly that text, not
       // a locally invented one.
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
+      const succeeded = result.verification.status === 'appropriate' && !result.ageBlocked
+      flashPose(succeeded ? 'happy' : 'sad', 2500)
+      if (succeeded) setCelebrateCount((c) => c + 1)
     } catch (err) {
       setVerification(null)
       setVerifiedSnapshot(null)
@@ -231,7 +250,9 @@ export default function InteractionPanel({
       setAgeBlocked(result.ageBlocked)
       setRequiredAgeTier(result.requiredAgeTier)
       pushLine('character', result.characterReply)
-      flashPose(result.verification.status === 'appropriate' && !result.ageBlocked ? 'happy' : 'sad', 2500)
+      const succeeded = result.verification.status === 'appropriate' && !result.ageBlocked
+      flashPose(succeeded ? 'happy' : 'sad', 2500)
+      if (succeeded) setCelebrateCount((c) => c + 1)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '스스로 공부하는 중 오류가 발생했어요.')
       flashPose('sad', 2500)
@@ -457,7 +478,23 @@ export default function InteractionPanel({
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
           경로. */}
       <div className="flex flex-col gap-3 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-4">
-        <p className="text-lg font-extrabold text-rose-400 sm:text-xl">📌 직접 입력하기</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-lg font-extrabold text-rose-400 sm:text-xl">📌 직접 입력하기</p>
+          {/* 지시서(가르치기 입력 화면 즉각 피드백): 타이핑할 때마다
+              nodCount가 올라 이 아이콘이 새로 마운트되며 짧게 끄덕인다 —
+              위 <p>의 정확한 문구(e2e가 exact:true로 찾음)는 바꾸지
+              않는다. */}
+          {nodCount > 0 && (
+            <span
+              key={nodCount}
+              data-testid="teach-input-nod-icon"
+              aria-hidden
+              className="motion-safe:animate-[grow-input-nod_0.3s_ease-out] text-lg"
+            >
+              ✏️
+            </span>
+          )}
+        </div>
         <input
           value={title}
           onChange={(e) => {
@@ -474,6 +511,7 @@ export default function InteractionPanel({
           onChange={(e) => {
             setContent(e.target.value)
             markManualEdit()
+            setNodCount((c) => c + 1)
           }}
           // 지시서: 연령대마다 "8살 수준으로" 같은 고정 문구 대신, 지금
           // 캐릭터의 실제 연령대(AGE_TIER_LABEL)를 넣어준다 — e2e는
@@ -506,7 +544,25 @@ export default function InteractionPanel({
       {actionError && <p className="text-base font-bold text-rose-300">{actionError}</p>}
 
       {verification && (
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-cyan-400/20 bg-slate-900/50 p-4">
+        <div className="relative flex flex-col gap-2.5 overflow-visible rounded-2xl border border-cyan-400/20 bg-slate-900/50 p-4">
+          {/* 지시서(가르치기 입력 화면 즉각 피드백): AI검증이 "적합"으로
+              끝날 때마다 celebrateCount가 올라 별 파티클 8개를 새로
+              마운트한다(순수 CSS, 라이브러리 없음) — 결과 배지/문구 등
+              기존 내용에는 전혀 손대지 않는다. */}
+          {celebrateCount > 0 && (
+            <div key={celebrateCount} aria-hidden className="pointer-events-none absolute inset-0 z-20">
+              {STAR_PARTICLE_OFFSETS.map((offset, i) => (
+                <span
+                  key={i}
+                  data-testid="teach-success-particle"
+                  className="absolute left-1/2 top-1/2 text-xl motion-safe:animate-[grow-star-particle_0.8s_ease-out_forwards]"
+                  style={{ '--tx': `${offset.tx}px`, '--ty': `${offset.ty}px`, animationDelay: `${i * 25}ms` } as CSSProperties}
+                >
+                  ⭐
+                </span>
+              ))}
+            </div>
+          )}
           <p className="text-lg font-extrabold text-cyan-200/90 sm:text-xl">📋 미션 결과</p>
           <span
             className={`self-start rounded-full px-3.5 py-1.5 text-base font-bold ${VERIFICATION_BADGE_CLASS[verification.status]}`}
