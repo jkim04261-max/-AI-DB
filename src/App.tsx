@@ -7,6 +7,7 @@ import ChatListPage from './pages/ChatListPage'
 import ChatPage from './pages/ChatPage'
 import GrowPage from './pages/GrowPage'
 import CardMatchPage from './pages/CardMatchPage'
+import JobQuizPage from './pages/JobQuizPage'
 import CategoryPage from './pages/CategoryPage'
 import TemplatesPage from './pages/TemplatesPage'
 import FavoritesPage from './pages/FavoritesPage'
@@ -38,6 +39,9 @@ export default function App() {
                 방법이 없어, "기존 파일 수정 금지" 중 이 한 줄만
                 예외로 두었다(사용자 확인). */}
             <Route path="/card-match" element={<CardMatchPage />} />
+            {/* 지시서(직업 그림 퀴즈): 이 기능도 새 라우트로 접근 가능해야
+                해서 등록한다. */}
+            <Route path="/job-quiz" element={<JobQuizPage />} />
             <Route path="/category/:id" element={<CategoryPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
