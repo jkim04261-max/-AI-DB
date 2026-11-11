@@ -8,6 +8,7 @@ import type { AppearanceTier } from '../../data/characterAppearance'
 import type { OutfitId } from '../../data/characterCustomization'
 import type { AgeTier } from '../../data/characterAge'
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
+import { eatingPortraitSrc } from '../../data/characterEating'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -24,14 +25,13 @@ const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '�
 // 캐릭터 그림"은 항상 딱 하나뿐이다.
 const ILLUSTRATED_PORTRAIT_ANCHOR = '50%'
 
+// 지시서(연령대별 식사 모습 이미지 적용): 'eating'은 이제 전용 전신
+// 그림(characterEating.ts)이 있어 더 이상 이모지 오버레이로 표현하지
+// 않는다 — 아래에서 portraitSrc 계산 시 직접 분기한다.
 const MOOD_ICON: Partial<Record<CharacterPose, string>> = {
   happy: '✨',
   sad: '💧',
   studying: '📖',
-  // 지시서(가르치기 완료 후 자동 식사 이벤트): 기본 일러스트 배경은
-  // 포즈별로 다른 그림을 그리지 않고(정적 전신 이미지) 이 기분 이모지
-  // 오버레이로만 포즈를 표현하므로, 'eating'도 같은 방식으로 추가한다.
-  eating: '🍙',
 }
 
 // PR #52: 일러스트 모드에서 쓰는 연령대 배지 — CharacterSprite(CSS 모드)
@@ -156,7 +156,11 @@ export default function GameStage({
   // 'junior_20s'(기존 "기본 모습"과 같은 뜻으로 쓰던 단계)를 기본값으로
   // 쓴다.
   const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
-  const portraitSrc = outfitHasVisualOverride ? null : fullBodyPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
+  const portraitSrc = outfitHasVisualOverride
+    ? null
+    : pose === 'eating'
+      ? eatingPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
+      : fullBodyPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
   const name = COMPANION_NAME[companionType]
   const moodIcon = MOOD_ICON[pose]
 
