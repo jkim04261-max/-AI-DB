@@ -1034,6 +1034,102 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
 })
 
+// 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가
+// 'eating'이 되면 기존 🍙 이모지 오버레이 대신 연령대별 전신 식사
+// 일러스트가 뜨고, 식사가 끝나 pose가 'idle'로 돌아가면 원래의 평상시
+// 전신 일러스트로 되돌아온다.
+test('the meal event swaps the illustrated portrait to the age-tier eating image, then back to idle', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-portrait',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  const portrait = page.getByTestId('illustrated-age-portrait-nuri')
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler/)
+  await expect(portrait).not.toHaveAttribute('src', /-eating/)
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(portrait).toHaveAttribute('src', /nuri-toddler-eating/)
+
+  // 2600ms 후 식사가 끝나 pose가 다시 idle로 돌아간다 — 평상시 전신
+  // 일러스트로 되돌아왔는지 확인한다.
+  await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 4000 })
+})
+
 // 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
 // "3회 저장" 신호를 공유하며 번갈아 뜬다 — 1번째 3회(round 0)는 식사,
 // 2번째 3회(round 1, 누적 6회)는 서점 외출이어야 한다.
