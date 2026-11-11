@@ -21,6 +21,7 @@ import ProfessionPicker from '../components/grow/ProfessionPicker'
 import TurnTransition from '../components/grow/TurnTransition'
 import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
+import UniversalMarket from '../components/grow/UniversalMarket'
 import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
@@ -68,6 +69,7 @@ const SHEET_TITLE: Record<GameMenuAction, string> = {
   growth: '성장 보기',
   customize: '커스터마이징 룸',
   market: '아이템 마켓',
+  universalMarket: '만능마켓',
   album: '앨범 · 기록',
 }
 // PR #49 요청 3: 텍스트 입력 폼(InteractionPanel/ExamPanel)을 대체하지는
@@ -714,8 +716,9 @@ export default function GrowPage() {
     // 등을 열면 연출과 화면이 서로 겹친다.
     if (bookstoreOuting || workingOnJob) return
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
-    // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외).
-    if (!character?.profession && action !== 'customize' && action !== 'market') return
+    // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외). 지시서(누리AI
+    // 만능마켓): 같은 이유로 만능마켓도 예외에 추가한다.
+    if (!character?.profession && action !== 'customize' && action !== 'market' && action !== 'universalMarket') return
     if (action === 'quiz' && !examSupported) return
     const label = TURN_TRANSITION_LABEL[action]
     if (!label || reduceMotion) {
@@ -1046,7 +1049,7 @@ export default function GrowPage() {
         </div>
       )}
 
-      {openSheet && character && (character.profession || openSheet === 'customize' || openSheet === 'market') && (
+      {openSheet && character && (character.profession || openSheet === 'customize' || openSheet === 'market' || openSheet === 'universalMarket') && (
         <BottomSheet
           title={SHEET_TITLE[openSheet]}
           onClose={() => setOpenSheet(null)}
@@ -1082,6 +1085,7 @@ export default function GrowPage() {
             />
           )}
           {openSheet === 'market' && <ItemMarket companionType={character.companionType} inventory={inventory} />}
+          {openSheet === 'universalMarket' && <UniversalMarket wallet={wallet} />}
         </BottomSheet>
       )}
 

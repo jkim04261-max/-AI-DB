@@ -1034,6 +1034,64 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
 })
 
+// 지시서(누리AI 만능마켓): 온보딩으로 지급된 체험판 가상 용돈으로
+// 만능마켓에서 물건을 구입하면 실제로 잔액이 차감되는지 검증한다.
+// 이미 배포된 "아이템 마켓"(Gold 경제)과는 완전히 별개의 화면·통화다.
+test('buying an item in the universal market (만능마켓) deducts from the mock allowance', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+
+  await page.getByRole('button', { name: '만능마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '만능마켓' })
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('1,000,000원')
+
+  await dialog.getByRole('button', { name: '의사 가운 세트' }).click()
+  await page.getByRole('button', { name: '구입하기' }).click()
+
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('975,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('975,000원')
+  await expect(dialog.getByText('최근 구입한 물건')).toBeVisible()
+})
+
 // 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가
 // 'eating'이 되면 기존 🍙 이모지 오버레이 대신 연령대별 전신 식사
 // 일러스트가 뜨고, 식사가 끝나 pose가 'idle'로 돌아가면 원래의 평상시

@@ -1,6 +1,6 @@
-import { BookOpen, MessageCircle, HelpCircle, Sparkles, TrendingUp, Images, Shirt, Store } from 'lucide-react'
+import { BookOpen, MessageCircle, HelpCircle, Sparkles, TrendingUp, Images, Shirt, Store, ShoppingBag } from 'lucide-react'
 
-export type GameMenuAction = 'teach' | 'chat-log' | 'quiz' | 'study' | 'growth' | 'album' | 'customize' | 'market'
+export type GameMenuAction = 'teach' | 'chat-log' | 'quiz' | 'study' | 'growth' | 'album' | 'customize' | 'market' | 'universalMarket'
 
 interface MenuItem {
   action: GameMenuAction
@@ -24,6 +24,9 @@ const ITEMS: MenuItem[] = [
   { action: 'album', label: '앨범·기록', icon: Images },
   { action: 'customize', label: '커스터마이징', icon: Shirt, alwaysEnabled: true },
   { action: 'market', label: '아이템 마켓', icon: Store, alwaysEnabled: true },
+  // 지시서(누리AI 만능마켓): 기존 "아이템 마켓"(Gold, 옷/배경)과 완전히
+  // 별개의 새 화면 — 직업 선택과 무관하게 항상 쓸 수 있다는 점은 같다.
+  { action: 'universalMarket', label: '만능마켓', icon: ShoppingBag, alwaysEnabled: true },
 ]
 
 export default function GameMenu({
