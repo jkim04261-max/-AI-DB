@@ -1193,6 +1193,11 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
   await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
   await expect(page.getByTestId('points-popup')).toContainText('+300P')
   await expect(page.getByTestId('bookstore-outing-overlay')).toBeVisible()
+  // 지시서(연령대별 걷는 모습 이미지 적용): "걸어가는 중"(2초짜리 단계,
+  // 도착 카드로 바뀌기 전) 연출이 더 이상 SVG 도형이 아니라 연령대별
+  // 전신 걷는 일러스트를 보여준다 — 도착 카드로 넘어가기 전에 먼저
+  // 확인한다.
+  await expect(page.getByTestId('bookstore-walk-sprite').locator('img')).toHaveAttribute('src', /nuri-toddler-walking/)
   await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
 
   await page.getByTestId('bookstore-leave-review-button').click()

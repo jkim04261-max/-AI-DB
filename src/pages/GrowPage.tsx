@@ -929,6 +929,8 @@ export default function GrowPage() {
                       companionType={character.companionType}
                       storeName={BOOKSTORE_NAME}
                       onLeaveReview={handleBookstoreReviewSubmit}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
                     />
                   )}
                 </div>
