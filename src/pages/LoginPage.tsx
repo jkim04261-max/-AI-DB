@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto flex max-w-sm flex-col items-center gap-6 px-4 py-14">
-      <img src="/assets/logo.png" alt="누리AI 로고" className="h-12 w-12 rounded-2xl object-contain" />
+      <img src="/assets/logo.png" alt="누리AI 로고" width={48} height={48} className="h-12 w-12 rounded-2xl object-contain" />
       <div className="text-center">
         <h1 className="text-xl font-bold text-slate-900">로그인</h1>
         <p className="mt-1 text-sm text-slate-400">누리AI에 다시 오신 걸 환영해요</p>

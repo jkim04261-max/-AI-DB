@@ -13,6 +13,8 @@ export default function Logo({ withIcon = true }: { withIcon?: boolean }) {
         <img
           src="/assets/logo.png"
           alt="누리AI 로고"
+          width={36}
+          height={36}
           className="h-9 w-9 shrink-0 rounded-xl object-contain"
         />
       )}

@@ -132,6 +132,9 @@ export default function ChatPage() {
                 <img
                   src="/assets/logo.png"
                   alt="누리AI"
+                  width={32}
+                  height={32}
+                  loading="lazy"
                   className="h-8 w-8 shrink-0 rounded-full object-cover"
                 />
               )}
@@ -159,6 +162,7 @@ export default function ChatPage() {
                           key={ai}
                           src={attachment.url}
                           alt={attachment.name ?? '첨부 이미지'}
+                          loading="lazy"
                           className="max-h-48 max-w-full rounded-lg object-contain"
                         />
                       ) : (
@@ -204,6 +208,8 @@ export default function ChatPage() {
               <img
                 src="/assets/logo.png"
                 alt="누리AI"
+                width={32}
+                height={32}
                 className="h-8 w-8 shrink-0 animate-pulse rounded-full object-cover"
               />
               <div className="flex max-w-[75%] items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2.5 text-sm text-slate-400">

@@ -192,6 +192,8 @@ export default function ChatInput({ onSendMessage, isLoading }: ChatInputProps) 
                 <img
                   src={s.previewUrl}
                   alt={s.file.name}
+                  width={64}
+                  height={64}
                   className="h-16 w-16 rounded-lg object-cover"
                 />
               ) : (
