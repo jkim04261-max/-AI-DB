@@ -46,7 +46,11 @@ export async function mockEmptyCharacters(page: Page) {
 export async function openChat(page: Page, id: number | string) {
   await mockEmptyCharacters(page)
   await page.goto('/chat')
-  const link = page.locator(`a[href="/chat/${id}"]`)
+  // 메인 대시보드 개편(사이드바 하단 "최근 대화" 스크롤 목록 추가)으로
+  // 같은 href를 가리키는 링크가 사이드바에도 하나 더 생겨, 이 selector가
+  // 더 이상 유일하게 매치되지 않는다 — ChatListPage 자신의 목록만
+  // 가리키도록 <main> 영역으로 좁힌다(사이드바는 <main> 밖에 있음).
+  const link = page.getByRole('main').locator(`a[href="/chat/${id}"]`)
   await link.waitFor()
   await link.click()
   await page.waitForURL(`**/chat/${id}`)
