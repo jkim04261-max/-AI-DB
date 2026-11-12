@@ -156,7 +156,10 @@ test.describe('chat', () => {
     await page.reload()
     await expect(page).toHaveURL(/\/chat$/)
 
-    await page.locator('a[href="/chat/4"]').click()
+    // 사이드바 "최근 대화" 목록에도 같은 href 링크가 하나 더 있어(메인
+    // 대시보드 개편), <main> 영역(ChatListPage 자신의 목록)으로 좁힌다 —
+    // openChat()의 selector와 같은 이유.
+    await page.getByRole('main').locator('a[href="/chat/4"]').click()
     await expect(page.getByText('저장된 질문')).toBeVisible()
     await expect(page.getByText('저장된 답변')).toBeVisible()
   })

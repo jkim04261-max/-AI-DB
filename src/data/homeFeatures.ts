@@ -1,13 +1,19 @@
-import { Bot, Clapperboard, FileSearch, MessageCircle, Music, Sprout, type LucideIcon } from 'lucide-react'
+import { FileSearch, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
 
-// The 6 entry points shown on the home screen. `action` decides what
-// clicking a card actually does:
-//  - 'newChat': starts a new conversation (reuses useChats().startNewChat,
-//    the same mechanism the sidebar/bottom-nav "새 대화" buttons already use)
-//  - 'link': navigates to an existing, real route
-//  - 'comingSoon': not implemented yet — never navigates or calls an API,
-//    just shows a short inline notice (see FeatureCards.tsx). Do not repoint
-//    this at a route or endpoint until the feature actually exists.
+// 지시서(메인 대시보드 전면 개편): 예전엔 이 4개(원래 6개 — "비서·직원
+// 만들기" 제거, "동영상 만들기"+"음악 만들기"를 "미디어 만들기" 하나로
+// 통합)가 전부 홈 화면 카드 그리드(FeatureCards.tsx)에 그대로 나왔지만,
+// 지금은 홈 화면(HomePage.tsx)이 이 중 'chat'/'grow' 두 개만 직접 꺼내
+// 쓰고, 나머지('analyze'/'media')는 사이드바(Sidebar.tsx, nav.ts의
+// sidebarFeatureItems)에서만 보인다. FeatureCards.tsx 자체는 삭제하지
+// 않았다(기존 파일 삭제 금지) — 지금은 어디서도 쓰이지 않는다.
+// `action`이 클릭 시 동작을 정한다:
+//  - 'newChat': 새 대화 시작 (useChats().startNewChat 재사용, 사이드바/
+//    하단 네비게이션의 "새 대화" 버튼과 같은 메커니즘)
+//  - 'link': 이미 존재하는 실제 라우트로 이동
+//  - 'comingSoon': 아직 구현 안 됨 — 라우팅도 API 호출도 하지 않고 짧은
+//    안내만 띄움(ComingSoonToast). 실제 기능이 생기기 전까지는 라우트/
+//    엔드포인트로 바꾸지 말 것.
 export type HomeFeatureAction =
   | { kind: 'newChat' }
   | { kind: 'link'; to: string }
@@ -50,24 +56,10 @@ export const homeFeatures: HomeFeature[] = [
     action: { kind: 'link', to: '/grow' },
   },
   {
-    id: 'assistant',
-    icon: Bot,
-    title: '비서·직원 만들기',
-    description: '나만의 AI 비서와 직원을 만들어 보세요',
-    action: { kind: 'comingSoon' },
-  },
-  {
-    id: 'video',
-    icon: Clapperboard,
-    title: '동영상 만들기',
-    description: '아이디어를 영상으로 만들어 보세요',
-    action: { kind: 'comingSoon' },
-  },
-  {
-    id: 'music',
-    icon: Music,
-    title: '음악 만들기',
-    description: 'AI와 함께 음악을 만들어 보세요',
+    id: 'media',
+    icon: Image,
+    title: '미디어 만들기',
+    description: '동영상과 음악을 AI로 만들어 보세요',
     action: { kind: 'comingSoon' },
   },
 ]
