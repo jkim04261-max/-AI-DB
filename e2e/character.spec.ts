@@ -200,6 +200,63 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
 })
 
+// 지시서(성별 필드 추가): 생일·거주지역과 같은 원칙의 플레이버 전용
+// 입력이다 — 어느 값을 고르든 생성되는 캐릭터(companionType)에도,
+// 저장되는 데이터(PATCH 바디)에도 전혀 영향을 주지 않아야 한다.
+test('the gender field in the opening profile screen is flavor-only — it never changes which character is created or what gets saved', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let postBody: { companionType?: string } | null = null
+  let patchBody: { companionType?: string; profession?: string } | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      postBody = route.request().postDataJSON()
+      const created = { id: 1, user_id: USER.id, companion_type: postBody?.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    if (method === 'PATCH') {
+      patchBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'custom', custom_profession_label: '숲해설가', level: 1, exp: 0, created_at: new Date().toISOString() },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+
+  await expect(page.getByTestId('opening-profile-gender-male')).not.toBeChecked()
+  await expect(page.getByTestId('opening-profile-gender-female')).not.toBeChecked()
+
+  // 캐릭터는 이미 "누리"로 정해져 있는데(남성 전용 캐릭터), 플레이버
+  // 입력으로는 일부러 반대인 "여성"을 고른다 — 그래도 아무 영향이 없어야
+  // 한다는 것이 이 테스트의 핵심이다.
+  await page.getByTestId('opening-profile-gender-female').click()
+  await expect(page.getByTestId('opening-profile-gender-female')).toBeChecked()
+
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+  expect(postBody).toMatchObject({ companionType: 'nuri' })
+  expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom' })
+  expect(patchBody).not.toHaveProperty('gender')
+})
+
 test('a user who already has both characters sees no creation UI, just their cards', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })

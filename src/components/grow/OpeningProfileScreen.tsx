@@ -9,17 +9,22 @@ export interface OpeningProfile {
   name: string
   birthday: string
   region: string
+  gender: '' | 'male' | 'female'
   profession: string
 }
 
 // Stage 1(오프닝 프로필): 신규 캐릭터를 처음 만들 때 보여주는 몰입형
-// 시작 화면 — 이름/생일/거주지역/자유 직업을 입력받는다. 캐릭터 이름을
-// 제외한 나머지(생일·거주지역)는 선택 입력이고, 직업도 비워두면
-// 건너뛸 수 있다(나중에 기존 "직업 선택"에서 골라도 된다).
+// 시작 화면 — 이름/생일/거주지역/성별/자유 직업을 입력받는다. 캐릭터
+// 이름을 제외한 나머지(생일·거주지역·성별)는 선택 입력이고, 직업도
+// 비워두면 건너뛸 수 있다(나중에 기존 "직업 선택"에서 골라도 된다).
 //
 // 이 화면 자체는 어떤 값도 저장하지 않는다 — onComplete로 입력값만
 // 그대로 올려보내고, 실제로 무엇을 할지(캐릭터 생성·직업 저장 API
-// 호출 여부)는 호출부(GrowPage)가 결정한다.
+// 호출 여부)는 호출부(GrowPage)가 결정한다. 성별은 생일·거주지역과
+// 같은 원칙의 플레이버 전용 입력이다 — 어느 캐릭터(누리/두리)를
+// 키울지는 이 화면이 열리기 전에 이미 정해져 있고(호출부가 넘겨주는
+// companionType), 성별 선택값이 그 결정에 영향을 주거나 DB에 저장되지
+// 않는다.
 export default function OpeningProfileScreen({
   companionType,
   onComplete,
@@ -34,6 +39,7 @@ export default function OpeningProfileScreen({
   const [name, setName] = useState(COMPANION_DEFAULT_NAME[companionType])
   const [birthday, setBirthday] = useState('')
   const [region, setRegion] = useState('')
+  const [gender, setGender] = useState<'' | 'male' | 'female'>('')
   const [profession, setProfession] = useState('')
 
   const canStart = name.trim().length > 0 && !submitting
@@ -56,7 +62,7 @@ export default function OpeningProfileScreen({
           <p className="text-2xl">✨</p>
           <h1 className="text-lg font-bold text-cyan-100">{COMPANION_LABEL[companionType]}와 함께하는 첫걸음</h1>
           <p className="text-xs text-cyan-200/70">
-            {COMPANION_LABEL[companionType]}에게 이름과 간단한 프로필을 알려주세요. 생일·거주지역·직업은 비워두고 나중에 채워도 괜찮아요.
+            {COMPANION_LABEL[companionType]}에게 이름과 간단한 프로필을 알려주세요. 생일·거주지역·성별·직업은 비워두고 나중에 채워도 괜찮아요.
           </p>
         </div>
 
@@ -95,6 +101,46 @@ export default function OpeningProfileScreen({
           />
         </label>
 
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-xs font-semibold text-cyan-200/80">성별 (선택)</legend>
+          <div className="flex gap-2">
+            <label
+              className={`flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                gender === 'male'
+                  ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-100'
+                  : 'border-cyan-400/25 bg-slate-800/70 text-slate-300'
+              }`}
+            >
+              <input
+                type="radio"
+                name="opening-profile-gender"
+                data-testid="opening-profile-gender-male"
+                checked={gender === 'male'}
+                onChange={() => setGender('male')}
+                className="accent-cyan-400"
+              />
+              남성
+            </label>
+            <label
+              className={`flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                gender === 'female'
+                  ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-100'
+                  : 'border-cyan-400/25 bg-slate-800/70 text-slate-300'
+              }`}
+            >
+              <input
+                type="radio"
+                name="opening-profile-gender"
+                data-testid="opening-profile-gender-female"
+                checked={gender === 'female'}
+                onChange={() => setGender('female')}
+                className="accent-cyan-400"
+              />
+              여성
+            </label>
+          </div>
+        </fieldset>
+
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-cyan-200/80">직업 (선택, 자유 입력)</span>
           <input
@@ -115,7 +161,7 @@ export default function OpeningProfileScreen({
           <button
             type="button"
             data-testid="opening-profile-start-button"
-            onClick={() => onComplete({ name: name.trim(), birthday, region, profession: profession.trim() })}
+            onClick={() => onComplete({ name: name.trim(), birthday, region, gender, profession: profession.trim() })}
             disabled={!canStart}
             className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-[0_0_12px_rgba(56,189,248,0.4)] hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50"
           >
