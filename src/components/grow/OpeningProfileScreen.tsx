@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { CompanionType } from '../../context/GrowthContext'
 import fantasyLibraryBgImg from '../../assets/grow/fantasy-library-bg.webp'
+import { GROW_INITIAL_ALLOWANCE_WON } from '../../hooks/useMockWallet'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const COMPANION_DEFAULT_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -108,7 +109,7 @@ export default function OpeningProfileScreen({
         </label>
 
         <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs text-amber-200">
-          🎁 시작하면 가상 용돈 <span className="font-bold">1,000,000원</span>을 받아요 (체험판 — 새로고침하면 초기화돼요)
+          🎁 시작하면 가상 용돈 <span className="font-bold">{GROW_INITIAL_ALLOWANCE_WON.toLocaleString('ko-KR')}원</span>을 받아요 (체험판 — 새로고침하면 초기화돼요)
         </div>
 
         <div className="flex flex-col gap-2">

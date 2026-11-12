@@ -1065,7 +1065,7 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 
   await page.getByRole('button', { name: '가르치기' }).click()
   for (let i = 0; i < 3; i++) {
@@ -1077,7 +1077,7 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   }
 
   await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
 // 지시서(누리AI 만능마켓): 온보딩으로 지급된 체험판 가상 용돈으로
@@ -1124,17 +1124,17 @@ test('buying an item in the universal market (만능마켓) deducts from the moc
   await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 
   await page.getByRole('button', { name: '만능마켓' }).click()
   const dialog = page.getByRole('dialog', { name: '만능마켓' })
-  await expect(dialog.getByTestId('universal-market-balance')).toContainText('1,000,000원')
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('100,000원')
 
   await dialog.getByRole('button', { name: '의사 가운 세트' }).click()
   await page.getByRole('button', { name: '구입하기' }).click()
 
-  await expect(dialog.getByTestId('universal-market-balance')).toContainText('975,000원')
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('975,000원')
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('75,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('75,000원')
   await expect(dialog.getByText('최근 구입한 물건')).toBeVisible()
 })
 
@@ -1312,8 +1312,8 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
 
 // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사(1번째 3회) → 서점
 // 외출(2번째 3회)에 이어, 3번째 3회(누적 9회)는 알바 이벤트가 뜨고
-// 체험판 용돈이 늘어나야 한다. 온보딩으로 받은 1,000,000원에서 식사비
-// 10,000원이 빠지고 알바 수입 20,000원이 더해지면 1,010,000원이다
+// 체험판 용돈이 늘어나야 한다. 온보딩으로 받은 100,000원에서 식사비
+// 10,000원이 빠지고 알바 수입 20,000원이 더해지면 110,000원이다
 // (서점 이벤트의 +300P는 용돈이 아닌 별도 체험판 골드라 영향 없음).
 test('a third round of 3 saves (9 total) triggers the part-time job event and adds 20,000원 to the mock allowance', async ({ page }) => {
   await failUnmockedApiCalls(page)
@@ -1385,7 +1385,7 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 
   const teachThreeTimes = async (roundLabel: string) => {
     await page.getByRole('button', { name: '가르치기' }).click()
@@ -1400,7 +1400,7 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
 
   await teachThreeTimes('round0') // 식사: -10,000원
   await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('990,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   await teachThreeTimes('round1') // 서점: 용돈이 아니라 체험판 골드 +300P
   await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
@@ -1411,5 +1411,5 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
   await expect(page.getByTestId('money-popup')).toContainText('20,000원')
   await expect(page.getByTestId('speech-bubble')).toContainText('아르바이트해서')
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,010,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('110,000원')
 })

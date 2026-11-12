@@ -115,8 +115,9 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   await expect(page.getByText('어린이', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
-  // Stage 1: 온보딩을 거치면 체험판 가상 용돈 1,000,000원이 즉시 뜬다.
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('1,000,000원')
+  // Stage 1: 온보딩을 거치면 체험판 가상 용돈 100,000원이 즉시 뜬다
+  // (GROW_INITIAL_ALLOWANCE_WON, 지시서에 따라 1,000,000원→100,000원).
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 })
 
 // Stage 1(오프닝 프로필): 취소하면 캐릭터가 생성되지 않고 그대로
