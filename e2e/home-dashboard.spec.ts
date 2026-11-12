@@ -108,6 +108,20 @@ test('sidebar 문서·사진 분석 still routes to the existing /category/docum
   await expect(page).toHaveURL(/\/category\/document$/)
 })
 
+// 지시서(직업 카드 맞추기 게임 연동): 이미 있던 /card-match 라우트로
+// 들어갈 입구가 사이드바에 새로 생겼는지 확인 — 메인 대시보드([대화]/
+// [AI 키우기] 2개 카드 레이아웃)는 전혀 건드리지 않았으므로 여기서는
+// 안 늘어났는지도 함께 확인한다.
+test('sidebar 직업 카드 맞추기 routes to /card-match, and the home screen 2-card layout is unaffected', async ({ page }) => {
+  await setup(page)
+  await page.locator('aside').getByText('직업 카드 맞추기').click()
+  await expect(page).toHaveURL(/\/card-match$/)
+
+  await page.goto('/')
+  const main = page.getByRole('main')
+  await expect(main.getByText('직업 카드 맞추기')).toHaveCount(0)
+})
+
 test('sidebar library section shows a coming-soon notice, and recent chats scroll list links to each conversation', async ({
   page,
 }) => {
