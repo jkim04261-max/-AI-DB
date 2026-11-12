@@ -104,6 +104,18 @@ export function toddlerProfessionGreeting(professionLabel: string): string {
   return `나 ${professionLabel} 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!`
 }
 
+// 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후(오프닝 화면을 막
+// 통과한 시점) 한 번 보여주는 인사말 — 입력한 캐릭터 이름/직업을 그대로
+// 끼워 넣는다. 이름은 OpeningProfileScreen에서 항상 값이 있도록
+// 보장되지만(비워두면 시작 버튼이 비활성화됨), 혹시라도 비어 있으면
+// 지시서가 요구한 기본값으로 대체한다. 직업은 선택 입력이라 비어 있을
+// 수 있다(professionLabel이 null).
+export function openingGreeting(name: string, professionLabel: string | null): string {
+  if (!name) return '안녕하세요! 저를 가르쳐주세요?'
+  if (!professionLabel) return `안녕하세요, ${name}님이에요! 저를 가르쳐주세요?`
+  return `안녕하세요, ${name}님이에요! 저는 ${professionLabel}입니다. 저를 가르쳐주세요?`
+}
+
 // 연령대에 비해 너무 어려운 지식을 가르치려 할 때 보여줄 거절 메시지 —
 // 요청 3번의 예시 문구를 그대로 따른다. requiredLabel은 그 지식이 원래
 // 필요한 최소 연령대의 라벨이다.

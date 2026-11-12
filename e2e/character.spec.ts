@@ -258,6 +258,106 @@ test('the gender field in the opening profile screen is flavor-only — it never
   expect(patchBody).not.toHaveProperty('gender')
 })
 
+// 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후 0.5초 뒤 페이드인되는
+// 인사말 — 입력한 이름/직업이 그대로 들어가는지, 기존 showBubble의
+// 기본 지속시간(3.2초)이 아니라 이 인사말만의 더 긴 지속시간(5초)이
+// 적용되는지 확인한다.
+test('the opening greeting bubble fades in ~0.5s after onboarding, shows the entered name/profession, and lasts longer than the default bubble duration', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() } }),
+      })
+      return true
+    }
+    if (method === 'PATCH') {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: 'custom', custom_profession_label: body.customProfessionLabel, level: 1, exp: 0, created_at: new Date().toISOString() },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('opening-profile-name-input').fill('신새별')
+  await page.getByTestId('opening-profile-profession-input').fill('목욕도우미')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  // 0.5초 지연 — 클릭 직후(인사말 타이머가 걸릴 시간조차 없는 시점)에는
+  // 아직 안 떠 있어야 한다. CI처럼 느린 환경에서 "정확히 300ms" 같은
+  // 고정 대기는 0.5초 지연과의 여유가 너무 좁아 간헐적으로 깨졌다
+  // (이미 떠 있는데 "0이어야 한다"고 기대) — 대기 없이 클릭 바로
+  // 다음에 확인해 그 여유를 없앴다.
+  await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
+
+  await expect(page.getByTestId('speech-bubble')).toContainText(
+    '안녕하세요, 신새별님이에요! 저는 목욕도우미입니다. 저를 가르쳐주세요?',
+    { timeout: 3000 },
+  )
+
+  // 기존 showBubble 기본 지속시간(3.2초)이 지난 시점(총 경과 약 4초)에도
+  // 여전히 떠 있어야 한다 — 이 인사말만 5초로 더 길게 설정됐다는 증거.
+  await page.waitForTimeout(3300)
+  await expect(page.getByTestId('speech-bubble')).toBeVisible()
+
+  // 5초가 다 지난 시점(총 경과 약 5.8초)에는 자동으로 사라져 있어야 한다.
+  await expect(page.getByTestId('speech-bubble')).toHaveCount(0, { timeout: 2500 })
+})
+
+test('clicking the character dismisses the opening greeting bubble early', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() } }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '두리 만들기 (여)' }).click()
+  await page.getByTestId('opening-profile-name-input').fill('아름이')
+  // 직업은 비워둔다 — 기본값(fallback) 문구로 이어지는지도 함께 확인.
+  await page.getByTestId('opening-profile-start-button').click()
+
+  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 아름이님이에요! 저를 가르쳐주세요?', {
+    timeout: 2000,
+  })
+
+  await page.getByTestId('character-tap-target').click()
+  await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
+})
+
 test('a user who already has both characters sees no creation UI, just their cards', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })

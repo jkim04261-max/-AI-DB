@@ -25,7 +25,7 @@ import UniversalMarket from '../components/grow/UniversalMarket'
 import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
-import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
+import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -214,6 +214,14 @@ export default function GrowPage() {
   const prevAgeTierRef = useRef<AgeTier | null>(null)
   const prevOpenSheetRef = useRef<GameMenuAction | null>(null)
   const bubbleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후 0.5초 뒤 띄우는
+  // 인사말 말풍선 전용 상태 — 그 지연(500ms) 예약 타이머와, 지금 뜬
+  // 말풍선이 "클릭하면 바로 닫을 수 있는 그 인사말"인지 표시하는
+  // 플래그. 다른 showBubble 호출(식사·알바 등 기존 이벤트)에는 전혀
+  // 영향을 주지 않는다 — showBubble은 매 호출마다 이 플래그를 false로
+  // 되돌린 뒤, 이 인사말 호출에서만 다시 true로 켠다.
+  const openingGreetingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dismissibleGreetingRef = useRef(false)
   const levelUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const evolveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -440,6 +448,7 @@ export default function GrowPage() {
   useEffect(() => {
     return () => {
       if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
+      if (openingGreetingTimeoutRef.current) clearTimeout(openingGreetingTimeoutRef.current)
       if (levelUpTimeoutRef.current) clearTimeout(levelUpTimeoutRef.current)
       if (evolveTimeoutRef.current) clearTimeout(evolveTimeoutRef.current)
       if (turnTransitionTimeoutRef.current) clearTimeout(turnTransitionTimeoutRef.current)
@@ -450,7 +459,7 @@ export default function GrowPage() {
     }
   }, [])
 
-  const showBubble = (text: string) => {
+  const showBubble = (text: string, durationMs = 3200) => {
     // 진입 시 예약된 "먼저 말 거는" 말풍선이 아직 안 떴다면, 지금 다른
     // 이유로 말풍선을 띄우는 이 호출이 먼저다 — 나중에 그 지연 타이머가
     // 뒤늦게 발동해 지금 막 띄운 말풍선을 덮어쓰지 않도록 취소한다.
@@ -458,9 +467,12 @@ export default function GrowPage() {
       clearTimeout(questBubbleTimeoutRef.current)
       questBubbleTimeoutRef.current = null
     }
+    // 이 호출이 "클릭하면 바로 닫히는 인사말"이 아니라면 항상 꺼둔다 —
+    // 인사말 호출 쪽(handleOnboardingComplete)에서만 명시적으로 다시 켠다.
+    dismissibleGreetingRef.current = false
     setBubbleText(text)
     if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
-    bubbleTimeoutRef.current = setTimeout(() => setBubbleText(null), 3200)
+    bubbleTimeoutRef.current = setTimeout(() => setBubbleText(null), durationMs)
   }
 
   // Stage 1(오프닝 프로필): OpeningProfileScreen이 모은 입력값을 받아
@@ -477,11 +489,26 @@ export default function GrowPage() {
       await createCharacter(companionType)
       if (profile.profession) {
         await setProfession(companionType, 'custom', profile.profession)
-        showBubble(toddlerProfessionGreeting(profile.profession))
       }
       wallet.grantInitialAllowance(GROW_INITIAL_ALLOWANCE_WON)
       selectCompanion(companionType)
       setOnboardingFor(null)
+
+      // 지시서(캐릭터 인사말 말풍선): AI 키우기 메인 화면에 막 들어왔을
+      // 때 0.5초 뒤 페이드인되는 인사말 — 입력한 이름·직업을 그대로
+      // 끼워 넣는다(기존 toddlerProfessionGreeting과 달리 이름도 포함).
+      // 5초 후 자동으로 사라지거나, 그 전에 캐릭터를 탭하면 바로 닫힌다
+      // (아래 onTapCharacter 참고). 이름·직업은 이 onComplete 콜백에만
+      // 잠깐 존재하는 값이라(OpeningProfileScreen도 어디에도 저장하지
+      // 않음, 생일·거주지역과 같은 원칙) 재방문 시에는 다시 보여줄 수
+      // 없다 — "프로필 생성 직후"라는 지시서의 범위와 정확히 일치한다.
+      const greetingName = profile.name.trim()
+      const greetingProfession = profile.profession.trim() || null
+      openingGreetingTimeoutRef.current = setTimeout(() => {
+        openingGreetingTimeoutRef.current = null
+        showBubble(openingGreeting(greetingName, greetingProfession), 5000)
+        dismissibleGreetingRef.current = true
+      }, 500)
     } catch (err) {
       setError(err instanceof Error ? err.message : '캐릭터를 만드는 중 오류가 발생했어요.')
     } finally {
@@ -877,7 +904,18 @@ export default function GrowPage() {
                     profession={character.profession}
                     pose={pose}
                     bubbleText={bubbleText}
-                    onTapCharacter={() => showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')}
+                    onTapCharacter={() => {
+                      // 지시서(캐릭터 인사말 말풍선): 인사말이 떠 있는 동안
+                      // 캐릭터를 탭하면(= 화면 클릭) 기존 탭 반응으로
+                      // 덮어쓰지 않고 그냥 닫는다.
+                      if (dismissibleGreetingRef.current) {
+                        dismissibleGreetingRef.current = false
+                        if (bubbleTimeoutRef.current) clearTimeout(bubbleTimeoutRef.current)
+                        setBubbleText(null)
+                        return
+                      }
+                      showBubble(character.profession ? '안녕하세요!' : '직업을 골라주세요!')
+                    }}
                     onPropClick={handlePropClick}
                     tier={tier}
                     ageTier={ageTier}
