@@ -1,4 +1,4 @@
-import { FileSearch, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
+import { FileSearch, Gamepad2, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
 
 // 지시서(메인 대시보드 전면 개편): 예전엔 이 4개(원래 6개 — "비서·직원
 // 만들기" 제거, "동영상 만들기"+"음악 만들기"를 "미디어 만들기" 하나로
@@ -61,5 +61,19 @@ export const homeFeatures: HomeFeature[] = [
     title: '미디어 만들기',
     description: '동영상과 음악을 AI로 만들어 보세요',
     action: { kind: 'comingSoon' },
+  },
+  // 지시서(직업 카드 맞추기 게임 연동): 이미 구현·배포돼 있던 /card-match
+  // 라우트(CardMatchPage)에는 그동안 어디에서도 들어갈 입구가 없었다 —
+  // 이 항목을 추가하면 sidebarFeatureItems(nav.ts, 'chat'만 제외하고
+  // homeFeatures를 그대로 재사용)에 자동으로 뜬다. HomePage.tsx는
+  // id==='chat'||'grow'만 따로 골라 쓰므로, 지시서로 확정된 "메인
+  // 대시보드엔 [대화]/[AI 키우기] 2개만" 레이아웃에는 영향이 없다 —
+  // 입구는 사이드바에만 추가된다.
+  {
+    id: 'cardMatch',
+    icon: Gamepad2,
+    title: '직업 카드 맞추기',
+    description: '직업과 도구 카드를 맞추고 용돈을 모아보세요',
+    action: { kind: 'link', to: '/card-match' },
   },
 ]
