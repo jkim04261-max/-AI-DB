@@ -1062,7 +1062,7 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
@@ -1121,7 +1121,7 @@ test('buying an item in the universal market (만능마켓) deducts from the moc
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
@@ -1209,7 +1209,7 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
 
@@ -1382,7 +1382,7 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')

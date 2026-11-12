@@ -1,3 +1,4 @@
+import { companionForGender, genderForCompanion, normalizeGender } from '../../shared/characterGender'
 import { useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Briefcase, BookOpen } from 'lucide-react'
@@ -136,6 +137,11 @@ export default function GrowPage() {
   const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge, getUsage } = useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
+  useEffect(() => {
+    if (characters.some(c => c.companionType === selected)) {
+      console.log('[gender:render]', { gender: genderForCompanion(selected), companionType: selected, characterName: selected === 'nuri' ? '누리' : '두리' })
+    }
+  }, [characters, selected])
   const [error, setError] = useState<string | null>(null)
   // Stage 1(오프닝 프로필): 신규 캐릭터를 만들 때 바로 생성하지 않고
   // 이름·생일·거주지역·자유 직업을 먼저 입력받는 화면을 거친다 — 어느
@@ -482,11 +488,13 @@ export default function GrowPage() {
   // wallet 체험판 상태)에만 반영한다.
   const handleOnboardingComplete = async (profile: OpeningProfile) => {
     if (!onboardingFor) return
-    const companionType = onboardingFor
+    const gender = normalizeGender(profile.gender)
+    const companionType = gender ? companionForGender(gender) : onboardingFor
+    console.log('[gender:submit]', { gender, companionType })
     setOnboardingSubmitting(true)
     setError(null)
     try {
-      await createCharacter(companionType)
+      await createCharacter(companionType, gender ?? undefined)
       if (profile.profession) {
         await setProfession(companionType, 'custom', profile.profession)
       }
@@ -1023,7 +1031,7 @@ export default function GrowPage() {
                 disabled={onboardingFor !== null}
                 className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
-                누리 만들기 (남)
+                누리 만들기 (여)
               </button>
             )}
             {!hasDuri && (
@@ -1032,7 +1040,7 @@ export default function GrowPage() {
                 disabled={onboardingFor !== null}
                 className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
               >
-                두리 만들기 (여)
+                두리 만들기 (남)
               </button>
             )}
           </div>
