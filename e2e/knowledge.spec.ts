@@ -1231,7 +1231,7 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
 
   // 2600ms 후 식사가 끝나 pose가 다시 idle로 돌아간다 — 평상시 전신
   // 일러스트로 되돌아왔는지 확인한다.
-  await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 4000 })
+  await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 9000 })
 })
 
 // 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
@@ -1302,11 +1302,11 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
   // 전신 걷는 일러스트를 보여준다 — 도착 카드로 넘어가기 전에 먼저
   // 확인한다.
   await expect(page.getByTestId('bookstore-walk-sprite').locator('img')).toHaveAttribute('src', /nuri-toddler-walking/)
-  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
+  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible({ timeout: 8000 })
 
   await page.getByTestId('bookstore-leave-review-button').click()
   await expect(page.getByTestId('speech-bubble')).toContainText('인체해부도')
-  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('speech-bubble')).toContainText('다녀왔어요')
 })
 
@@ -1316,6 +1316,8 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
 // 10,000원이 빠지고 알바 수입 20,000원이 더해지면 110,000원이다
 // (서점 이벤트의 +300P는 용돈이 아닌 별도 체험판 골드라 영향 없음).
 test('a third round of 3 saves (9 total) triggers the part-time job event and adds 20,000원 to the mock allowance', async ({ page }) => {
+  // This flow includes 11 seconds of visible walking plus meal and job scenes.
+  test.setTimeout(60_000)
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1403,9 +1405,9 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   await teachThreeTimes('round1') // 서점: 용돈이 아니라 체험판 골드 +300P
-  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
+  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible({ timeout: 8000 })
   await page.getByTestId('bookstore-leave-review-button').click()
-  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 5000 })
+  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 8000 })
 
   await teachThreeTimes('round2') // 알바: +20,000원
   await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')

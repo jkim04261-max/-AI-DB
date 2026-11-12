@@ -292,7 +292,7 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 
   await expect(page.getByTestId('speech-bubble')).toContainText(
-    '안녕하세요, 신새별님이에요! 저는 목욕도우미입니다. 저를 가르쳐주세요?',
+    '안녕하세요! 저는 신새별이에요. 목욕도우미의 일을 배우고 싶어요. 저를 가르쳐주세요!',
     { timeout: 3000 },
   )
 
@@ -332,7 +332,7 @@ test('clicking the character dismisses the opening greeting bubble early', async
   // 직업은 비워둔다 — 기본값(fallback) 문구로 이어지는지도 함께 확인.
   await page.getByTestId('opening-profile-start-button').click()
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 아름이님이에요! 저를 가르쳐주세요?', {
+  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요! 저는 아름이예요. 저를 가르쳐주세요!', {
     timeout: 2000,
   })
 
@@ -651,4 +651,48 @@ test('shows the character\'s focus gauge percentage', async ({ page }) => {
   await page.goto('/grow')
 
   await expect(page.getByTestId('focus-gauge')).toContainText('72%')
+})
+
+test('card lesson is verified and saved as its own mission; early evolution updates age and image', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let savedMission: unknown
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ json: { characters: [{ id: 1, companion_type: 'nuri', stage: 'child', profession: 'doctor', level: 1, exp: 0, age_tier: 'toddler' }] } })
+      return true
+    }
+    if (action === 'missions') {
+      await route.fulfill({ json: { missionProgress: { ageTier: 'toddler', ageTierLabel: '8~9살', byType: {
+        objective: { confirmed: 2, required: 2, complete: true }, subjective: { confirmed: 2, required: 2, complete: true }, cardmatch: { confirmed: 0, required: 1, complete: false }, knowhow: { confirmed: 1, required: 1, complete: true },
+      }, confirmedTotal: 5, requiredTotal: 6, allConfirmed: false, nextAgeTier: 'teen', nextAgeTierLabel: '10대' } } })
+      return true
+    }
+    if (action === 'verify-knowledge') {
+      await route.fulfill({ json: { verification: { status: 'appropriate', explanation: '직업 도구의 쓰임이에요.', relevance: '관련 있음', issues: '', suggestion: '' }, verificationToken: 'verified-card', characterReply: '잘 배웠어요!' } })
+      return true
+    }
+    if (action === 'save-knowledge') {
+      savedMission = route.request().postDataJSON().missionType
+      await route.fulfill({ status: 201, json: { entry: { id: 1, profession: 'doctor', title: '직업과 도구 연결하기', original_content: '', final_content: '', verification_status: 'appropriate', verification_explanation: '', created_at: new Date().toISOString() }, savedReply: '카드 미션을 저장했어요!', level: 1, exp: 5, evolved: true, newAgeTier: 'teen' } })
+      return true
+    }
+    return false
+  })
+  await page.goto('/grow')
+  await expect(page.getByText('8세', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '가르치기', exact: true }).click()
+  await expect(page.getByTestId('mission-progress-cardmatch')).toContainText('0/1')
+  await page.getByRole('button', { name: '직업 카드 시작하기' }).click()
+  await page.locator('[data-job-id="doctor"][data-kind="job"]').click()
+  await page.locator('[data-job-id="doctor"][data-kind="tool"]').click()
+  await page.getByTestId('card-match-use-lesson').click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('직업과 도구 연결하기')
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect.poll(() => savedMission).toBe('cardmatch')
+  await page.getByRole('button', { name: '닫기', exact: true }).click()
+  await expect(page.getByText('10세', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
 })

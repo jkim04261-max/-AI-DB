@@ -92,3 +92,17 @@ test('clearing all 6 pairs awards a 20,000원 bonus and offers a new game', asyn
   await expect(page.getByTestId('card-match-balance')).toContainText('1,050,000원')
   await expect(page.getByRole('button', { name: '다시 하기' })).toBeVisible()
 })
+
+test('profession practice changes to an application screen after completion', async ({ page }) => {
+  await setup(page)
+  await page.getByLabel('연습할 직업').selectOption('doctor')
+  await expect(page.getByTestId('card-match-progress')).toHaveText('0 / 1 쌍')
+  await page.locator('[data-job-id="doctor"][data-kind="job"]').click()
+  await page.locator('[data-job-id="doctor"][data-kind="tool"]').click()
+  await expect(page.getByTestId('card-match-grid')).toHaveCount(0)
+  await expect(page.getByTestId('card-match-application')).toContainText('의사')
+  await expect(page.getByTestId('card-match-application')).toContainText('도구가 없다면')
+  await page.getByPlaceholder('예: 이 도구로 어떤 문제를 해결할 수 있을까요?').fill('도구의 쓰임을 설명해 볼래요.')
+  await page.getByRole('button', { name: '다시 하기' }).click()
+  await expect(page.getByTestId('card-match-grid')).toBeVisible()
+})

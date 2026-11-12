@@ -77,7 +77,7 @@ export default function BookstoreOutingOverlay({
       <div aria-hidden className="absolute inset-x-0 bottom-0 h-10 bg-amber-300/70" />
       <div
         data-testid="bookstore-walk-sprite"
-        className="grow-walk-sprite motion-safe:animate-[grow-walk-across_2s_linear_infinite] absolute bottom-6 left-0"
+        className="grow-walk-sprite motion-safe:animate-[grow-walk-across_5.5s_linear_infinite] absolute bottom-6 left-0"
         style={stage === 'walking-back' ? { transform: 'scaleX(-1)' } : undefined}
       >
         <img

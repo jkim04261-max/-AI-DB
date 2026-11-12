@@ -862,9 +862,9 @@ async function run() {
     const subj2 = await teachOnce(8, 'subjective')
     t.assert(subj2.body.evolved === false, 'subjective가 2개 찼어도 knowhow가 아직 0개라 진화하지 않는다')
     await teachOnce(9, 'knowhow')
-    const evolved = await teachOnce(10, 'knowhow')
+    const evolved = await teachOnce(10, 'cardmatch')
     t.assert(evolved.statusCode === 201, '유형별 2개씩 마지막 지식 저장이 성공한다')
-    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
+    t.assert(evolved.body.evolved === true, '객관식2+예시2+카드1+노하우1가 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
     t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
     t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
@@ -1129,7 +1129,7 @@ async function run() {
     await teachOnceLeo(4, 'subjective')
     await teachOnceLeo(5, 'knowhow')
     t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
-    const leoEvolved = await teachOnceLeo(6, 'knowhow')
+    const leoEvolved = await teachOnceLeo(6, 'cardmatch')
     t.assert(leoEvolved.statusCode === 201, '6번째(마지막) 지식 저장이 성공한다')
     t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별 2개씩 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
     t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
@@ -1159,7 +1159,7 @@ async function run() {
         `${tier} 단계의 필요 지식 총합은 ${expectedTotal}개다`,
       )
       const perType = characterAge.MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
-      const sum = perType.objective + perType.subjective + perType.knowhow
+      const sum = perType.objective + perType.subjective + perType.knowhow + perType.cardmatch
       t.assert(sum === expectedTotal, `${tier} 단계의 유형별(객관식/주관식/노하우) 필요 개수 합도 정확히 ${expectedTotal}개다(현재 ${perType.objective}+${perType.subjective}+${perType.knowhow})`)
       t.assert(
         perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0,

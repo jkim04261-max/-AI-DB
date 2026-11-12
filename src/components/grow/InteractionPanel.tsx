@@ -1,3 +1,4 @@
+import CardMatchGame from '../games/CardMatchGame'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import {
@@ -157,6 +158,7 @@ export default function InteractionPanel({
   // 미션 슬롯을 채우는지 알려준다(한 번 정해지면, 저장/초기화 전까지는
   // 이어서 수정해도 바뀌지 않는다 — 예시를 고치는 것과 처음부터 직접
   // 쓰는 것을 구분하기 위해).
+  const [cardMissionOpen, setCardMissionOpen] = useState(false)
   const [missionType, setMissionType] = useState<MissionType | null>(null)
   const markManualEdit = () => setMissionType((prev) => prev ?? 'knowhow')
   // PR #65: 지식 카드 10종 분류(선택값) — missionType(입력 방식)과는
@@ -387,6 +389,7 @@ export default function InteractionPanel({
           <div className="flex flex-wrap gap-1.5">
             {MISSION_TYPES.map((type) => {
               const p = missionProgress.byType[type]
+              if (!p || p.required === 0) return null
               return (
                 <span
                   key={type}
@@ -474,6 +477,17 @@ export default function InteractionPanel({
           </p>
         )}
       </div>
+
+      <section className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4">
+        <h3 className="text-lg font-extrabold text-amber-200">🧩 직업 카드 맞추기</h3>
+        <p className="my-2 text-sm text-amber-100">직업과 도구를 연결한 뒤 활용 내용을 확인해요. AI 검증 후 저장하면 성장 미션에 반영돼요.</p>
+        <button type="button" disabled={busy} className="rounded-xl bg-amber-700 px-4 py-2 text-white disabled:opacity-50" onClick={() => setCardMissionOpen(open => !open)}>{cardMissionOpen ? '카드 접기' : '직업 카드 시작하기'}</button>
+        {cardMissionOpen && <div className="mt-4"><CardMatchGame profession={character.profession === 'custom' ? character.customProfessionLabel ?? undefined : character.profession ?? undefined} onComplete={lesson => {
+          applyTopicSuggestion(lesson)
+          setMissionType('cardmatch')
+          setCardMissionOpen(false)
+        }} /></div>}
+      </section>
 
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
           경로. */}

@@ -1,3 +1,4 @@
+import { jobCardSymbol } from '../../data/jobCardArt'
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useMockWallet } from '../../hooks/useMockWallet'
 import { JOB_CARDS, type JobCardEntry } from '../../data/jobCards'
@@ -61,11 +62,11 @@ function speak(text: string) {
 // 리렌더될 때 이미 뒤집힌/맞춘 카드까지 불필요하게 다시 그려지는 것을
 // 막기 위해 memo 적용 — 렌더 결과·동작은 동일하다.
 const CardArt = memo(function CardArt({ src, label }: { src: string; label: string }) {
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState(src.startsWith('/characters/'))
   if (failed) {
     return (
       <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-700 p-1 text-center text-[11px] font-bold leading-tight text-slate-200">
-        {label}
+        <span aria-hidden className="text-4xl">{jobCardSymbol(src)}</span>
       </div>
     )
   }
@@ -82,40 +83,45 @@ const CardArt = memo(function CardArt({ src, label }: { src: string; label: stri
   )
 })
 
-export default function CardMatchGame() {
+export default function CardMatchGame({ profession, onComplete }: { profession?: string; onComplete?: (lesson: { title: string; content: string }) => void }) {
+  const relatedJobs = JOB_CARDS.filter(job => job.id === profession || job.jobName === profession)
+  const jobPool = relatedJobs.length ? relatedJobs : JOB_CARDS
+  const learningMode = Boolean(onComplete)
   const wallet = useMockWallet()
-  const [cards, setCards] = useState<GameCard[]>(() => buildDeck(JOB_CARDS))
+  const [cards, setCards] = useState<GameCard[]>(() => buildDeck(jobPool))
   const [flipped, setFlipped] = useState<number[]>([])
   const [matchedJobIds, setMatchedJobIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [cleared, setCleared] = useState(false)
+  const [applicationIdea, setApplicationIdea] = useState('')
   const [lastMessage, setLastMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    wallet.grantInitialAllowance()
+    if (!learningMode) wallet.grantInitialAllowance()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const totalPairs = CARDS_PER_GAME
+  const totalPairs = cards.length / 2
   const matchedCount = matchedJobIds.size
 
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0 && !cleared) {
       setCleared(true)
-      wallet.earn(CLEAR_BONUS_WON)
-      setLastMessage(`🎉 전체 클리어! 보너스 +${CLEAR_BONUS_WON.toLocaleString('ko-KR')}원`)
+      if (!learningMode) wallet.earn(CLEAR_BONUS_WON)
+      setLastMessage(learningMode ? '모두 맞혔어요! 아래에서 도구 활용을 확인해 보세요.' : `🎉 전체 클리어! 보너스 +${CLEAR_BONUS_WON.toLocaleString('ko-KR')}원`)
       speak('모두 맞혔어요! 축하해요!')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchedCount, totalPairs, cleared])
 
   const handleNewGame = () => {
-    setCards(buildDeck(JOB_CARDS))
+    setCards(buildDeck(jobPool))
     setFlipped([])
     setMatchedJobIds(new Set())
     setBusy(false)
     setCleared(false)
     setLastMessage(null)
+    setApplicationIdea('')
   }
 
   const handleCardClick = (index: number) => {
@@ -142,8 +148,8 @@ export default function CardMatchGame() {
           return next
         })
         setFlipped([])
-        wallet.earn(MATCH_REWARD_WON)
-        setLastMessage(`정답이에요! +${MATCH_REWARD_WON.toLocaleString('ko-KR')}원`)
+        if (!learningMode) wallet.earn(MATCH_REWARD_WON)
+        setLastMessage(learningMode ? '정답이에요! 직업과 도구를 기억해 보세요.' : `정답이에요! +${MATCH_REWARD_WON.toLocaleString('ko-KR')}원`)
         speak('정답이에요!')
       } else {
         setBusy(true)
@@ -159,13 +165,14 @@ export default function CardMatchGame() {
 
   return (
     <div className="flex flex-col gap-4">
+      {profession && <p className="text-sm font-semibold text-amber-700">{relatedJobs.length ? `${relatedJobs[0].jobName} 도구 연습` : '이 직업의 전용 카드가 아직 없어 여러 직업의 기초 도구를 연습해요.'}</p>}
       <div className="flex items-center justify-between rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-100 to-yellow-50 px-4 py-3">
-        <div>
+        {!learningMode && <div>
           <p className="text-xs font-bold text-amber-500">체험판 — 새로고침하면 초기화돼요</p>
           <p className="text-lg font-black text-amber-900" data-testid="card-match-balance">
             {wallet.balanceWon !== null ? `${wallet.balanceWon.toLocaleString('ko-KR')}원` : '지급 전'}
           </p>
-        </div>
+        </div>}
         <div className="text-right">
           <p className="text-xs font-semibold text-amber-600">맞춘 쌍</p>
           <p className="text-base font-bold text-amber-800" data-testid="card-match-progress">
@@ -180,7 +187,7 @@ export default function CardMatchGame() {
         </p>
       )}
 
-      <div className="grid grid-cols-4 gap-3" data-testid="card-match-grid">
+      {!cleared && <div className="grid grid-cols-4 gap-3" data-testid="card-match-grid">
         {cards.map((card, index) => {
           const isFlipped = flipped.includes(index) || matchedJobIds.has(card.jobId)
           return (
@@ -194,6 +201,7 @@ export default function CardMatchGame() {
               // 시각적으로 뒷면 카드는 여전히 "❓"만 보인다).
               data-job-id={card.jobId}
               data-kind={card.kind}
+              aria-label={isFlipped ? card.label : '카드 뒤집기'}
               onClick={() => handleCardClick(index)}
               disabled={isFlipped}
               className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-2xl border-2 p-2 transition-all ${
@@ -217,8 +225,29 @@ export default function CardMatchGame() {
             </button>
           )
         })}
-      </div>
+      </div>}
 
+      {cleared && (
+        <section data-testid="card-match-application" className="rounded-2xl border border-cyan-300 bg-slate-900 p-5 text-slate-100">
+          <h2 className="text-lg font-bold">🧰 직업 도구 활용하기</h2>
+          <p className="mt-2 text-sm">짝을 찾았다면, 실제로 어떤 일을 할 때 필요한지 생각해 보세요.</p>
+          <ul className="my-3 space-y-2">
+            {cards.filter(card => card.kind === 'tool').map(card => (
+              <li key={card.key} className="rounded-xl bg-white/10 p-3">
+                <strong>{JOB_CARDS.find(job => job.id === card.jobId)?.jobName}</strong> · {card.label}
+                <p className="mt-1 text-sm text-cyan-200">이 도구가 없다면 어떤 일이 불편해질까요?</p>
+              </li>
+            ))}
+          </ul>
+          <label className="my-4 flex flex-col gap-2 text-sm font-semibold">내 직업에서 활용할 아이디어
+            <textarea value={applicationIdea} maxLength={500} onChange={event => setApplicationIdea(event.target.value)} placeholder="예: 이 도구로 어떤 문제를 해결할 수 있을까요?" className="min-h-24 rounded-xl border border-cyan-400/30 bg-slate-800 p-3 text-white" />
+          </label>
+          {onComplete && <button type="button" data-testid="card-match-use-lesson" className="rounded-xl bg-cyan-700 px-4 py-3 font-bold" onClick={() => onComplete({
+            title: '직업과 도구 연결하기',
+            content: cards.filter(card => card.kind === 'tool').map(card => `${JOB_CARDS.find(job => job.id === card.jobId)?.jobName}의 도구에는 ${card.label}이(가) 있습니다.`).join(' ') + (applicationIdea.trim() ? ` 활용 아이디어: ${applicationIdea.trim()}` : ''),
+          })}>이 내용으로 미션 이어가기</button>}
+        </section>
+      )}
       {cleared && (
         <button
           type="button"

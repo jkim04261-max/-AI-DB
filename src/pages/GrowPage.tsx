@@ -26,7 +26,7 @@ import UniversalMarket from '../components/grow/UniversalMarket'
 import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
-import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
+import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForCharacter, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
@@ -577,8 +577,11 @@ export default function GrowPage() {
     const t1 = setTimeout(() => {
       if (wallet.balanceWon !== null) wallet.spend(MEAL_COST_WON)
       setPose('eating')
-      showBubble(`냠냠, ${MEAL_RESTAURANT_LABEL} 김밥 진짜 맛있어요! 🍙`)
-      const t2 = setTimeout(() => setPose('idle'), 2600)
+      showBubble(`냠냠! 김밥 맛있어요. 천천히 먹고 올게요! 🍙`, 6500)
+      const t2 = setTimeout(() => {
+        setPose('idle')
+        showBubble('김밥 잘 먹었어요! 다시 공부하러 갈까요?')
+      }, 6500)
       mealTimeoutsRef.current.push(t2)
     }, 1400)
     mealTimeoutsRef.current.push(t1)
@@ -603,14 +606,14 @@ export default function GrowPage() {
     outingTimeoutsRef.current.push(t1)
   }
 
-  // "가는 길" 걷기 애니메이션이 한 바퀴(2초) 끝나면 도착 카드로 넘어간다
+  // 걷는 모습을 충분히 볼 수 있도록 5.5초 뒤 도착 카드로 넘어간다
   // — BookstoreOutingOverlay 쪽 CSS 애니메이션 길이와 맞춘 고정 지연.
   useEffect(() => {
     if (bookstoreOuting !== 'walking-there') return
     const t = setTimeout(() => {
       setBookstoreOuting('arrived')
       showBubble(`${BOOKSTORE_NAME}에 도착했어요!`)
-    }, 2000)
+    }, 5500)
     outingTimeoutsRef.current.push(t)
     return () => clearTimeout(t)
   }, [bookstoreOuting])
@@ -621,7 +624,7 @@ export default function GrowPage() {
     const t = setTimeout(() => {
       setBookstoreOuting(null)
       showBubble('다녀왔어요!')
-    }, 2000)
+    }, 5500)
     outingTimeoutsRef.current.push(t)
     return () => clearTimeout(t)
   }, [bookstoreOuting])
@@ -707,7 +710,10 @@ export default function GrowPage() {
         if (wallet.balanceWon !== null) wallet.spend(QUIZ_SNACK_COST_WON)
         setPose('eating')
         showBubble('냠냠, 간식 진짜 맛있어요! 🍕')
-        const t2 = setTimeout(() => setPose('idle'), 2600)
+        const t2 = setTimeout(() => {
+        setPose('idle')
+        showBubble('김밥 잘 먹었어요! 다시 공부하러 갈까요?')
+      }, 6500)
         outingTimeoutsRef.current.push(t2)
       }, 1400)
       outingTimeoutsRef.current.push(t1)
@@ -787,7 +793,7 @@ export default function GrowPage() {
   const ageTier = character?.ageTier ?? 'toddler'
   // PR #52 후속 5차 요청 3번: 티어보다 더 구체적인 "지금 몇 살인지" 숫자
   // 뱃지용 — 역시 character.level에서 그때그때 계산하는 표시용 값이다.
-  const ageNumber = character ? ageNumberForLevel(character.level) : 8
+  const ageNumber = character ? ageNumberForCharacter(character.level, ageTier) : 8
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (

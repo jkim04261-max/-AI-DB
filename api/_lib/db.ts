@@ -412,6 +412,8 @@ export function ensureKnowledgeTable() {
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS mission_type TEXT
           CHECK (mission_type IN ('objective', 'subjective', 'knowhow'))
       `
+      // Repeated safely on cold start; retain every existing knowledge row.
+      await sql`ALTER TABLE character_knowledge_entries DROP CONSTRAINT IF EXISTS character_knowledge_entries_mission_type_check, ADD CONSTRAINT character_knowledge_entries_mission_type_check CHECK (mission_type IN ('objective', 'subjective', 'cardmatch', 'knowhow'))`
       await sql`
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS age_tier_at_save TEXT
           CHECK (age_tier_at_save IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
@@ -648,7 +650,7 @@ export interface KnowledgeEntryRow {
   verification_status: 'appropriate' | 'needs_revision' | 'unverifiable'
   verification_explanation: string
   source: 'user_taught' | 'ai_generated'
-  mission_type: 'objective' | 'subjective' | 'knowhow' | null
+  mission_type: 'objective' | 'subjective' | 'cardmatch' | 'knowhow' | null
   age_tier_at_save: AgeTierValue | null
   knowledge_category: KnowledgeCategory | null
   created_at: string
