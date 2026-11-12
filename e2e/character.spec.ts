@@ -201,17 +201,19 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
 })
 
-// 지시서(성별 필드 추가): 생일·거주지역과 같은 원칙의 플레이버 전용
-// 입력이다 — 어느 값을 고르든 생성되는 캐릭터(companionType)에도,
-// 저장되는 데이터(PATCH 바디)에도 전혀 영향을 주지 않아야 한다.
-test('the gender field in the opening profile screen is flavor-only — it never changes which character is created or what gets saved', async ({
+// 지시서(성별 필드 제거): PR #97에서 추가했던 플레이버 전용 "성별" 필드가
+// — 아무리 문서화해도 "내가 고른 성별대로 캐릭터가 정해진다"는 오해를
+// 반복적으로 일으켜(실제 사용자 신고 다수) 완전히 제거했다. 어느 캐릭터
+// (누리/두리)를 키울지는 버튼 클릭 시점에 이미 정해져 있고, 이 화면에는
+// 그걸 바꾸거나 혼동할 만한 입력이 더 이상 없어야 한다는 걸 고정하는
+// 회귀 테스트다.
+test('the opening profile screen has no gender field — removed after it repeatedly confused users into thinking it controlled which character was created', async ({
   page,
 }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let postBody: { companionType?: string } | null = null
-  let patchBody: { companionType?: string; profession?: string } | null = null
   await mockCharacterApi(page, async (route, action, method) => {
     if (method === 'GET' && !action) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
@@ -223,39 +225,18 @@ test('the gender field in the opening profile screen is flavor-only — it never
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
       return true
     }
-    if (method === 'PATCH') {
-      patchBody = route.request().postDataJSON()
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          character: { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'custom', custom_profession_label: '숲해설가', level: 1, exp: 0, created_at: new Date().toISOString() },
-        }),
-      })
-      return true
-    }
     return false
   })
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
 
-  await expect(page.getByTestId('opening-profile-gender-male')).not.toBeChecked()
-  await expect(page.getByTestId('opening-profile-gender-female')).not.toBeChecked()
+  await expect(page.getByTestId('opening-profile-gender-male')).toHaveCount(0)
+  await expect(page.getByTestId('opening-profile-gender-female')).toHaveCount(0)
+  await expect(page.getByText('성별')).toHaveCount(0)
 
-  // 캐릭터는 이미 "누리"로 정해져 있는데(남성 전용 캐릭터), 플레이버
-  // 입력으로는 일부러 반대인 "여성"을 고른다 — 그래도 아무 영향이 없어야
-  // 한다는 것이 이 테스트의 핵심이다.
-  await page.getByTestId('opening-profile-gender-female').click()
-  await expect(page.getByTestId('opening-profile-gender-female')).toBeChecked()
-
-  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
-
-  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
   expect(postBody).toMatchObject({ companionType: 'nuri' })
-  expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom' })
-  expect(patchBody).not.toHaveProperty('gender')
 })
 
 // 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후 0.5초 뒤 페이드인되는
