@@ -15,6 +15,15 @@ import { useCallback, useState } from 'react'
 // 의도.
 export const INITIAL_ALLOWANCE_WON = 1_000_000
 
+// 지시서(초기 가상용돈 밸런스 수정): AI 키우기(/grow)만 10만 원으로
+// 낮춘다 — 이 훅은 카드 맞추기(/card-match)·직업 그림 퀴즈(/job-quiz)
+// 에서도 독립 인스턴스로 재사용되고 있어(둘 다 "독립적인 별도 잔액"
+// 요구사항으로 만들어짐), 공용 기본값(INITIAL_ALLOWANCE_WON)을 그대로
+// 낮추면 그 두 미니게임의 밸런스까지 요청 범위 밖에서 바뀐다. 호출부가
+// grantInitialAllowance(amount)로 원하는 금액을 넘기게 해서 /grow만
+// 바꾸고 나머지는 기존 기본값을 그대로 쓰게 한다.
+export const GROW_INITIAL_ALLOWANCE_WON = 100_000
+
 export function useMockWallet() {
   // null = 아직 캐릭터를 만들지 않았거나 초기 지급을 받기 전.
   const [balanceWon, setBalanceWon] = useState<number | null>(null)
@@ -23,8 +32,8 @@ export function useMockWallet() {
   // 뒤라면 그대로 둔다) — 서버의 "최초 1회 지급" 원자적 보장을 체험판
   // 수준에서 흉내낸 것일 뿐, 실제 중복 지급 방지는 Stage 2(실제 DB
   // 전환)에서 서버가 보장해야 한다.
-  const grantInitialAllowance = useCallback(() => {
-    setBalanceWon((prev) => prev ?? INITIAL_ALLOWANCE_WON)
+  const grantInitialAllowance = useCallback((amount: number = INITIAL_ALLOWANCE_WON) => {
+    setBalanceWon((prev) => prev ?? amount)
   }, [])
 
   const resetWallet = useCallback(() => {

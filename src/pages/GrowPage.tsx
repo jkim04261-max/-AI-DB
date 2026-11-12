@@ -29,7 +29,7 @@ import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, ageNumberForLevel, typ
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { useMockInventory } from '../hooks/useMockInventory'
-import { useMockWallet } from '../hooks/useMockWallet'
+import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -188,10 +188,11 @@ export default function GrowPage() {
   // 시 초기화, 실제 DB 저장 없음). 자세한 설계 의도는 useMockInventory.ts
   // 참고.
   const inventory = useMockInventory()
-  // Stage 1(오프닝 프로필): 초기 가상 용돈 1,000,000원의 체험판 전용
-  // 상태 — 실제 DB에 저장되지 않는다(useMockWallet.ts 참고). Preview/
-  // Production DB 분리가 아직 검증되지 않은 상태라, 이번 단계에서는
-  // 새 DB 쓰기를 하나도 추가하지 않기로 했다.
+  // Stage 1(오프닝 프로필): 초기 가상 용돈(GROW_INITIAL_ALLOWANCE_WON,
+  // 10만 원)의 체험판 전용 상태 — 실제 DB에 저장되지 않는다
+  // (useMockWallet.ts 참고). Preview/Production DB 분리가 아직 검증되지
+  // 않은 상태라, 이번 단계에서는 새 DB 쓰기를 하나도 추가하지 않기로
+  // 했다.
   const wallet = useMockWallet()
 
   const character = characters.find((c) => c.companionType === selected) ?? null
@@ -478,7 +479,7 @@ export default function GrowPage() {
         await setProfession(companionType, 'custom', profile.profession)
         showBubble(toddlerProfessionGreeting(profile.profession))
       }
-      wallet.grantInitialAllowance()
+      wallet.grantInitialAllowance(GROW_INITIAL_ALLOWANCE_WON)
       selectCompanion(companionType)
       setOnboardingFor(null)
     } catch (err) {
