@@ -1413,3 +1413,134 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   await expect(page.getByTestId('speech-bubble')).toContainText('아르바이트해서')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('110,000원')
 })
+
+// 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검): 이 테스트를 쓰기
+// 전까지는 진화(toddler→teen)를 다루는 테스트 전부가 "유형별 2개씩"이
+// 아니라 같은 유형을 6번 반복하거나(위 bookstore outing 테스트), 저장
+// 요청 자체를 생략한 채 evolved:true를 직접 모킹했다(grow-game-ui.spec.ts).
+// 실제 진화 게이트는 반드시 유형별 2개씩(객관식/주관식/노하우)이어야
+// 하므로(api/_lib/characterMissions.ts, tests/knowledge.test.cjs에서 이미
+// 단위 테스트로 검증됨), 이 테스트는 그 세 가지 방식을 실제 UI로
+// 섞어가며 6번 저장해 — 토들러 단계의 "6개 저장" 보상(서점 외출, 이
+// 테스트에서도 정확히 6번째 저장에 함께 발동함)과 겹치는 실제 상황에서
+// 도 — 진화 배너·캐릭터 그림·상태창이 전부 올바르게 바뀌는지 확인한다.
+test('evolving from toddler to teen via 6 real saves split across all 3 mission types shows the evolution banner and swaps the portrait to teen — even though it coincides with the bookstore outing event', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  const confirmed = { objective: 0, subjective: 0, knowhow: 0 }
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-evolve',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-evolve-subjective',
+          characterReply: "오늘은 '복식부기'를 공부했어요!",
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      const body = route.request().postDataJSON() as { missionType: keyof typeof confirmed }
+      confirmed[body.missionType] = Math.min(confirmed[body.missionType] + 1, 2)
+      const allConfirmed = confirmed.objective === 2 && confirmed.subjective === 2 && confirmed.knowhow === 2
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: allConfirmed ? '청소년 단계로 성장했어요!' : '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+          ...(allConfirmed ? { evolved: true, newAgeTier: 'teen', newAgeTierLabel: '10대' } : {}),
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  // 패널은 한 번 열면 저장 1~2번째까지는 자동으로 닫히지 않고 그대로
+  // 열려 있다(기존 teachThreeTimes 패턴과 동일) — 3번째 저장에서만
+  // GrowPage가 명시적으로 패널을 닫으므로, "가르치기"는 배치당 한 번만
+  // 누른다(이미 열려 있는데 다시 누르면 열린 패널이 클릭을 가로채
+  // 타임아웃난다).
+  const teachObjective = async () => {
+    await page.getByTestId('topic-suggestion-chip').first().click()
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+  }
+  const teachSubjective = async () => {
+    await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+  }
+  const teachKnowhow = async (n: number) => {
+    await page.getByPlaceholder('지식 제목').fill(`노하우 ${n}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${n}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+  }
+
+  // 1~3번째 저장(objective, objective, subjective) — 3번째 저장 직후
+  // 식사 이벤트로 패널이 자동으로 닫힌다(기존 패턴과 동일). 저장 성공
+  // 핸들러가 title/content를 비동기로 비우므로(InteractionPanel의
+  // setTitle('')/setContent('')), 다음 입력을 채우기 전에 그게 끝났는지
+  // 확인한다 — 기존 "completing 3 knowledge saves" 테스트와 같은 이유
+  // (안 그러면 다음 라운드의 fill이 그 비동기 초기화와 경합해 방금 입력한
+  // 값이 지워질 수 있다 — 실제로 이 테스트를 처음 썼을 때 그렇게 깨졌다).
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await teachObjective()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachObjective()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachSubjective()
+  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+
+  // 4~6번째 저장(subjective, knowhow, knowhow) — 6번째가 "유형별 2개씩"을
+  // 완성시키는 마지막 저장이고, 토들러의 "6개 저장" 보상(서점 외출)도
+  // 정확히 같은 저장에서 함께 발동한다.
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await teachSubjective()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachKnowhow(1)
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachKnowhow(2)
+
+  // 진화 배너가 뜬다 — 같은 저장에서 동시에 열리는 서점 외출 오버레이에
+  // 가려지지 않고 실제로 보이는지 확인한다(핵심 회귀 포인트).
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
+
+  // 서점 외출 흐름을 끝까지 따라간다(기존 "bookstore outing" 테스트와 동일).
+  await expect(page.getByTestId('bookstore-outing-overlay')).toBeVisible()
+  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
+  await page.getByTestId('bookstore-leave-review-button').click()
+  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 5000 })
+
+  // 모든 연출이 끝난 뒤 — 실제 화면의 캐릭터 그림이 teen(10대) 일러스트로
+  // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고
+  // 10대로 넘어간다").
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
+})
