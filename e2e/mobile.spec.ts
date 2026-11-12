@@ -138,7 +138,7 @@ test('the opening profile screen fits a phone width with no horizontal scroll', 
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
   await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
   await expect(page.getByTestId('opening-profile-start-button')).toBeVisible()
 

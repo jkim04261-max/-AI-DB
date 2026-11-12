@@ -61,7 +61,7 @@ test('prompts a signed-out visitor to log in instead of showing the create UI', 
   await page.goto('/grow')
 
   await expect(page.getByText('로그인하면 누리·두리를 키울 수 있어요.')).toBeVisible()
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
+  await expect(page.getByTestId('character-create-nuri')).toHaveCount(0)
 })
 
 test('a signed-in user with no characters sees both creation buttons', async ({ page }) => {
@@ -78,8 +78,8 @@ test('a signed-in user with no characters sees both creation buttons', async ({ 
 
   await page.goto('/grow')
 
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  await expect(page.getByTestId('character-create-nuri')).toBeVisible()
+  await expect(page.getByTestId('character-create-duri')).toBeVisible()
 })
 
 test('creating 누리 shows its card and removes only its own button', async ({ page }) => {
@@ -101,7 +101,7 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
   // Stage 1(오프닝 프로필): 이제 클릭 즉시 생성되지 않고, 이름·생일·
   // 거주지역·직업을 입력받는 화면을 먼저 거친다 — 전부 선택값이라
   // 이름(기본값 "누리")만 그대로 두고 바로 시작해도 된다.
@@ -113,8 +113,8 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   // 증거). 어린이 단계 표시는 HUD 한 곳에만 있어 그대로 둔다.
   await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
   await expect(page.getByText('어린이', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  await expect(page.getByTestId('character-create-nuri')).toHaveCount(0)
+  await expect(page.getByTestId('character-create-duri')).toBeVisible()
   // Stage 1: 온보딩을 거치면 체험판 가상 용돈 100,000원이 즉시 뜬다
   // (GROW_INITIAL_ALLOWANCE_WON, 지시서에 따라 1,000,000원→100,000원).
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
@@ -140,12 +140,12 @@ test('cancelling the opening profile screen creates no character', async ({ page
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
   await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
   await page.getByTestId('opening-profile-cancel-button').click()
 
   await expect(page.getByTestId('opening-profile-screen')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toBeVisible()
+  await expect(page.getByTestId('character-create-nuri')).toBeVisible()
   expect(postCalled).toBe(false)
 })
 
@@ -193,7 +193,7 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
 
@@ -229,7 +229,7 @@ test('the opening profile screen has no gender field — removed after it repeat
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
 
   await expect(page.getByTestId('opening-profile-gender-male')).toHaveCount(0)
   await expect(page.getByTestId('opening-profile-gender-female')).toHaveCount(0)
@@ -278,7 +278,7 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByTestId('character-create-nuri').click()
   await page.getByTestId('opening-profile-name-input').fill('신새별')
   await page.getByTestId('opening-profile-profession-input').fill('목욕도우미')
   await page.getByTestId('opening-profile-start-button').click()
@@ -326,7 +326,7 @@ test('clicking the character dismisses the opening greeting bubble early', async
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '두리 만들기 (여)' }).click()
+  await page.getByTestId('character-create-duri').click()
   await page.getByTestId('opening-profile-name-input').fill('아름이')
   // 직업은 비워둔다 — 기본값(fallback) 문구로 이어지는지도 함께 확인.
   await page.getByTestId('opening-profile-start-button').click()

@@ -28,27 +28,32 @@ interface Palette {
   accent: string
 }
 
-// 누리(남)는 인디고/블루 톤, 두리(여)는 로즈/핑크 톤 — 기존 서비스가
-// 이미 쓰는 인디고-블루 그라디언트(예: 캐릭터 카드 아바타, 버튼) 및
-// 그와 대비되는 톤으로 맞춰 사이드바·전체 디자인과 어울리게 했다. 두
-// 캐릭터 모두 원작(프린세스 메이커 등) 디자인을 참고하지 않은 자체
-// 제작 단순 도형(원/둥근 사각형/path) 조합이다.
+// 성별 표기 정정: 원래 이 주석은 "누리(남)는 인디고/블루, 두리(여)는
+// 로즈/핑크"였다 — 하지만 실제로 커밋돼 있는 일러스트(characterFullBody.ts
+// 의 nuri-*.webp/duri-*.webp)를 직접 열어보니 누리는 분홍 한복을 입은
+// 여자아이, 두리는 남색 전사풍 한복을 입은 남자아이로 그려져 있어 이
+// 주석/팔레트와 정반대였다(텍스트끼리는 일관됐지만 그림과는 어긋남).
+// 일러스트가 실제 게임 화면의 주 표현이라(GameStage.tsx) 그림을 기준으로
+// 삼아 팔레트를 뒤집었다 — 이제 누리(여)는 로즈/핑크 톤, 두리(남)는
+// 인디고/블루 톤으로 일러스트와 일치한다. 두 캐릭터 모두 원작(프린세스
+// 메이커 등) 디자인을 참고하지 않은 자체 제작 단순 도형(원/둥근 사각형/
+// path) 조합이다.
 const PALETTE: Record<CompanionType, Palette> = {
   nuri: {
-    skin: '#ffe0bd',
-    hair: '#4453d8',
-    hairDark: '#2f3bb0',
-    outfit: '#5b6bf0',
-    outfitDark: '#3c46b0',
-    accent: '#283593',
-  },
-  duri: {
     skin: '#ffe0bd',
     hair: '#e0579e',
     hairDark: '#b8407c',
     outfit: '#ef6ea8',
     outfitDark: '#c23f82',
     accent: '#8e2a5e',
+  },
+  duri: {
+    skin: '#ffe0bd',
+    hair: '#4453d8',
+    hairDark: '#2f3bb0',
+    outfit: '#5b6bf0',
+    outfitDark: '#3c46b0',
+    accent: '#283593',
   },
 }
 

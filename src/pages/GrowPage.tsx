@@ -28,6 +28,7 @@ import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
+import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
@@ -1013,26 +1014,67 @@ export default function GrowPage() {
         </div>
       )}
 
+      {/* 지시서(캐릭터 선택 UI/UX 개선): 텍스트만 있던 버튼을 얼굴(누끼)
+          이미지 + 이름 + 성별이 한눈에 보이는 카드로 바꿨다.
+          성별 표기 정정(중요): 이전까지 "누리=남/두리=여"라는 텍스트
+          규칙(버튼 라벨·CharacterSprite.tsx 색상 주석)을 세 차례나
+          재확인했지만, 실제로 커밋돼 있는 일러스트(nuri-toddler.webp
+          등, characterFullBody.ts)를 직접 열어보니 누리는 분홍 한복을
+          입은 여자아이, 두리는 남색 전사풍 한복을 입은 남자아이로
+          그려져 있었다 — 텍스트끼리는 일관됐지만 그림과는 정반대였다.
+          GameStage.tsx가 이 일러스트를 캐릭터의 주 표현으로 쓰므로(유저가
+          실제로 보는 건 거의 항상 이 그림), 그림을 기준으로 텍스트를
+          맞추기로 사용자 확인을 받았다 — 누리=여자 아이, 두리=남자
+          아이로 뒤집었다. companionType 문자열('nuri'/'duri')과 이미지
+          파일 자체는 전혀 바꾸지 않았다(사용자가 그림은 그대로 두고
+          텍스트만 맞추는 쪽을 선택). CharacterSprite.tsx의 색상 팔레트도
+          같은 이유로 함께 뒤집었다 — 이제 두 표현 체계가 서로 일치한다.
+          이미지는 두 캐릭터 다 아직 생성 전이라 공통 시작 연령(toddler)의
+          전신 컷아웃을 재사용한다(characterFullBody.ts, 새 이미지 추가
+          없음). */}
       {!loading && (!hasNuri || !hasDuri) && (
         <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 p-5">
-          <p className="text-sm font-semibold text-amber-900">새 캐릭터 만들기</p>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <p className="text-sm font-semibold text-amber-900">새 캐릭터 만들기</p>
+            <p className="text-xs text-amber-700/80">함께하고 싶은 친구를 선택해 주세요!</p>
+          </div>
           <div className="flex gap-3">
             {!hasNuri && (
               <button
+                data-testid="character-create-nuri"
                 onClick={() => setOnboardingFor('nuri')}
                 disabled={onboardingFor !== null}
-                className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                aria-label="누리 키우기 (여자 아이)"
+                className="flex flex-1 flex-col items-center gap-1 rounded-2xl border border-amber-200 bg-white p-3 transition hover:-translate-y-0.5 hover:border-rose-300 hover:shadow-lg hover:shadow-rose-100 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
-                누리 만들기 (남)
+                <img
+                  src={FULL_BODY_PORTRAIT_SRC.nuri.toddler}
+                  alt="누리 캐릭터"
+                  className="h-20 w-20 object-contain"
+                />
+                <span className="text-sm font-bold text-amber-900">누리</span>
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                  여자 아이
+                </span>
               </button>
             )}
             {!hasDuri && (
               <button
+                data-testid="character-create-duri"
                 onClick={() => setOnboardingFor('duri')}
                 disabled={onboardingFor !== null}
-                className="flex-1 rounded-xl border border-amber-200 bg-white py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                aria-label="두리 키우기 (남자 아이)"
+                className="flex flex-1 flex-col items-center gap-1 rounded-2xl border border-amber-200 bg-white p-3 transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-100 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
-                두리 만들기 (여)
+                <img
+                  src={FULL_BODY_PORTRAIT_SRC.duri.toddler}
+                  alt="두리 캐릭터"
+                  className="h-20 w-20 object-contain"
+                />
+                <span className="text-sm font-bold text-amber-900">두리</span>
+                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                  남자 아이
+                </span>
               </button>
             )}
           </div>
