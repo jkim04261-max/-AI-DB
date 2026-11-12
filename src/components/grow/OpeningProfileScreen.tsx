@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CompanionType } from '../../context/GrowthContext'
 import fantasyLibraryBgImg from '../../assets/grow/fantasy-library-bg.webp'
 import { GROW_INITIAL_ALLOWANCE_WON } from '../../hooks/useMockWallet'
@@ -14,18 +14,7 @@ export interface OpeningProfile {
   profession: string
 }
 
-// Stage 1(오프닝 프로필): 신규 캐릭터를 처음 만들 때 보여주는 몰입형
-// 시작 화면 — 이름/생일/거주지역/성별/자유 직업을 입력받는다. 캐릭터
-// 이름을 제외한 나머지(생일·거주지역·성별)는 선택 입력이고, 직업도
-// 비워두면 건너뛸 수 있다(나중에 기존 "직업 선택"에서 골라도 된다).
-//
-// 이 화면 자체는 어떤 값도 저장하지 않는다 — onComplete로 입력값만
-// 그대로 올려보내고, 실제로 무엇을 할지(캐릭터 생성·직업 저장 API
-// 호출 여부)는 호출부(GrowPage)가 결정한다. 성별은 생일·거주지역과
-// 같은 원칙의 플레이버 전용 입력이다 — 어느 캐릭터(누리/두리)를
-// 키울지는 이 화면이 열리기 전에 이미 정해져 있고(호출부가 넘겨주는
-// companionType), 성별 선택값이 그 결정에 영향을 주거나 DB에 저장되지
-// 않는다.
+// Gender determines canonical companion identity before the create request.
 export default function OpeningProfileScreen({
   companionType,
   onComplete,
@@ -42,6 +31,8 @@ export default function OpeningProfileScreen({
   const [region, setRegion] = useState('')
   const [gender, setGender] = useState<'' | 'male' | 'female'>('')
   const [profession, setProfession] = useState('')
+
+  useEffect(() => { console.log('[gender:state]', { gender }) }, [gender])
 
   const canStart = name.trim().length > 0 && !submitting
 

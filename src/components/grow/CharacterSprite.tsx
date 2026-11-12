@@ -28,7 +28,7 @@ interface Palette {
   accent: string
 }
 
-// 누리(남)는 인디고/블루 톤, 두리(여)는 로즈/핑크 톤 — 기존 서비스가
+// 누리(여)는 인디고/블루 톤, 두리(남)는 로즈/핑크 톤 — 기존 서비스가
 // 이미 쓰는 인디고-블루 그라디언트(예: 캐릭터 카드 아바타, 버튼) 및
 // 그와 대비되는 톤으로 맞춰 사이드바·전체 디자인과 어울리게 했다. 두
 // 캐릭터 모두 원작(프린세스 메이커 등) 디자인을 참고하지 않은 자체
@@ -225,11 +225,11 @@ export default function CharacterSprite({
           ) : (
             <>
               <path d="M 66 120 L 80 136 L 94 120 Z" fill={palette.outfitDark} />
-              {isNuri ? (
-                // 누리: 작은 넥타이
+              {!isNuri ? (
+                // 두리: 작은 넥타이
                 <path d="M 78 128 L 82 128 L 85 150 L 80 158 L 75 150 Z" fill={palette.accent} />
               ) : (
-                // 두리: 작은 리본
+                // 누리: 작은 리본
                 <>
                   <path d="M 80 130 L 68 122 L 70 136 Z" fill={palette.accent} />
                   <path d="M 80 130 L 92 122 L 90 136 Z" fill={palette.accent} />
@@ -313,7 +313,7 @@ export default function CharacterSprite({
           <circle cx={80} cy={72} r={44} fill={palette.skin} />
 
           {/* 머리카락 */}
-          {isNuri ? (
+          {!isNuri ? (
             <path
               d="M 36 66 Q 32 20 80 22 Q 128 20 124 66 Q 118 40 100 44 Q 90 30 80 44 Q 70 30 60 44 Q 42 40 36 66 Z"
               fill={palette.hair}

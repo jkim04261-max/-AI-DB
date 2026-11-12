@@ -1,3 +1,4 @@
+import { companionForGender, genderForCompanion, normalizeGender } from '../shared/characterGender'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
   ensureCharacterTables,
@@ -288,7 +289,7 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
 // 연령대를 직접 계산하지 않고(그러면 미션 게이트로 고정된 상태를 다시
 // 레벨로 무시해버리게 된다) 이 값을 그대로 쓰게 하기 위해서다.
 function toCharacterJson(row: CharacterRow) {
-  return { ...row, age_tier: effectiveAgeTier(row) }
+  return { ...row, gender: genderForCompanion(row.companion_type), age_tier: effectiveAgeTier(row) }
 }
 
 async function handleGet(res: VercelResponse, userId: number) {
@@ -352,7 +353,14 @@ async function handleGetUsage(res: VercelResponse, userId: number) {
 }
 
 async function handlePost(req: VercelRequest, res: VercelResponse, userId: number) {
-  const { companionType } = (req.body ?? {}) as { companionType?: unknown }
+  const body = (req.body ?? {}) as { companionType?: unknown; gender?: unknown }
+  const gender = normalizeGender(body.gender)
+  if (body.gender !== undefined && body.gender !== '' && !gender) {
+    res.status(400).json({ error: '성별은 male 또는 female로 입력해주세요.' })
+    return
+  }
+  const companionType = gender ? companionForGender(gender) : body.companionType
+  console.log('[gender:save]', { gender, companionType })
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) {
     res.status(400).json({ error: '누리 또는 두리 중 하나를 선택해주세요.' })
     return

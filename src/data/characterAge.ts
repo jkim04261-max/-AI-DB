@@ -111,9 +111,12 @@ export function toddlerProfessionGreeting(professionLabel: string): string {
 // 지시서가 요구한 기본값으로 대체한다. 직업은 선택 입력이라 비어 있을
 // 수 있다(professionLabel이 null).
 export function openingGreeting(name: string, professionLabel: string | null): string {
-  if (!name) return '안녕하세요! 저를 가르쳐주세요?'
-  if (!professionLabel) return `안녕하세요, ${name}님이에요! 저를 가르쳐주세요?`
-  return `안녕하세요, ${name}님이에요! 저는 ${professionLabel}입니다. 저를 가르쳐주세요?`
+  if (!name) return '안녕하세요! 저를 가르쳐주세요!'
+  const lastCode = name.charCodeAt(name.length - 1)
+  const ending = lastCode >= 0xAC00 && lastCode <= 0xD7A3 && (lastCode - 0xAC00) % 28 !== 0 ? '이에요' : '예요'
+  const introduction = `안녕하세요! 저는 ${name}${ending}.`
+  if (!professionLabel) return `${introduction} 저를 가르쳐주세요!`
+  return `${introduction} ${professionLabel}의 일을 배우고 싶어요. 저를 가르쳐주세요!`
 }
 
 // 연령대에 비해 너무 어려운 지식을 가르치려 할 때 보여줄 거절 메시지 —
@@ -121,4 +124,10 @@ export function openingGreeting(name: string, professionLabel: string | null): s
 // 필요한 최소 연령대의 라벨이다.
 export function ageBlockedMessage(requiredLabel: string): string {
   return `아직은 너무 어려워서 이해하기 힘들어요! ${requiredLabel}가 되면 다시 가르쳐 주세요~`
+}
+
+// Mission evolution can advance a tier before its usual XP level threshold.
+export function ageNumberForCharacter(level: number, tier: AgeTier): number {
+  const [minimum, maximum] = AGE_NUMBER_AGE_RANGE[tier]
+  return Math.max(minimum, Math.min(maximum, ageNumberForLevel(level)))
 }

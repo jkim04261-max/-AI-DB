@@ -1,3 +1,4 @@
+import { genderForCompanion, type CharacterGender } from '../../shared/characterGender'
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import type { ProfessionId } from '../data/characterProfessions'
@@ -139,7 +140,7 @@ interface CharacterMessageApiRow {
 interface GrowthContextValue {
   characters: Character[]
   loading: boolean
-  createCharacter: (companionType: CompanionType) => Promise<void>
+  createCharacter: (companionType: CompanionType, gender?: CharacterGender) => Promise<void>
   setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<void>
   verifyKnowledge: (
     companionType: CompanionType,
@@ -222,6 +223,7 @@ interface CharacterApiRow {
 }
 
 function fromApiRow(row: CharacterApiRow): Character {
+  console.log('[gender:load]', { gender: genderForCompanion(row.companion_type), companionType: row.companion_type })
   return {
     id: row.id,
     companionType: row.companion_type,
@@ -324,11 +326,11 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, focusPercent } : c)))
   }, [])
 
-  const createCharacter = useCallback(async (companionType: CompanionType) => {
+  const createCharacter = useCallback(async (companionType: CompanionType, gender?: CharacterGender) => {
     const res = await fetch('/api/character', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companionType }),
+      body: JSON.stringify({ companionType, gender }),
     })
     const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
     if (!res.ok || !data.character) {

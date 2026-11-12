@@ -25,6 +25,30 @@ async function run() {
     t.assert(res.statusCode === 401, 'POST without a session is rejected (401)')
   }
 
+  // Gender reaches the actual handler and DB mock; explicit selection wins.
+  for (const [gender, expected] of [['female', 'nuri'], ['여성', 'nuri'], ['male', 'duri'], ['남성', 'duri']]) {
+    mock.reset()
+    mock.seedUser(1, { email: 'alice@test.com' })
+    const auth = bundle('api/_lib/auth.ts')
+    const cookie = cookieHeaderFor(auth, 1, 0, 'alice@test.com')
+    const res = mockRes()
+    await characterHandler({ method: 'POST', headers: { cookie }, body: { companionType: expected === 'nuri' ? 'duri' : 'nuri', gender } }, res)
+    t.assert(res.statusCode === 201 && res.body.character.companion_type === expected, `${gender} determines stored companion`)
+    const loaded = mockRes()
+    await characterHandler({ method: 'GET', headers: { cookie } }, loaded)
+    t.assert(loaded.body.characters[0].companion_type === expected, `${gender} survives database reload`)
+  }
+
+  for (const gender of [true, false, 'unknown']) {
+    mock.reset()
+    mock.seedUser(1, { email: 'alice@test.com' })
+    const auth = bundle('api/_lib/auth.ts')
+    const cookie = cookieHeaderFor(auth, 1, 0, 'alice@test.com')
+    const res = mockRes()
+    await characterHandler({ method: 'POST', headers: { cookie }, body: { companionType: 'nuri', gender } }, res)
+    t.assert(res.statusCode === 400, `ambiguous gender ${gender} is rejected rather than guessed`)
+  }
+
   // --- create ---
   mock.reset()
   mock.seedUser(1, { email: 'alice@test.com' })

@@ -1,3 +1,4 @@
+import { jobCardSymbol, JOB_ACTIVITY_HINT } from '../data/jobCardArt'
 import { useEffect, useState } from 'react'
 import { useMockWallet } from '../hooks/useMockWallet'
 import { JOB_CARDS, type JobCardEntry } from '../data/jobCards'
@@ -56,7 +57,7 @@ function buildQuestions(jobs: JobCardEntry[]): QuizQuestion[] {
         key: `${job.id}-job-${index}`,
         type,
         image: job.jobImage,
-        prompt: '이 사람은 무슨 일을 할까요?',
+        prompt: `${JOB_ACTIVITY_HINT[job.id] ?? '이 사람은 무슨 일을 할까요?'} 이 직업은 무엇일까요?`,
         correctJobId: job.id,
         options,
       }
@@ -67,7 +68,7 @@ function buildQuestions(jobs: JobCardEntry[]): QuizQuestion[] {
       key: `${job.id}-tool-${tool.id}-${index}`,
       type,
       image: tool.image,
-      prompt: '이 도구를 쓰는 직업은?',
+      prompt: `${tool.name} 도구를 쓰는 직업은?`,
       correctJobId: job.id,
       options,
     }
@@ -79,11 +80,11 @@ function buildQuestions(jobs: JobCardEntry[]): QuizQuestion[] {
 // 프롬프트 자체(아래 prompt 텍스트)가 라벨을 대신하므로 실패 시엔
 // 빈 플레이스홀더 박스만 보여준다.
 function QuizImage({ src }: { src: string }) {
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState(src.startsWith('/characters/'))
   if (failed) {
     return (
       <div className="flex h-32 w-32 items-center justify-center rounded-2xl bg-indigo-100 text-4xl" aria-hidden>
-        🖼️
+        {jobCardSymbol(src)}
       </div>
     )
   }

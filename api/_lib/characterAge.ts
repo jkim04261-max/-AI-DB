@@ -65,8 +65,8 @@ export function nextAgeTier(tier: AgeTier): AgeTier | null {
 // 완전히 대체한다 — 더 이상 개수만 세지 않고, 유형별(객관식/주관식/
 // 노하우) 균형을 요구하는 진짜 게이트로 바뀐다. 실제 집계/진화 판정
 // 로직은 api/_lib/characterMissions.ts에 있다(이 파일은 상수만 둔다).
-export type MissionType = 'objective' | 'subjective' | 'knowhow'
-export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow']
+export type MissionType = 'objective' | 'subjective' | 'cardmatch' | 'knowhow'
+export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'cardmatch', 'knowhow']
 
 // 지시서(연령대별 스테이지 볼륨업): "한 연령대를 졸업하려면 유형별
 // 균형(PR #63)을 갖춘 지식을 몇 개 확정해야 하는지"가 더 이상 모든
@@ -86,14 +86,15 @@ export const MISSIONS_REQUIRED_TOTAL_BY_TIER: Record<AgeTier, number> = {
   master_50s: 50,
 }
 
-// 유형별(객관식/주관식/노하우) 균형 요구는 그대로 유지하면서, 총합이
-// 위 표와 정확히 일치하도록 3유형에 최대한 고르게 나눈다(나머지는
-// MISSION_TYPES 순서대로 +1씩) — 예: teen(10) → [4, 3, 3].
+// 입문 단계는 선택2·예시2·카드1·노하우1. 이후 단계는 기존 3유형의 분배를 보존한다.
 function splitMissionsRequiredByType(total: number): Record<MissionType, number> {
-  const base = Math.floor(total / MISSION_TYPES.length)
-  const remainder = total - base * MISSION_TYPES.length
-  const result = {} as Record<MissionType, number>
-  MISSION_TYPES.forEach((type, i) => {
+  // Keep later tiers' existing learning balance; the introductory tier adds one card mission.
+  if (total === 6) return { objective: 2, subjective: 2, cardmatch: 1, knowhow: 1 }
+  const learningTypes: MissionType[] = ['objective', 'subjective', 'knowhow']
+  const base = Math.floor(total / learningTypes.length)
+  const remainder = total - base * learningTypes.length
+  const result = { cardmatch: 0 } as Record<MissionType, number>
+  learningTypes.forEach((type, i) => {
     result[type] = base + (i < remainder ? 1 : 0)
   })
   return result

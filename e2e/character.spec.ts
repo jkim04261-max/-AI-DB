@@ -61,7 +61,7 @@ test('prompts a signed-out visitor to log in instead of showing the create UI', 
   await page.goto('/grow')
 
   await expect(page.getByText('로그인하면 누리·두리를 키울 수 있어요.')).toBeVisible()
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '누리 만들기 (여)' })).toHaveCount(0)
 })
 
 test('a signed-in user with no characters sees both creation buttons', async ({ page }) => {
@@ -78,8 +78,8 @@ test('a signed-in user with no characters sees both creation buttons', async ({ 
 
   await page.goto('/grow')
 
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '누리 만들기 (여)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '두리 만들기 (남)' })).toBeVisible()
 })
 
 test('creating 누리 shows its card and removes only its own button', async ({ page }) => {
@@ -101,7 +101,7 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   // Stage 1(오프닝 프로필): 이제 클릭 즉시 생성되지 않고, 이름·생일·
   // 거주지역·직업을 입력받는 화면을 먼저 거친다 — 전부 선택값이라
   // 이름(기본값 "누리")만 그대로 두고 바로 시작해도 된다.
@@ -113,8 +113,8 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   // 증거). 어린이 단계 표시는 HUD 한 곳에만 있어 그대로 둔다.
   await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
   await expect(page.getByText('어린이', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '두리 만들기 (여)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '누리 만들기 (여)' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '두리 만들기 (남)' })).toBeVisible()
   // Stage 1: 온보딩을 거치면 체험판 가상 용돈 100,000원이 즉시 뜬다
   // (GROW_INITIAL_ALLOWANCE_WON, 지시서에 따라 1,000,000원→100,000원).
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
@@ -140,12 +140,12 @@ test('cancelling the opening profile screen creates no character', async ({ page
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
   await page.getByTestId('opening-profile-cancel-button').click()
 
   await expect(page.getByTestId('opening-profile-screen')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '누리 만들기 (남)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '누리 만들기 (여)' })).toBeVisible()
   expect(postCalled).toBe(false)
 })
 
@@ -193,7 +193,7 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
   await page.getByTestId('opening-profile-start-button').click()
 
@@ -201,62 +201,44 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
 })
 
-// 지시서(성별 필드 추가): 생일·거주지역과 같은 원칙의 플레이버 전용
-// 입력이다 — 어느 값을 고르든 생성되는 캐릭터(companionType)에도,
-// 저장되는 데이터(PATCH 바디)에도 전혀 영향을 주지 않아야 한다.
-test('the gender field in the opening profile screen is flavor-only — it never changes which character is created or what gets saved', async ({
-  page,
-}) => {
-  await failUnmockedApiCalls(page)
-  await mockMe(page, { user: USER })
-  await mockEmptyConversations(page)
-  let postBody: { companionType?: string } | null = null
-  let patchBody: { companionType?: string; profession?: string } | null = null
-  await mockCharacterApi(page, async (route, action, method) => {
-    if (method === 'GET' && !action) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
-      return true
-    }
-    if (method === 'POST') {
-      postBody = route.request().postDataJSON()
-      const created = { id: 1, user_id: USER.id, companion_type: postBody?.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
-      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
-      return true
-    }
-    if (method === 'PATCH') {
-      patchBody = route.request().postDataJSON()
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          character: { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'custom', custom_profession_label: '숲해설가', level: 1, exp: 0, created_at: new Date().toISOString() },
-        }),
-      })
-      return true
-    }
-    return false
+for (const [gender, companion, name] of [['female', 'nuri', '누리'], ['male', 'duri', '두리']] as const) {
+  test(`gender ${gender} overrides the opening choice, persists, and renders ${name} after reload`, async ({ page }) => {
+    await failUnmockedApiCalls(page)
+    await mockMe(page, { user: USER })
+    await mockEmptyConversations(page)
+    const logs: string[] = []
+    page.on('console', message => logs.push(message.text()))
+    let stored: Record<string, unknown> | null = null
+    let requestBody: unknown
+    await mockCharacterApi(page, async (route, action, method) => {
+      if (method === 'GET' && !action) {
+        await route.fulfill({ json: { characters: stored ? [stored] : [] } })
+        return true
+      }
+      if (method === 'POST') {
+        requestBody = route.request().postDataJSON()
+        stored = { id: 1, user_id: USER.id, companion_type: companion, gender, stage: 'child', profession: null, level: 1, exp: 0, age_tier: 'toddler', created_at: new Date().toISOString() }
+        await route.fulfill({ status: 201, json: { character: stored } })
+        return true
+      }
+      return false
+    })
+    await page.goto('/grow')
+    // Start with the opposite companion: selected gender must win.
+    await page.getByRole('button', { name: gender === 'female' ? '두리 만들기 (남)' : '누리 만들기 (여)' }).click()
+    await page.getByTestId('opening-profile-name-input').fill(gender === 'female' ? '김세희' : '김동진')
+    await page.getByTestId(`opening-profile-gender-${gender}`).check()
+    await page.getByTestId('opening-profile-start-button').click()
+    await expect.poll(() => requestBody).toEqual({ companionType: companion, gender })
+    await expect(page.getByRole('img', { name: `${name} 캐릭터, 대기 중` })).toBeVisible()
+    await expect(page.getByTestId(`illustrated-age-portrait-${companion}`)).toHaveAttribute('src', new RegExp(`${companion}-toddler`))
+    await page.reload()
+    await expect(page.getByRole('img', { name: `${name} 캐릭터, 대기 중` })).toBeVisible()
+    expect(logs.some(line => line.includes('[gender:state]') && line.includes(gender))).toBeTruthy()
+    expect(logs.some(line => line.includes('[gender:load]') && line.includes(gender))).toBeTruthy()
+    expect(logs.some(line => line.includes('[gender:render]') && line.includes(name))).toBeTruthy()
   })
-
-  await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
-
-  await expect(page.getByTestId('opening-profile-gender-male')).not.toBeChecked()
-  await expect(page.getByTestId('opening-profile-gender-female')).not.toBeChecked()
-
-  // 캐릭터는 이미 "누리"로 정해져 있는데(남성 전용 캐릭터), 플레이버
-  // 입력으로는 일부러 반대인 "여성"을 고른다 — 그래도 아무 영향이 없어야
-  // 한다는 것이 이 테스트의 핵심이다.
-  await page.getByTestId('opening-profile-gender-female').click()
-  await expect(page.getByTestId('opening-profile-gender-female')).toBeChecked()
-
-  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
-  await page.getByTestId('opening-profile-start-button').click()
-
-  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
-  expect(postBody).toMatchObject({ companionType: 'nuri' })
-  expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom' })
-  expect(patchBody).not.toHaveProperty('gender')
-})
+}
 
 // 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후 0.5초 뒤 페이드인되는
 // 인사말 — 입력한 이름/직업이 그대로 들어가는지, 기존 showBubble의
@@ -297,7 +279,7 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '누리 만들기 (남)' }).click()
+  await page.getByRole('button', { name: '누리 만들기 (여)' }).click()
   await page.getByTestId('opening-profile-name-input').fill('신새별')
   await page.getByTestId('opening-profile-profession-input').fill('목욕도우미')
   await page.getByTestId('opening-profile-start-button').click()
@@ -310,7 +292,7 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 
   await expect(page.getByTestId('speech-bubble')).toContainText(
-    '안녕하세요, 신새별님이에요! 저는 목욕도우미입니다. 저를 가르쳐주세요?',
+    '안녕하세요! 저는 신새별이에요. 목욕도우미의 일을 배우고 싶어요. 저를 가르쳐주세요!',
     { timeout: 3000 },
   )
 
@@ -345,12 +327,12 @@ test('clicking the character dismisses the opening greeting bubble early', async
   })
 
   await page.goto('/grow')
-  await page.getByRole('button', { name: '두리 만들기 (여)' }).click()
+  await page.getByRole('button', { name: '두리 만들기 (남)' }).click()
   await page.getByTestId('opening-profile-name-input').fill('아름이')
   // 직업은 비워둔다 — 기본값(fallback) 문구로 이어지는지도 함께 확인.
   await page.getByTestId('opening-profile-start-button').click()
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 아름이님이에요! 저를 가르쳐주세요?', {
+  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요! 저는 아름이예요. 저를 가르쳐주세요!', {
     timeout: 2000,
   })
 
@@ -669,4 +651,48 @@ test('shows the character\'s focus gauge percentage', async ({ page }) => {
   await page.goto('/grow')
 
   await expect(page.getByTestId('focus-gauge')).toContainText('72%')
+})
+
+test('card lesson is verified and saved as its own mission; early evolution updates age and image', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let savedMission: unknown
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ json: { characters: [{ id: 1, companion_type: 'nuri', stage: 'child', profession: 'doctor', level: 1, exp: 0, age_tier: 'toddler' }] } })
+      return true
+    }
+    if (action === 'missions') {
+      await route.fulfill({ json: { missionProgress: { ageTier: 'toddler', ageTierLabel: '8~9살', byType: {
+        objective: { confirmed: 2, required: 2, complete: true }, subjective: { confirmed: 2, required: 2, complete: true }, cardmatch: { confirmed: 0, required: 1, complete: false }, knowhow: { confirmed: 1, required: 1, complete: true },
+      }, confirmedTotal: 5, requiredTotal: 6, allConfirmed: false, nextAgeTier: 'teen', nextAgeTierLabel: '10대' } } })
+      return true
+    }
+    if (action === 'verify-knowledge') {
+      await route.fulfill({ json: { verification: { status: 'appropriate', explanation: '직업 도구의 쓰임이에요.', relevance: '관련 있음', issues: '', suggestion: '' }, verificationToken: 'verified-card', characterReply: '잘 배웠어요!' } })
+      return true
+    }
+    if (action === 'save-knowledge') {
+      savedMission = route.request().postDataJSON().missionType
+      await route.fulfill({ status: 201, json: { entry: { id: 1, profession: 'doctor', title: '직업과 도구 연결하기', original_content: '', final_content: '', verification_status: 'appropriate', verification_explanation: '', created_at: new Date().toISOString() }, savedReply: '카드 미션을 저장했어요!', level: 1, exp: 5, evolved: true, newAgeTier: 'teen' } })
+      return true
+    }
+    return false
+  })
+  await page.goto('/grow')
+  await expect(page.getByText('8세', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '가르치기', exact: true }).click()
+  await expect(page.getByTestId('mission-progress-cardmatch')).toContainText('0/1')
+  await page.getByRole('button', { name: '직업 카드 시작하기' }).click()
+  await page.locator('[data-job-id="doctor"][data-kind="job"]').click()
+  await page.locator('[data-job-id="doctor"][data-kind="tool"]').click()
+  await page.getByTestId('card-match-use-lesson').click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('직업과 도구 연결하기')
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect.poll(() => savedMission).toBe('cardmatch')
+  await page.getByRole('button', { name: '닫기', exact: true }).click()
+  await expect(page.getByText('10세', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
 })
