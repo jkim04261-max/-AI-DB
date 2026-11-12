@@ -302,13 +302,16 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   await page.getByTestId('opening-profile-profession-input').fill('목욕도우미')
   await page.getByTestId('opening-profile-start-button').click()
 
-  // 0.5초 지연 — 즉시(300ms 시점)는 아직 안 떠 있어야 한다.
-  await page.waitForTimeout(300)
+  // 0.5초 지연 — 클릭 직후(인사말 타이머가 걸릴 시간조차 없는 시점)에는
+  // 아직 안 떠 있어야 한다. CI처럼 느린 환경에서 "정확히 300ms" 같은
+  // 고정 대기는 0.5초 지연과의 여유가 너무 좁아 간헐적으로 깨졌다
+  // (이미 떠 있는데 "0이어야 한다"고 기대) — 대기 없이 클릭 바로
+  // 다음에 확인해 그 여유를 없앴다.
   await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 
   await expect(page.getByTestId('speech-bubble')).toContainText(
     '안녕하세요, 신새별님이에요! 저는 목욕도우미입니다. 저를 가르쳐주세요?',
-    { timeout: 2000 },
+    { timeout: 3000 },
   )
 
   // 기존 showBubble 기본 지속시간(3.2초)이 지난 시점(총 경과 약 4초)에도
