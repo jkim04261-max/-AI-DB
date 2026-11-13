@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMockWallet } from '../hooks/useMockWallet'
+import { reward } from '../services/paymentService'
 import { JOB_CARDS, type JobCardEntry } from '../data/jobCards'
 
 // 지시서(직업 그림 퀴즈): "2단계에서 생성한 jobCards.js(.ts)를 그대로
@@ -129,7 +130,7 @@ export default function JobQuiz() {
     if (jobId === current.correctJobId) {
       setAnsweredCorrectly(true)
       setShowTryAgain(false)
-      wallet.earn(CORRECT_REWARD_WON)
+      reward(wallet, CORRECT_REWARD_WON, 'job_quiz_reward')
       setCorrectCount((c) => c + 1)
     } else {
       setShowTryAgain(true)
@@ -140,7 +141,7 @@ export default function JobQuiz() {
   const handleNext = () => {
     if (currentIndex + 1 >= questions.length) {
       if (perfectRun) {
-        wallet.earn(PERFECT_BONUS_WON)
+        reward(wallet, PERFECT_BONUS_WON, 'job_quiz_reward')
       }
       setFinished(true)
       return

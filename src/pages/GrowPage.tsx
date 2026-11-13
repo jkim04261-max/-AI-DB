@@ -32,6 +32,7 @@ import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
+import { charge, reward } from '../services/paymentService'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -596,7 +597,7 @@ export default function GrowPage() {
       setFeedError('잔액이 부족하여 밥을 사줄 수 없어요. 문제를 더 풀어주세요!')
       return
     }
-    if (wallet.balanceWon !== null) wallet.spend(MEAL_COST_WON)
+    if (wallet.balanceWon !== null) charge(wallet, MEAL_COST_WON, 'meal')
     setHungryEventOpen(false)
     setFeedError(null)
     setIsHungry(false)
@@ -677,7 +678,7 @@ export default function GrowPage() {
       setWorkingOnJob(true)
       const t2 = setTimeout(() => {
         setWorkingOnJob(false)
-        wallet.earn(PART_TIME_JOB_EARNING_WON)
+        reward(wallet, PART_TIME_JOB_EARNING_WON, 'part_time_job')
         setMoneyPopup(PART_TIME_JOB_EARNING_WON)
         const t3 = setTimeout(() => setMoneyPopup(null), 1800)
         outingTimeoutsRef.current.push(t3)
@@ -726,7 +727,7 @@ export default function GrowPage() {
 
     if (count % QUIZ_CORRECT_REWARD_INTERVAL === 0) {
       setOpenSheet(null)
-      if (wallet.balanceWon !== null) wallet.earn(QUIZ_CORRECT_REWARD_WON)
+      if (wallet.balanceWon !== null) reward(wallet, QUIZ_CORRECT_REWARD_WON, 'quiz_reward')
       setMoneyPopup(QUIZ_CORRECT_REWARD_WON)
       const t = setTimeout(() => setMoneyPopup(null), 1800)
       outingTimeoutsRef.current.push(t)
@@ -737,7 +738,7 @@ export default function GrowPage() {
       setOpenSheet(null)
       showBubble('배가 고파요! 간식 먹고 올게요!')
       const t1 = setTimeout(() => {
-        if (wallet.balanceWon !== null) wallet.spend(QUIZ_SNACK_COST_WON)
+        if (wallet.balanceWon !== null) charge(wallet, QUIZ_SNACK_COST_WON, 'quiz_snack')
         setPose('eating')
         showBubble('냠냠, 간식 진짜 맛있어요! 🍕')
         const t2 = setTimeout(() => setPose('idle'), 2600)
