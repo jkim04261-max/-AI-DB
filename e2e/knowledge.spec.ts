@@ -1880,3 +1880,31 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-submit-button').click()
   await expect(page.getByTestId('final-subjective-step')).toBeVisible()
 })
+
+// 무료 예시 선택은 입력 보조이며 서버 저장/검증/XP 지급을 일으키지 않는다.
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`8~9세 무료 예시 3개 복구: ${viewport.width}px 입력만 채우고 서버 변경 없음`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await failUnmockedApiCalls(page)
+    await mockMe(page, { user: USER })
+    await mockEmptyConversations(page)
+    let writes = 0
+    await mockCharacterApi(page, { characters: [NURI_ACCOUNTANT] })
+    page.on('request', request => {
+      if (request.url().includes('/api/character') && request.method() === 'POST') writes++
+    })
+    await page.goto('/grow')
+    await page.getByRole('button', { name: '가르치기', exact: true }).click()
+    const examples = page.getByTestId('topic-suggestion-chip')
+    await expect(examples).toHaveCount(3)
+    for (let i = 0; i < 3; i++) {
+      const title = await examples.nth(i).innerText()
+      await examples.nth(i).click()
+      await expect(page.getByPlaceholder('지식 제목')).toHaveValue(title)
+      await expect(page.getByTestId('knowledge-content-textarea')).not.toHaveValue('')
+      await expect(examples).toHaveCount(3)
+    }
+    expect(writes).toBe(0)
+    await expect(page.getByTestId('objective-quiz-step')).toHaveCount(0)
+  })
+}

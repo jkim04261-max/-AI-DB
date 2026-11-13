@@ -294,7 +294,7 @@ export default function InteractionPanel({
   const applyTopicSuggestion = (topic: { title: string; content: string }) => {
     setTitle(topic.title)
     setContent(topic.content)
-    setMissionType('objective')
+    setMissionType(isToddlerStagedFlow ? 'knowhow' : 'objective')
     setVerification(null)
     setVerifiedSnapshot(null)
     setVerificationToken(null)
@@ -444,13 +444,13 @@ export default function InteractionPanel({
       )}
 
       {/* 미션 ① 선택지에서 고르기 — 8~9살 눈높이에서 제일 쉬운, 터치 한
-          번으로 끝나는 입력 방식. 입력칸이 비어 있을 때만 보여주는 기존
-          조건은 그대로 유지했다. */}
-      {!isToddlerStagedFlow && !title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+          번으로 입력을 돕는다. 8~9세는 1단계 동안 3개를 계속 보여준다.
+          선택만으로 검증·저장·XP 지급은 하지 않는다. */}
+      {(isToddlerStagedFlow ? toddlerStep === 'direct' : !title.trim() && !content.trim()) && topicSuggestions.length > 0 && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-cyan-400/25 bg-cyan-400/5 p-4 shadow-[0_0_14px_rgba(34,211,238,0.08)]">
           <p className="text-lg font-extrabold text-cyan-200 sm:text-xl">🎯 선택지에서 고르기</p>
           <p className="text-sm font-semibold text-cyan-200/70 sm:text-base">
-            지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
+            지금 {AGE_TIER_LABEL[characterAgeTier]} 단계에 맞는 예시예요 — 기본 3개는 무료예요. 눌러서 채운 뒤 자유롭게 고쳐도 돼요.
           </p>
           <div className="flex flex-wrap gap-2">
             {topicSuggestions.map((topic) => (
@@ -458,6 +458,7 @@ export default function InteractionPanel({
                 key={topic.title}
                 type="button"
                 data-testid="topic-suggestion-chip"
+                disabled={busy || saving}
                 onClick={() => applyTopicSuggestion(topic)}
                 className="rounded-full border-2 border-cyan-400/50 bg-gradient-to-b from-cyan-400/20 to-cyan-500/10 px-4 py-2 text-base font-bold text-cyan-100 shadow-[0_2px_0_rgba(34,211,238,0.3)] transition hover:scale-[1.04] hover:border-cyan-300 hover:from-cyan-400/30 hover:to-cyan-500/20 active:scale-95"
               >
