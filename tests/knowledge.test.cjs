@@ -841,8 +841,11 @@ async function run() {
     const kateNuriJson = getRes.body.characters.find((c) => c.companion_type === 'nuri')
     t.assert(kateNuriJson.level === 5 && kateNuriJson.age_tier === 'toddler', '캐릭터 목록 응답도 레벨(5)과 무관하게 age_tier는 toddler로 고정되어 내려온다')
 
-    // 2) 유형 구성이 2+2+2가 아니면(객관식만 계속 쌓여도) 진화하지 않는다
-    // — "총 6개"가 아니라 "유형별 2개씩"이 조건이다.
+    // 2) 유형 구성이 3(knowhow)+2(objective)+1(subjective)가 아니면
+    // (객관식만 계속 쌓여도) 진화하지 않는다 — 지시서(학습 플로우 전면
+    // 개편)로 toddler만 균등분배(2/2/2)에서 이 비율로 바뀌었다(사용자
+    // 승인: "게이트를 3:2:1로 변경") — "총 6개"가 아니라 "유형별로 정해진
+    // 개수"가 조건인 것은 그대로다.
     for (let n = 3; n <= 6; n++) {
       const res = await teachOnce(n, 'objective')
       t.assert(res.body.evolved === false, `${n}번째(여전히 objective만)까지는 진화하지 않는다`)
@@ -853,18 +856,19 @@ async function run() {
       missionsRes.body.missionProgress.byType.objective.confirmed === 2 && missionsRes.body.missionProgress.byType.objective.complete === true,
       'objective는 2개에서 더 이상 늘지 않고(유형별 상한 2) 완료 표시된다',
     )
+    t.assert(missionsRes.body.missionProgress.byType.subjective.required === 1 && missionsRes.body.missionProgress.byType.knowhow.required === 3, 'toddler의 유형별 필요 개수는 subjective 1개/knowhow 3개다')
     t.assert(missionsRes.body.missionProgress.byType.subjective.confirmed === 0 && missionsRes.body.missionProgress.byType.knowhow.confirmed === 0, 'subjective/knowhow는 아직 0개다')
     t.assert(missionsRes.body.missionProgress.allConfirmed === false, '유형이 한쪽으로 쏠려 있으면 총 개수가 충분해도 allConfirmed는 false다')
 
-    // 3) subjective 2개 + knowhow 2개까지 채우면(= 2+2+2) 레벨도 이미
-    // 충분하므로 그 즉시 진화한다.
-    await teachOnce(7, 'subjective')
-    const subj2 = await teachOnce(8, 'subjective')
-    t.assert(subj2.body.evolved === false, 'subjective가 2개 찼어도 knowhow가 아직 0개라 진화하지 않는다')
+    // 3) subjective 1개(새 필요 개수) + knowhow 3개까지 채우면(= 2+1+3=6)
+    // 레벨도 이미 충분하므로 그 즉시 진화한다.
+    const subj1 = await teachOnce(7, 'subjective')
+    t.assert(subj1.body.evolved === false, 'subjective가 1개로 꽉 찼어도(새 필요 개수) knowhow가 아직 0개라 진화하지 않는다')
+    await teachOnce(8, 'knowhow')
     await teachOnce(9, 'knowhow')
     const evolved = await teachOnce(10, 'knowhow')
-    t.assert(evolved.statusCode === 201, '유형별 2개씩 마지막 지식 저장이 성공한다')
-    t.assert(evolved.body.evolved === true, '객관식2+주관식2+노하우2가 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
+    t.assert(evolved.statusCode === 201, '유형별로 정해진 개수의 마지막 지식 저장이 성공한다')
+    t.assert(evolved.body.evolved === true, '객관식2+주관식1+노하우3이 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
     t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
     t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
@@ -1080,9 +1084,10 @@ async function run() {
     }
   }
 
-  // --- 지시서 #03(8~9살 시험 시스템 전면 개편): toddler(8~9살)→teen(10대)
-  // 첫 진화는 "복잡한 레벨 조건 없이" 유형별 2개씩 총 6개(예시 문제
-  // 풀이형=subjective/객관식=objective/노하우 설계형=knowhow) 확정만으로
+  // --- 지시서 #03(8~9살 시험 시스템 전면 개편), 지시서(학습 플로우
+  // 전면 개편)로 숫자 갱신: toddler(8~9살)→teen(10대) 첫 진화는 "복잡한
+  // 레벨 조건 없이" 유형별로 정해진 개수 총 6개(knowhow 3+objective
+  // 2+subjective 1 — 사용자 승인: "게이트를 3:2:1로 변경") 확정만으로
   // 즉시 진화해야 한다 — Lv.1(레벨 조건 AGE_TIER_MIN_LEVEL.teen=5에
   // 한참 못 미침)인 채로도 진화하는지 전용으로 확인한다.
   {
@@ -1126,15 +1131,133 @@ async function run() {
     await teachOnceLeo(1, 'objective')
     await teachOnceLeo(2, 'objective')
     await teachOnceLeo(3, 'subjective')
-    await teachOnceLeo(4, 'subjective')
+    await teachOnceLeo(4, 'knowhow')
     await teachOnceLeo(5, 'knowhow')
     t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
     const leoEvolved = await teachOnceLeo(6, 'knowhow')
     t.assert(leoEvolved.statusCode === 201, '6번째(마지막) 지식 저장이 성공한다')
-    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별 2개씩 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
+    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별로 정해진 개수(2+1+3) 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
     t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(leoNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록된다')
     t.assert(leoNuri.level === 1, '진화해도 레벨/경험치는 그대로다(진화가 레벨을 강제로 올리지 않는다)')
+  }
+
+  // --- 지시서(학습 플로우 전면 개편) 2단계: 객관식 2문제(세트 전부
+  // 정답 필요) 생성/채점 API — 직업 무관 공통 문제은행(사용자 승인:
+  // "직업 무관 생활상식 동일 문제은행")이라 EXAM_SUPPORTED_PROFESSIONS
+  // 가드 없이 모든 직업(의사 포함)에서 동작해야 한다.
+  {
+    const objectiveQuizQuestions = bundle('api/_lib/objectiveQuizQuestions.ts')
+    const correctIndexFor = (id) => objectiveQuizQuestions.getObjectiveQuizQuestionById(id).correctIndex
+
+    mock.seedUser(13, { email: 'mina@test.com' })
+    const minaCookie = cookieHeaderFor(auth, 13, 0, 'mina@test.com')
+    const minaReq = (overrides = {}) => ({ headers: { cookie: minaCookie }, query: {}, ...overrides })
+    await characterHandler(minaReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(minaReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'doctor' } }), mockRes())
+    await characterHandler(minaReq({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
+    await characterHandler(minaReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'doctor' } }), mockRes())
+
+    // 1) 문제 2개 + quizToken을 받고, 정답(correctIndex)은 전혀
+    // 포함되지 않는다.
+    const quizRes1 = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes1)
+    t.assert(quizRes1.statusCode === 200, '의사 직업이어도 객관식 퀴즈를 바로 받을 수 있다(직업 무관 공통 문제은행)')
+    t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 2, '문제 2개를 받는다')
+    t.assert(typeof quizRes1.body.quizToken === 'string' && quizRes1.body.quizToken.length > 0, '서명된 quizToken을 받는다')
+    t.assert(quizRes1.body.questions.every((q) => q.correctIndex === undefined), '정답(correctIndex)은 클라이언트로 내려가지 않는다')
+
+    // 2) 하나라도 틀리면 통과하지 못하고, 아무것도 저장되지 않는다.
+    const [q1a, q2a] = quizRes1.body.questions
+    const wrongAnswers = [q1a, q2a].map((q) => (correctIndexFor(q.id) + 1) % q.choices.length)
+    const wrongSubmit = mockRes()
+    await characterHandler(
+      minaReq({
+        method: 'POST',
+        query: { action: 'objective-quiz-submit' },
+        body: { companionType: 'nuri', quizToken: quizRes1.body.quizToken, answers: wrongAnswers },
+      }),
+      wrongSubmit,
+    )
+    t.assert(wrongSubmit.statusCode === 200, '틀려도 200으로 응답한다(에러가 아니라 결과)')
+    t.assert(wrongSubmit.body.allCorrect === false, '하나라도 틀리면 allCorrect:false다')
+    t.assert(wrongSubmit.body.results.length === 2, '두 문제 각각의 정오답이 내려온다')
+    t.assert(wrongSubmit.body.expAwarded === 0, '틀리면 XP가 지급되지 않는다')
+    const afterWrongKnowledge = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterWrongKnowledge)
+    t.assert(afterWrongKnowledge.body.entries.length === 0, '틀리면 지식 항목이 전혀 저장되지 않는다')
+
+    // 3) 새 세트를 받아 둘 다 맞히면 통과하고, 2건이 저장되며 XP가
+    // 20(지식 저장 10XP × 2) 지급된다.
+    const quizRes2 = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes2)
+    const [q1b, q2b] = quizRes2.body.questions
+    const correctAnswers = [q1b, q2b].map((q) => correctIndexFor(q.id))
+    const correctSubmit = mockRes()
+    await characterHandler(
+      minaReq({
+        method: 'POST',
+        query: { action: 'objective-quiz-submit' },
+        body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: correctAnswers, requestId: 'req-obj-mina-1' },
+      }),
+      correctSubmit,
+    )
+    t.assert(correctSubmit.statusCode === 201, '둘 다 맞히면 201로 응답한다')
+    t.assert(correctSubmit.body.allCorrect === true, '둘 다 맞히면 allCorrect:true다')
+    t.assert(correctSubmit.body.expAwarded === 20, '지식 저장 XP(10) × 2건 = 20XP가 지급된다')
+    t.assert(correctSubmit.body.missionProgress.byType.objective.confirmed === 2 && correctSubmit.body.missionProgress.byType.objective.complete === true, 'objective 미션이 2/2로 완료 표시된다')
+    t.assert(correctSubmit.body.evolved === false, 'knowhow/subjective가 아직 안 채워져 있어 이것만으로는 진화하지 않는다')
+    const afterCorrectKnowledge = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterCorrectKnowledge)
+    t.assert(afterCorrectKnowledge.body.entries.length === 2, '통과한 2문제가 각각 지식 항목으로 저장된다')
+    t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '두 항목 모두 mission_type=objective로 저장된다')
+
+    // 4) 같은 requestId로 재제출(네트워크 재시도 등)하면 중복 저장·중복
+    // XP 지급 없이 현재 상태를 그대로 돌려준다.
+    const replaySubmit = mockRes()
+    await characterHandler(
+      minaReq({
+        method: 'POST',
+        query: { action: 'objective-quiz-submit' },
+        body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: correctAnswers, requestId: 'req-obj-mina-1' },
+      }),
+      replaySubmit,
+    )
+    t.assert(replaySubmit.statusCode === 200 && replaySubmit.body.allCorrect === true && replaySubmit.body.expAwarded === 0, '같은 requestId의 재제출은 중복 지급 없이 현재 상태를 돌려준다')
+    const afterReplayKnowledge = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterReplayKnowledge)
+    t.assert(afterReplayKnowledge.body.entries.length === 2, '재제출로 지식 항목이 중복 저장되지 않는다(여전히 2건)')
+
+    // 5) 다른 캐릭터(두리)의 quizToken으로 누리 쪽을 제출하면 거부된다
+    // (서명은 유효해도 이 캐릭터에게 출제된 문제가 아니므로).
+    const quizResDuri = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'duri' } }), quizResDuri)
+    const crossSubmit = mockRes()
+    await characterHandler(
+      minaReq({
+        method: 'POST',
+        query: { action: 'objective-quiz-submit' },
+        body: { companionType: 'nuri', quizToken: quizResDuri.body.quizToken, answers: [0, 0] },
+      }),
+      crossSubmit,
+    )
+    t.assert(crossSubmit.statusCode === 400, '다른 캐릭터에게 발급된 quizToken은 거부된다(400)')
+
+    // 6) 직업이 아직 없는 캐릭터는 퀴즈를 받을 수 없다.
+    mock.seedUser(14, { email: 'noprofession@test.com' })
+    const npCookie = cookieHeaderFor(auth, 14, 0, 'noprofession@test.com')
+    await characterHandler({ headers: { cookie: npCookie }, query: {}, method: 'POST', body: { companionType: 'nuri' } }, mockRes())
+    const noProfessionQuiz = mockRes()
+    await characterHandler({ headers: { cookie: npCookie }, query: { action: 'objective-quiz', companionType: 'nuri' }, method: 'GET' }, noProfessionQuiz)
+    t.assert(noProfessionQuiz.statusCode === 400, '직업이 없으면 객관식 퀴즈를 받을 수 없다(400)')
+
+    // 7) 답을 하나만 보내거나 형식이 잘못되면 400.
+    const malformedSubmit = mockRes()
+    await characterHandler(
+      minaReq({ method: 'POST', query: { action: 'objective-quiz-submit' }, body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: [0] } }),
+      malformedSubmit,
+    )
+    t.assert(malformedSubmit.statusCode === 400, '답이 2개가 아니면 400으로 거부된다')
   }
 
   // --- 지시서(연령대별 스테이지 볼륨업): 연령대별 필요 지식 개수

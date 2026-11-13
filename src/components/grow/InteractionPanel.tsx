@@ -13,6 +13,8 @@ import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
 import type { CharacterPose } from './CharacterSprite'
+import ObjectiveQuizStep from './ObjectiveQuizStep'
+import FinalSubjectiveStep from './FinalSubjectiveStep'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
 const VERIFICATION_LABEL: Record<KnowledgeVerification['status'], string> = {
@@ -149,6 +151,24 @@ export default function InteractionPanel({
       cancelled = true
     }
   }, [character.companionType, getMissionProgress])
+
+  // 지시서(학습 플로우 전면 개편): 8~9살(toddler) 단계에서만 "1단계
+  // 직접입력 3문제 → 2단계 객관식 2문제(세트 전부 정답 필요) → 3단계
+  // 주관식 1문제" 순서를 강제한다 — 사용자 승인에 따라 teen 이후
+  // 단계는 이 범위 밖이라 기존 자유 선택 3카드 UI를 전혀 건드리지
+  // 않는다. 단계는 서버가 내려준 missionProgress(byType별 confirmed/
+  // required)에서 그때그때 다시 계산한다 — 클라이언트에 별도로 저장하지
+  // 않으므로 새로고침·패널 재오픈 후에도 항상 정확한 단계로 복원된다.
+  const isToddlerStagedFlow = characterAgeTier === 'toddler'
+  type ToddlerStep = 'direct' | 'multiple' | 'final' | 'complete'
+  const toddlerStep: ToddlerStep = (() => {
+    if (!missionProgress) return 'direct'
+    const { knowhow, objective, subjective } = missionProgress.byType
+    if (knowhow.confirmed < knowhow.required) return 'direct'
+    if (objective.confirmed < objective.required) return 'multiple'
+    if (subjective.confirmed < subjective.required) return 'final'
+    return 'complete'
+  })()
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -426,7 +446,7 @@ export default function InteractionPanel({
       {/* 미션 ① 선택지에서 고르기 — 8~9살 눈높이에서 제일 쉬운, 터치 한
           번으로 끝나는 입력 방식. 입력칸이 비어 있을 때만 보여주는 기존
           조건은 그대로 유지했다. */}
-      {!title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+      {!isToddlerStagedFlow && !title.trim() && !content.trim() && topicSuggestions.length > 0 && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-cyan-400/25 bg-cyan-400/5 p-4 shadow-[0_0_14px_rgba(34,211,238,0.08)]">
           <p className="text-lg font-extrabold text-cyan-200 sm:text-xl">🎯 선택지에서 고르기</p>
           <p className="text-sm font-semibold text-cyan-200/70 sm:text-base">
@@ -454,29 +474,65 @@ export default function InteractionPanel({
           공부하기"에서 "✨ 예시 만들어주기"로 바꾸고, 버튼 스타일도 더
           차분한 톤으로 바꿨다 — 기능(disabled 조건, handleSelfStudy
           호출)은 그대로다. */}
-      <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
-        <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
-        <button
-          type="button"
-          onClick={() => void handleSelfStudy()}
-          disabled={busy}
-          className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
-        >
-          {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
-        </button>
-        <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
-          AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
-          내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
-        </p>
-        {studyRemaining && (
+      {!isToddlerStagedFlow && (
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
+          <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
+          <button
+            type="button"
+            onClick={() => void handleSelfStudy()}
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
+          >
+            {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
+          </button>
           <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
-            오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
+            AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
+            내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
           </p>
-        )}
-      </div>
+          {studyRemaining && (
+            <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
+              오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 지시서(학습 플로우 전면 개편) 2단계/3단계 — toddler 단계에서
+          유형별 필요 개수(knowhow 3/objective 2/subjective 1)를 다
+          채울 때까지 이 순서를 강제한다. 다른 연령대는 여기 들어오지
+          않고 아래 기존 "직접 입력하기" 카드(③)를 그대로 쓴다. */}
+      {isToddlerStagedFlow && toddlerStep === 'multiple' && (
+        <ObjectiveQuizStep
+          companionType={character.companionType}
+          onAllCorrect={(progress) => {
+            setMissionProgress(progress)
+            onKnowledgeSaved?.()
+            onKnowledgeSaved?.()
+            pushLine('character', '정답이에요! 2문제 모두 맞혔어요. 🎉')
+            flashPose('happy', 2500)
+          }}
+        />
+      )}
+      {isToddlerStagedFlow && toddlerStep === 'final' && (
+        <FinalSubjectiveStep
+          companionType={character.companionType}
+          onSaved={(progress) => {
+            setMissionProgress(progress)
+            onKnowledgeSaved?.()
+            pushLine('character', '소중한 이야기를 들려줘서 고마워요! 오늘 학습을 모두 마쳤어요. 🎉')
+            flashPose('happy', 2500)
+          }}
+        />
+      )}
+      {isToddlerStagedFlow && toddlerStep === 'complete' && (
+        <p data-testid="toddler-staged-flow-complete" className="text-base font-bold text-emerald-300">
+          오늘 학습을 모두 마쳤어요! 🎉
+        </p>
+      )}
 
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
-          경로. */}
+          경로. toddler 단계에서는 1단계(direct)일 때만 보인다. */}
+      {(!isToddlerStagedFlow || toddlerStep === 'direct') && (
       <div className="flex flex-col gap-3 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-4">
         <div className="flex items-center gap-1.5">
           <p className="text-lg font-extrabold text-rose-400 sm:text-xl">📌 직접 입력하기</p>
@@ -540,6 +596,7 @@ export default function InteractionPanel({
           </p>
         </div>
       </div>
+      )}
 
       {actionError && <p className="text-base font-bold text-rose-300">{actionError}</p>}
 

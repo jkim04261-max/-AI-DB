@@ -20,7 +20,14 @@ import {
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
-import { buildTeachReply, buildStudyReply, buildSavedReply, buildQuizResultMessage, buildExamResultMessage } from './_lib/characterDialogue'
+import {
+  buildTeachReply,
+  buildStudyReply,
+  buildSavedReply,
+  buildQuizResultMessage,
+  buildExamResultMessage,
+  buildObjectiveQuizResultMessage,
+} from './_lib/characterDialogue'
 import {
   KNOWLEDGE_SAVE_EXP,
   QUIZ_CORRECT_EXP,
@@ -29,6 +36,8 @@ import {
   levelForExp,
 } from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
+import { getObjectiveQuizQuestionById, pickRandomObjectiveQuizQuestions } from './_lib/objectiveQuizQuestions'
+import { signObjectiveQuizToken, verifyObjectiveQuizToken } from './_lib/objectiveQuizToken'
 import {
   meetsAgeTier,
   AGE_TIER_LABEL,
@@ -220,6 +229,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetQuiz(req, res, session.sub)
       return
     }
+    if (action === 'objective-quiz') {
+      await handleGetObjectiveQuiz(req, res, session.sub)
+      return
+    }
     if (action === 'exam') {
       await handleGetExam(req, res, session.sub)
       return
@@ -251,6 +264,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'quiz-submit') {
       await handleSubmitQuiz(req, res, session.sub)
+      return
+    }
+    if (action === 'objective-quiz-submit') {
+      await handleSubmitObjectiveQuiz(req, res, session.sub)
       return
     }
     if (action === 'exam-submit') {
@@ -1195,6 +1212,195 @@ async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId:
   } catch (err) {
     console.error('[api/character] unexpected error on quiz-submit', err)
     res.status(500).json({ error: '퀴즈 채점 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" — 직업과 무관하게
+// 모든 캐릭터에 같은 안전한 생활 상식 문제은행(objectiveQuizQuestions.ts)
+// 에서 2문제를 무작위로 뽑는다(사용자 승인: "직업 무관 생활상식 동일
+// 문제은행" — 기존 getQuiz/getExam과 달리 EXAM_SUPPORTED_PROFESSIONS
+// 가드가 없다, 50개 직업 전체에서 똑같이 동작해야 하기 때문). 정답은
+// 서명된 quizToken에 담지 않고 문제 id만 담아, 채점 시 다시 문제은행에서
+// 찾아 비교한다(correctIndex는 절대 클라이언트로 내려가지 않음).
+async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+
+  try {
+    await ensureCharacterTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const questions = pickRandomObjectiveQuizQuestions(2)
+    const quizToken = signObjectiveQuizToken({
+      userId,
+      characterId: character.id,
+      companionType: String(companionType),
+      questionIds: [questions[0].id, questions[1].id],
+    })
+
+    res.status(200).json({
+      questions: questions.map((q) => ({ id: q.id, text: q.text, choices: q.choices })),
+      quizToken,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on objective-quiz', err)
+    res.status(500).json({ error: '문제를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(학습 플로우 전면 개편) 2단계 채점 — "2문제 세트를 전부 맞혀야만"
+// 통과한다(요청 2번: 둘 중 하나라도 틀리면 통과 못함). 통과하면 두
+// 문제 각각을 character_knowledge_entries에 mission_type='objective'로
+// 저장해(일반 가르치기 저장과 똑같은 XP·집중력·진화 판정 경로를 그대로
+// 탄다) 2단계가 끝났다는 사실이 서버 쪽 진짜 상태(미션 집계)에 반영되게
+// 한다 — 틀리면 아무것도 저장하지 않고 "앗, 틀렸어요! 다시 도전해
+// 볼까요?"만 돌려줘, 클라이언트가 새 GET 호출로 다른 2문제를 다시
+// 받아 처음부터 반복하게 한다(요청 3번: 세트 단위 무한 반복).
+async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, quizToken, answers, requestId } = (req.body ?? {}) as {
+    companionType?: unknown
+    quizToken?: unknown
+    answers?: unknown
+    requestId?: unknown
+  }
+
+  if (!Array.isArray(answers) || answers.length !== 2 || answers.some((a) => typeof a !== 'number' || !Number.isInteger(a) || a < 0)) {
+    res.status(400).json({ error: '두 문제 모두 답을 선택해주세요.' })
+    return
+  }
+
+  const tokenPayload = verifyObjectiveQuizToken(quizToken)
+  if (!tokenPayload) {
+    res.status(400).json({ error: '문제가 만료되었거나 올바르지 않아요. 다시 받아주세요.' })
+    return
+  }
+
+  try {
+    await ensureCharacterTables()
+    await ensureKnowledgeTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+    if (tokenPayload.userId !== userId || tokenPayload.characterId !== character.id || tokenPayload.companionType !== companionType) {
+      res.status(400).json({ error: '이 캐릭터에게 출제된 문제가 아니에요. 다시 받아주세요.' })
+      return
+    }
+
+    const questions = tokenPayload.questionIds.map((id) => getObjectiveQuizQuestionById(id))
+    if (questions.some((q) => !q)) {
+      res.status(400).json({ error: '문제가 만료되었거나 올바르지 않아요. 다시 받아주세요.' })
+      return
+    }
+    const resolvedQuestions = questions as NonNullable<(typeof questions)[number]>[]
+
+    const results = resolvedQuestions.map((q, idx) => ({ questionId: q.id, correct: answers[idx] === q.correctIndex }))
+    const allCorrect = results.every((r) => r.correct)
+
+    const normalizedRequestId = typeof requestId === 'string' && requestId ? requestId : null
+
+    if (!allCorrect) {
+      res.status(200).json({
+        allCorrect: false,
+        results,
+        message: buildObjectiveQuizResultMessage(false, 0, false, character.level),
+        expAwarded: 0,
+        exp: character.exp,
+        level: character.level,
+        leveledUp: false,
+        missionProgress: null,
+        evolved: false,
+        newAgeTier: null,
+        newAgeTierLabel: null,
+      })
+      return
+    }
+
+    // Idempotency: a retried submit of the exact same (already-passed)
+    // attempt returns the current state instead of inserting the 2 entries
+    // (and granting XP) a second time — same client_request_id-based guard
+    // save-knowledge uses.
+    if (normalizedRequestId) {
+      const existing = await sql<{ id: number }>`
+        SELECT id FROM character_knowledge_entries
+        WHERE character_id = ${character.id} AND client_request_id = ${`${normalizedRequestId}:0`}
+      `
+      if (existing.rows[0]) {
+        const progress = await getMissionProgress(userId, character.id, effectiveAgeTier(character))
+        res.status(200).json({
+          allCorrect: true,
+          results,
+          message: buildObjectiveQuizResultMessage(true, 0, false, character.level),
+          expAwarded: 0,
+          exp: character.exp,
+          level: character.level,
+          leveledUp: false,
+          missionProgress: progress,
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
+        })
+        return
+      }
+    }
+
+    const tierAtSaveStart = effectiveAgeTier(character)
+
+    for (const [idx, q] of resolvedQuestions.entries()) {
+      await sql`
+        INSERT INTO character_knowledge_entries
+          (user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, client_request_id, source, mission_type, age_tier_at_save, knowledge_category)
+        VALUES
+          (${userId}, ${character.id}, ${character.profession}, ${character.custom_profession_label}, ${q.text}, ${q.explanation}, ${q.explanation}, 'appropriate', ${q.explanation}, ${normalizedRequestId ? `${normalizedRequestId}:${idx}` : null}, ${'user_taught'}, ${'objective'}, ${tierAtSaveStart}, ${null})
+      `
+    }
+
+    const expResult1 = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
+    const expResult2 = await applyExpGain(userId, character.id, expResult1.newLevel, KNOWLEDGE_SAVE_EXP)
+    const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult2.newLevel, character.mission_unlocked_tier)
+    await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
+    const focusPercent = await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
+
+    const expAwarded = KNOWLEDGE_SAVE_EXP * 2
+    const message = buildObjectiveQuizResultMessage(
+      true,
+      expAwarded,
+      expResult1.leveledUp || expResult2.leveledUp,
+      expResult2.newLevel,
+      evolveResult.newAgeTierStageLabel,
+    )
+
+    res.status(201).json({
+      allCorrect: true,
+      results,
+      message,
+      expAwarded,
+      exp: expResult2.exp,
+      level: expResult2.newLevel,
+      leveledUp: expResult1.leveledUp || expResult2.leveledUp,
+      missionProgress: evolveResult.missionProgress,
+      evolved: evolveResult.evolved,
+      newAgeTier: evolveResult.newAgeTier,
+      newAgeTierLabel: evolveResult.newAgeTierLabel,
+      focusPercent,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on objective-quiz-submit', err)
+    res.status(500).json({ error: '채점 중 오류가 발생했어요.' })
   }
 }
 

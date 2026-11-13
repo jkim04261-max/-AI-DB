@@ -99,8 +99,21 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
   return result
 }
 
+// 지시서(학습 플로우 전면 개편): toddler(8~9살)만 더 이상 균등분배(2/2/2)가
+// 아니라 "1단계 직접입력 3문제 → 2단계 객관식 2문제(전부 정답 필요) →
+// 3단계 주관식 1문제"라는 고정 순서 흐름과 숫자를 맞춘다(knowhow 3 +
+// objective 2 + subjective 1 = 6, MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와
+// 동일). teen 이후 단계는 이번 지시서의 범위 밖이라 기존 균등분배
+// 공식을 그대로 둔다(사용자 승인: "게이트를 3:2:1로 변경").
+const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
+  toddler: { knowhow: 3, objective: 2, subjective: 1 },
+}
+
 export const MISSIONS_REQUIRED_PER_TYPE_BY_TIER: Record<AgeTier, Record<MissionType, number>> = Object.fromEntries(
-  AGE_TIER_ORDER.map((tier) => [tier, splitMissionsRequiredByType(MISSIONS_REQUIRED_TOTAL_BY_TIER[tier])]),
+  AGE_TIER_ORDER.map((tier) => [
+    tier,
+    MISSIONS_REQUIRED_PER_TYPE_OVERRIDE[tier] ?? splitMissionsRequiredByType(MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]),
+  ]),
 ) as Record<AgeTier, Record<MissionType, number>>
 
 // 지금 연령대가 특정 연령대"이상"인지 — 지식 난이도 게이팅(가르치기 검증)
