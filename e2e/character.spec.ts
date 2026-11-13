@@ -239,11 +239,13 @@ test('the opening profile screen has no gender field — removed after it repeat
   expect(postBody).toMatchObject({ companionType: 'nuri' })
 })
 
-// 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후 0.5초 뒤 페이드인되는
-// 인사말 — 입력한 이름/직업이 그대로 들어가는지, 기존 showBubble의
-// 기본 지속시간(3.2초)이 아니라 이 인사말만의 더 긴 지속시간(5초)이
-// 적용되는지 확인한다.
-test('the opening greeting bubble fades in ~0.5s after onboarding, shows the entered name/profession, and lasts longer than the default bubble duration', async ({
+// 지시서(캐릭터 인사말 말풍선, 2026-11-13 문구 정정): 프로필 생성 직후
+// 0.5초 뒤 페이드인되는 인사말 — 입력한 이름이 그대로 들어가는지, 기존
+// showBubble의 기본 지속시간(3.2초)이 아니라 이 인사말만의 더 긴
+// 지속시간(5초)이 적용되는지 확인한다. 직업은 더 이상 문구에 쓰이지
+// 않지만(지시서가 지정한 문구에 직업 언급이 없음), 온보딩 자체의
+// 직업 입력 흐름은 여전히 정상 동작해야 하므로 입력은 그대로 둔다.
+test('the opening greeting bubble fades in ~0.5s after onboarding, shows the entered name, and lasts longer than the default bubble duration', async ({
   page,
 }) => {
   await failUnmockedApiCalls(page)
@@ -290,10 +292,9 @@ test('the opening greeting bubble fades in ~0.5s after onboarding, shows the ent
   // 다음에 확인해 그 여유를 없앴다.
   await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 
-  await expect(page.getByTestId('speech-bubble')).toContainText(
-    '안녕하세요, 신새별님이에요! 저는 목욕도우미입니다. 저를 가르쳐주세요?',
-    { timeout: 3000 },
-  )
+  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 신새별이에요! 저를 잘 키워주세요.', {
+    timeout: 3000,
+  })
 
   // 기존 showBubble 기본 지속시간(3.2초)이 지난 시점(총 경과 약 4초)에도
   // 여전히 떠 있어야 한다 — 이 인사말만 5초로 더 길게 설정됐다는 증거.
@@ -328,10 +329,9 @@ test('clicking the character dismisses the opening greeting bubble early', async
   await page.goto('/grow')
   await page.getByTestId('character-create-duri').click()
   await page.getByTestId('opening-profile-name-input').fill('아름이')
-  // 직업은 비워둔다 — 기본값(fallback) 문구로 이어지는지도 함께 확인.
   await page.getByTestId('opening-profile-start-button').click()
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 아름이님이에요! 저를 가르쳐주세요?', {
+  await expect(page.getByTestId('speech-bubble')).toContainText('안녕하세요, 아름이이에요! 저를 잘 키워주세요.', {
     timeout: 2000,
   })
 

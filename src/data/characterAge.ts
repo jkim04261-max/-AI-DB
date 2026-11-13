@@ -105,15 +105,20 @@ export function toddlerProfessionGreeting(professionLabel: string): string {
 }
 
 // 지시서(캐릭터 인사말 말풍선): 프로필 생성 직후(오프닝 화면을 막
-// 통과한 시점) 한 번 보여주는 인사말 — 입력한 캐릭터 이름/직업을 그대로
+// 통과한 시점) 한 번 보여주는 인사말 — 입력한 캐릭터 이름을 그대로
 // 끼워 넣는다. 이름은 OpeningProfileScreen에서 항상 값이 있도록
 // 보장되지만(비워두면 시작 버튼이 비활성화됨), 혹시라도 비어 있으면
-// 지시서가 요구한 기본값으로 대체한다. 직업은 선택 입력이라 비어 있을
-// 수 있다(professionLabel이 null).
-export function openingGreeting(name: string, professionLabel: string | null): string {
-  if (!name) return '안녕하세요! 저를 가르쳐주세요?'
-  if (!professionLabel) return `안녕하세요, ${name}님이에요! 저를 가르쳐주세요?`
-  return `안녕하세요, ${name}님이에요! 저는 ${professionLabel}입니다. 저를 가르쳐주세요?`
+// 지시서가 요구한 기본값으로 대체한다.
+//
+// 문구 정정(2026-11-13 지시서): 직업을 끼워 넣던 이전 문구("저는
+// {직업}입니다")와 존칭("님")을 빼고, 지시서가 지정한 정확한 문구
+// ("안녕하세요, {이름}이에요! 저를 잘 키워주세요.")로 교체했다 — 그 외
+// 타이밍(0.5초 지연·5초 유지·탭 시 조기 종료)과 말풍선 디자인은 전혀
+// 바뀌지 않는다(이미 요구사항을 만족하고 있었음). 직업을 더 이상
+// 쓰지 않아 매개변수에서도 뺐다(호출부 GrowPage.tsx도 함께 수정).
+export function openingGreeting(name: string): string {
+  if (!name) return '안녕하세요! 저를 잘 키워주세요.'
+  return `안녕하세요, ${name}이에요! 저를 잘 키워주세요.`
 }
 
 // 연령대에 비해 너무 어려운 지식을 가르치려 할 때 보여줄 거절 메시지 —
