@@ -23,6 +23,7 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import UniversalMarket from '../components/grow/UniversalMarket'
 import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
+import HungryEventModal from '../components/grow/HungryEventModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
@@ -93,7 +94,12 @@ const TURN_TRANSITION_LABEL: Partial<Record<GameMenuAction, string>> = {
 // 체험판 용돈에서만 일어난다.
 const MEAL_TRIGGER_SAVE_COUNT = 3
 const MEAL_COST_WON = 10_000
-const MEAL_RESTAURANT_LABEL = '이모네김밥'
+
+// 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
+// 고르면 isHungry가 켜지고, 그 뒤 문제 풀기(퀴즈)를 이 횟수만큼
+// 시도(정답·오답 무관)하면 자동으로 꺼진다 — 요청 4번("5문제 풀이가
+// 끝나고 다음 단계로 넘어가면 배고픔 상태가 해제").
+const HUNGRY_QUIZ_PENALTY_COUNT = 5
 
 // 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
 // "8~9살 가르치기 3회 저장마다" 신호를 재사용하되, 번갈아(식사 →
@@ -181,6 +187,16 @@ export default function GrowPage() {
   const [workingOnJob, setWorkingOnJob] = useState(false)
   // 알바 보상으로 뜨는 "+N원" 팝업 — pointsPopup과 같은 순수 연출용.
   const [moneyPopup, setMoneyPopup] = useState<number | null>(null)
+  // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 자동으로 차감만
+  // 하던 기존 식사 연출을 "밥 먹이기/나중에 먹기"를 고르는 모달로
+  // 바꿨다. hungryEventOpen=모달 표시 중, isHungry=나중에 먹기를 골라
+  // 아직 안 먹은 상태(상단 경고 배너용), hungryQuizRemaining=그 뒤
+  // 남은 문제 풀기 시도 횟수(null=페널티 없음), feedError=잔액 부족
+  // 안내(모달 안에서만 보임, 다음에 열 때 자동으로 사라짐).
+  const [hungryEventOpen, setHungryEventOpen] = useState(false)
+  const [isHungry, setIsHungry] = useState(false)
+  const [hungryQuizRemaining, setHungryQuizRemaining] = useState<number | null>(null)
+  const [feedError, setFeedError] = useState<string | null>(null)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -303,6 +319,10 @@ export default function GrowPage() {
     knowledgeSaveCountRef.current = 0
     outingCycleRef.current = 0
     quizCorrectCountRef.current = 0
+    setHungryEventOpen(false)
+    setIsHungry(false)
+    setHungryQuizRemaining(null)
+    setFeedError(null)
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -558,22 +578,43 @@ export default function GrowPage() {
     showBubble(`${emoji} 오늘도 여기 있네요!`)
   }
 
-  // 지시서(가르치기 완료 후 자동 식사 이벤트): 패널을 닫고 "배고프다"
-  // 말풍선을 먼저 띄운 뒤, 잠시 뒤 체험판 용돈에서 식사비를 차감하고
-  // 맛있게 먹는 포즈/말풍선으로 이어간다. 체험판 용돈을 아직 지급받지
-  // 않은 캐릭터(wallet.balanceWon === null, Stage 1 온보딩을 거치지
-  // 않은 기존 캐릭터)는 차감 없이 연출만 보여준다.
-  const triggerMealBreak = () => {
+  // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 패널을 닫고 모달을
+  // 띄운다 — 예전처럼 자동으로 차감하지 않고, 사용자가 "밥 먹이기"/
+  // "나중에 먹기" 중 하나를 고를 때까지 기다린다.
+  const triggerHungryEvent = () => {
     setOpenSheet(null)
-    showBubble(`배가 고파요! ${MEAL_RESTAURANT_LABEL}에 가서 김밥 한 줄 먹고 올게요!`)
-    const t1 = setTimeout(() => {
-      if (wallet.balanceWon !== null) wallet.spend(MEAL_COST_WON)
-      setPose('eating')
-      showBubble(`냠냠, ${MEAL_RESTAURANT_LABEL} 김밥 진짜 맛있어요! 🍙`)
-      const t2 = setTimeout(() => setPose('idle'), 2600)
-      mealTimeoutsRef.current.push(t2)
-    }, 1400)
-    mealTimeoutsRef.current.push(t1)
+    setFeedError(null)
+    setHungryEventOpen(true)
+  }
+
+  // "밥 먹이기" 클릭 — 체험판 용돈을 아직 지급받지 않은 캐릭터
+  // (wallet.balanceWon === null, Stage 1 온보딩을 거치지 않은 기존
+  // 캐릭터)는 차감 없이 바로 먹는다(기존 triggerMealBreak와 같은
+  // 원칙). 지급받았는데 잔액이 모자라면 모달을 닫지 않고 안내만 보여준다.
+  const handleFeedCharacter = () => {
+    if (wallet.balanceWon !== null && wallet.balanceWon < MEAL_COST_WON) {
+      setFeedError('잔액이 부족하여 밥을 사줄 수 없어요. 문제를 더 풀어주세요!')
+      return
+    }
+    if (wallet.balanceWon !== null) wallet.spend(MEAL_COST_WON)
+    setHungryEventOpen(false)
+    setFeedError(null)
+    setIsHungry(false)
+    setHungryQuizRemaining(null)
+    setPose('eating')
+    showBubble('냠냠! 잘 먹었습니다!')
+    const t = setTimeout(() => setPose('idle'), 2600)
+    mealTimeoutsRef.current.push(t)
+  }
+
+  // "나중에 먹기" 클릭(또는 모달 닫기) — 배고픈 상태로 남아, 상단에
+  // 경고 배너가 뜨고 문제 풀기를 HUNGRY_QUIZ_PENALTY_COUNT번 시도할
+  // 때까지 유지된다(handleQuizAnswered 참고).
+  const handleFeedLater = () => {
+    setHungryEventOpen(false)
+    setFeedError(null)
+    setIsHungry(true)
+    setHungryQuizRemaining(HUNGRY_QUIZ_PENALTY_COUNT)
   }
 
   // 지시서(서점 외출 미션): 패널을 닫고 "+300P" 팝업 + 서점으로 가야
@@ -662,7 +703,7 @@ export default function GrowPage() {
       knowledgeSaveCountRef.current = 0
       if (outingCycleRef.current === 0) {
         outingCycleRef.current = 1
-        triggerMealBreak()
+        triggerHungryEvent()
       } else if (outingCycleRef.current === 1) {
         outingCycleRef.current = 2
         triggerBookstoreOuting()
@@ -703,6 +744,23 @@ export default function GrowPage() {
         outingTimeoutsRef.current.push(t2)
       }, 1400)
       outingTimeoutsRef.current.push(t1)
+    }
+  }
+
+  // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
+  // 고른 뒤 상단 경고 배너를 띄우는 동안, 문제 풀기를 시도할 때마다
+  // (정답·오답 무관) 호출된다 — HUNGRY_QUIZ_PENALTY_COUNT번째에서
+  // 자동으로 배고픔 상태를 해제한다. 보상 로직(handleQuizAnswerCorrect)
+  // 과는 독립적으로 동작한다 — 둘 다 ExamPanel의 같은 제출 결과에서
+  // 각자의 조건만 본다.
+  const handleQuizAnswered = () => {
+    if (!isHungry || hungryQuizRemaining === null) return
+    const remaining = hungryQuizRemaining - 1
+    if (remaining <= 0) {
+      setIsHungry(false)
+      setHungryQuizRemaining(null)
+    } else {
+      setHungryQuizRemaining(remaining)
     }
   }
 
@@ -878,6 +936,19 @@ export default function GrowPage() {
             </div>
           )}
 
+          {/* 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에
+              먹기"를 고른 뒤 문제 풀기를 HUNGRY_QUIZ_PENALTY_COUNT번
+              시도할 때까지, 화면 상단(ResourceBar 바로 아래)에 계속
+              보이는 경고 — 어느 패널이 열려 있어도 가려지지 않는다. */}
+          {isHungry && (
+            <div
+              data-testid="hungry-warning-banner"
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600"
+            >
+              {COMPANION_LABEL[character.companionType]}님, 배고파요... 밥 사주세요!
+            </div>
+          )}
+
           {/* PR #49: 스테이지+HUD+스탯+퀘스트+메뉴를 하나의 목재
               프레임으로 묶었다 — 더 이상 흰 카드들이 줄줄이 쌓인
               목록이 아니라, 하나의 게임 화면이다.
@@ -973,6 +1044,18 @@ export default function GrowPage() {
                       onLeaveReview={handleBookstoreReviewSubmit}
                       ageTier={ageTier}
                       ageNumber={ageNumber}
+                    />
+                  )}
+                  {hungryEventOpen && (
+                    <HungryEventModal
+                      companionType={character.companionType}
+                      companionName={COMPANION_LABEL[character.companionType]}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      balanceWon={wallet.balanceWon}
+                      errorMessage={feedError}
+                      onFeed={handleFeedCharacter}
+                      onLater={handleFeedLater}
                     />
                   )}
                 </div>
@@ -1149,6 +1232,7 @@ export default function GrowPage() {
               profession={character.profession}
               onPoseChange={handlePoseChange}
               onCorrectAnswer={handleQuizAnswerCorrect}
+              onQuizSubmitted={handleQuizAnswered}
             />
           )}
           {openSheet === 'chat-log' && <ChatLogPanel character={character} />}

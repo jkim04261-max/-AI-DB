@@ -17,6 +17,7 @@ export default function ExamPanel({
   profession,
   onPoseChange,
   onCorrectAnswer,
+  onQuizSubmitted,
 }: {
   character: Character
   profession: ProfessionId
@@ -26,6 +27,11 @@ export default function ExamPanel({
   // 한다. 이 패널은 그 이벤트의 존재나 금액을 전혀 모른다 — 오직 "서버가
   // 정답이라고 채점했다"는 사실만 넘겨준다.
   onCorrectAnswer?: () => void
+  // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 배고픈 상태로 남아
+  // 있는 동안 상단 경고를 몇 문제 더 보여줄지 세는 용도 — 정답·오답과
+  // 무관하게 "퀴즈를 한 번 제출할 때마다" 호출된다(onCorrectAnswer는
+  // 정답일 때만 호출돼 이 목적에 맞지 않는다).
+  onQuizSubmitted?: () => void
 }) {
   const { getQuiz, submitQuiz, getExam, submitExam } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
@@ -99,6 +105,7 @@ export default function ExamPanel({
       const result = await submitQuiz(character.companionType, quizQuestion.id, quizAnswer)
       setQuizResult({ correct: result.correct, explanation: result.explanation, message: result.message })
       flash(result.correct ? 'happy' : 'sad')
+      onQuizSubmitted?.()
       if (result.correct) onCorrectAnswer?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : '퀴즈 채점 중 오류가 발생했어요.')

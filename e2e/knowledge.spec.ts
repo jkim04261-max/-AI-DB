@@ -937,7 +937,12 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
 // 3번 쌓이면 패널이 자동으로 닫히고 "배고프다" → "맛있게 먹었다" 말풍선
 // 이벤트가 이어진다. NURI_ACCOUNTANT는 level을 지정하지 않아 기본값으로
 // toddler(8~9살) 단계다.
-test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach panel and shows hunger then meal speech bubbles', async ({ page }) => {
+// 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 3번째 저장 뒤 더 이상
+// 자동으로 식사비를 차감·연출하지 않는다 — "밥 먹이기"/"나중에 먹기"를
+// 고르는 모달이 뜬다. 이 캐릭터는 Stage 1 온보딩을 거치지 않아
+// (wallet.balanceWon === null) "밥 먹이기"를 눌러도 차감 없이 바로
+// 먹는다.
+test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach panel and shows the hungry event modal', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -985,11 +990,16 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
   }
 
-  // 3번째 저장 직후 패널이 자동으로 닫히고, 캐릭터가 배고프다는 말풍선을 띄운다.
+  // 3번째 저장 직후 패널이 자동으로 닫히고, 배고픔 이벤트 모달이 뜬다.
   await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('배가 고파요')
-  // 잠시 뒤 '이모네김밥'을 맛있게 먹었다는 말풍선으로 이어진다.
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파요. 밥 먹으러 갈까요?')
+
+  // 체험판 용돈을 아직 지급받지 않은 캐릭터라, "밥 먹이기"를 눌러도
+  // 금액 표기 없이 바로 먹는다.
+  await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기')
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
 })
 
 // 위 테스트와 같은 식사 이벤트지만, Stage 1 온보딩으로 체험판 가상
@@ -1076,8 +1086,120 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
   }
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파요. 밥 먹으러 갈까요?')
+  await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기 (-10,000원)')
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+})
+
+// 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 잔액이 식사비보다
+// 적으면 "밥 먹이기"를 눌러도 차감되지 않고 안내만 뜬다 — 모달은
+// 열린 채로 남는다.
+test('insufficient balance blocks feeding and shows an inline warning, without closing the modal', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-poor',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  // 만능마켓에서 미리 써서 잔액을 식사비(10,000원) 미만으로 만든다
+  // (100,000원 - 업무용 노트북 50,000원 - 미니 냉장고 45,000원 = 5,000원).
+  await page.getByRole('button', { name: '만능마켓' }).click()
+  await page.getByRole('button', { name: '업무·사무관' }).click()
+  await page.getByText('업무용 노트북').click()
+  await page.getByRole('button', { name: '구입하기' }).click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('50,000원')
+  await page.getByRole('button', { name: '생활·가전관' }).click()
+  await page.getByText('미니 냉장고').click()
+  await page.getByRole('button', { name: '구입하기' }).click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('5,000원')
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-error')).toContainText(
+    '잔액이 부족하여 밥을 사줄 수 없어요. 문제를 더 풀어주세요!',
+  )
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('5,000원')
 })
 
 // 지시서(누리AI 만능마켓): 온보딩으로 지급된 체험판 가상 용돈으로
@@ -1226,7 +1348,9 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
   }
 
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
   await expect(portrait).toHaveAttribute('src', /nuri-toddler-eating/)
 
   // 2600ms 후 식사가 끝나 pose가 다시 idle로 돌아간다 — 평상시 전신
@@ -1287,9 +1411,11 @@ test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, 
     }
   }
 
-  // 1번째 3회 — 식사 이벤트(기존 동작, 여기서는 지나가는 것만 확인).
+  // 1번째 3회 — 배고픔 이벤트(기존 동작, 여기서는 지나가는 것만 확인).
   await teachThreeTimes('round0')
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
 
   // 2번째 3회(누적 6회) — 서점 외출 이벤트.
   await teachThreeTimes('round1')
@@ -1398,8 +1524,10 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
     }
   }
 
-  await teachThreeTimes('round0') // 식사: -10,000원
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await teachThreeTimes('round0') // 배고픔 이벤트: 밥 먹이기 -10,000원
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   await teachThreeTimes('round1') // 서점: 용돈이 아니라 체험판 골드 +300P
@@ -1504,8 +1632,8 @@ test('evolving from toddler to teen via 6 real saves split across all 3 mission 
   }
 
   // 1~3번째 저장(objective, objective, subjective) — 3번째 저장 직후
-  // 식사 이벤트로 패널이 자동으로 닫힌다(기존 패턴과 동일). 저장 성공
-  // 핸들러가 title/content를 비동기로 비우므로(InteractionPanel의
+  // 배고픔 이벤트 모달로 패널이 자동으로 닫힌다(기존 패턴과 동일). 저장
+  // 성공 핸들러가 title/content를 비동기로 비우므로(InteractionPanel의
   // setTitle('')/setContent('')), 다음 입력을 채우기 전에 그게 끝났는지
   // 확인한다 — 기존 "completing 3 knowledge saves" 테스트와 같은 이유
   // (안 그러면 다음 라운드의 fill이 그 비동기 초기화와 경합해 방금 입력한
@@ -1516,7 +1644,9 @@ test('evolving from toddler to teen via 6 real saves split across all 3 mission 
   await teachObjective()
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
   await teachSubjective()
-  await expect(page.getByTestId('speech-bubble')).toContainText('이모네김밥')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
 
   // 4~6번째 저장(subjective, knowhow, knowhow) — 6번째가 "유형별 2개씩"을
   // 완성시키는 마지막 저장이고, 토들러의 "6개 저장" 보상(서점 외출)도
