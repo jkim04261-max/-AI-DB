@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useMockWallet } from '../../hooks/useMockWallet'
+import { reward } from '../../services/paymentService'
 import { JOB_CARDS, type JobCardEntry } from '../../data/jobCards'
 
 // 지시서(직업 카드 맞추기 미니게임): "독립적인 별도 잔액" 결정에
@@ -102,7 +103,7 @@ export default function CardMatchGame() {
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0 && !cleared) {
       setCleared(true)
-      wallet.earn(CLEAR_BONUS_WON)
+      reward(wallet, CLEAR_BONUS_WON, 'card_match_reward')
       setLastMessage(`🎉 전체 클리어! 보너스 +${CLEAR_BONUS_WON.toLocaleString('ko-KR')}원`)
       speak('모두 맞혔어요! 축하해요!')
     }
@@ -142,7 +143,7 @@ export default function CardMatchGame() {
           return next
         })
         setFlipped([])
-        wallet.earn(MATCH_REWARD_WON)
+        reward(wallet, MATCH_REWARD_WON, 'card_match_reward')
         setLastMessage(`정답이에요! +${MATCH_REWARD_WON.toLocaleString('ko-KR')}원`)
         speak('정답이에요!')
       } else {

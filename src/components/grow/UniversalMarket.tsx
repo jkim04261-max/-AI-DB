@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Wallet } from 'lucide-react'
 import type { MockWallet } from '../../hooks/useMockWallet'
+import { charge } from '../../services/paymentService'
 import { MARKET_CATEGORY_LABEL, UNIVERSAL_MARKET_CATALOG, type MarketCategoryId, type MarketItem } from '../../data/universalMarketCatalog'
 
 const CATEGORIES = Object.keys(MARKET_CATEGORY_LABEL) as MarketCategoryId[]
@@ -20,7 +21,7 @@ export default function UniversalMarket({ wallet }: { wallet: MockWallet }) {
 
   const confirmPurchase = () => {
     if (!pendingItem) return
-    const ok = wallet.spend(pendingItem.price)
+    const ok = charge(wallet, pendingItem.price, 'market_purchase')
     if (!ok) {
       setError('가상 용돈이 부족하거나 아직 지급되지 않았어요.')
       setPendingItem(null)
