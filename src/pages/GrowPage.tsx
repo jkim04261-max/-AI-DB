@@ -496,18 +496,17 @@ export default function GrowPage() {
       setOnboardingFor(null)
 
       // 지시서(캐릭터 인사말 말풍선): AI 키우기 메인 화면에 막 들어왔을
-      // 때 0.5초 뒤 페이드인되는 인사말 — 입력한 이름·직업을 그대로
-      // 끼워 넣는다(기존 toddlerProfessionGreeting과 달리 이름도 포함).
+      // 때 0.5초 뒤 페이드인되는 인사말 — 입력한 이름을 그대로 끼워
+      // 넣는다(기존 toddlerProfessionGreeting과 달리 이름을 포함).
       // 5초 후 자동으로 사라지거나, 그 전에 캐릭터를 탭하면 바로 닫힌다
-      // (아래 onTapCharacter 참고). 이름·직업은 이 onComplete 콜백에만
-      // 잠깐 존재하는 값이라(OpeningProfileScreen도 어디에도 저장하지
-      // 않음, 생일·거주지역과 같은 원칙) 재방문 시에는 다시 보여줄 수
-      // 없다 — "프로필 생성 직후"라는 지시서의 범위와 정확히 일치한다.
+      // (아래 onTapCharacter 참고). 이름은 이 onComplete 콜백에만 잠깐
+      // 존재하는 값이라(OpeningProfileScreen도 어디에도 저장하지 않음,
+      // 생일·거주지역과 같은 원칙) 재방문 시에는 다시 보여줄 수 없다 —
+      // "프로필 생성 직후"라는 지시서의 범위와 정확히 일치한다.
       const greetingName = profile.name.trim()
-      const greetingProfession = profile.profession.trim() || null
       openingGreetingTimeoutRef.current = setTimeout(() => {
         openingGreetingTimeoutRef.current = null
-        showBubble(openingGreeting(greetingName, greetingProfession), 5000)
+        showBubble(openingGreeting(greetingName), 5000)
         dismissibleGreetingRef.current = true
       }, 500)
     } catch (err) {
