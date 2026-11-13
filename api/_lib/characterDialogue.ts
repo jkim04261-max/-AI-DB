@@ -89,5 +89,20 @@ export function buildExamResultMessage(
 // never mistaken for a claim about the real Gemini model's capability —
 // XP/레벨은 이 게임 안에서의 성장 지표일 뿐, Gemini 모델 자체가 더
 // 똑똑해졌다는 뜻이 아니다.
+// 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" 전용 — 세트 단위로
+// 전부 맞혀야 통과하는 규칙이라 exam과 비슷한 메시지 모양을 쓴다.
+export function buildObjectiveQuizResultMessage(
+  allCorrect: boolean,
+  expAwarded: number,
+  leveledUp: boolean,
+  newLevel: number,
+  evolvedStageLabel: string | null = null,
+): string {
+  const base = allCorrect
+    ? `정답이에요! 2문제 모두 맞혔어요.${expAwarded > 0 ? ` (+${expAwarded}XP)` : ''}`
+    : '앗, 틀렸어요! 다시 도전해 볼까요?'
+  return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
+}
+
 export const KNOWLEDGE_VS_MODEL_DISCLAIMER =
   '레벨·XP는 게임 속 성장 지표예요. 실제 Gemini AI 모델의 성능이 바뀌는 것은 아니에요.'

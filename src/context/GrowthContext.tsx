@@ -91,6 +91,15 @@ export interface ExamQuestion {
   choices: string[]
 }
 
+// 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" 전용 — QuizQuestion과
+// 모양은 같지만, 이 질문들은 직업과 무관한 공통 생활 상식 문제은행
+// (api/_lib/objectiveQuizQuestions.ts)에서 나온다는 점이 다르다.
+export interface ObjectiveQuizQuestion {
+  id: string
+  text: string
+  choices: string[]
+}
+
 export interface GrowthUpdate {
   expAwarded: number
   exp: number
@@ -198,6 +207,20 @@ interface GrowthContextValue {
     answerIndex: number,
   ) => Promise<{ correct: boolean; explanation: string; message: string } & GrowthUpdate & EvolutionUpdate>
   getExam: (companionType: CompanionType) => Promise<{ questions: ExamQuestion[]; alreadyPassed: boolean }>
+  // 지시서(학습 플로우 전면 개편) 2단계 — 2문제를 "세트"로 받아서, 세트
+  // 전체를 한 번에 제출하고 채점한다(ExamQuestion들의 submitExam처럼
+  // 전체 제출이지만, 시험 전체가 아니라 딱 2문제뿐이라는 점이 다르다).
+  getObjectiveQuiz: (
+    companionType: CompanionType,
+  ) => Promise<{ questions: [ObjectiveQuizQuestion, ObjectiveQuizQuestion]; quizToken: string }>
+  submitObjectiveQuiz: (
+    companionType: CompanionType,
+    quizToken: string,
+    answers: [number, number],
+  ) => Promise<
+    { allCorrect: boolean; results: { questionId: string; correct: boolean }[]; message: string; missionProgress: MissionProgress | null } & GrowthUpdate &
+      EvolutionUpdate
+  >
   getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
@@ -600,6 +623,70 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     return { questions: data.questions, alreadyPassed: data.alreadyPassed ?? false }
   }, [])
 
+  // 지시서(학습 플로우 전면 개편) 2단계 — 직업 무관 공통 문제은행에서
+  // 매번 새로 2문제를 받는다(틀려서 다시 도전할 때도 이걸 다시 호출해
+  // 처음부터 새 세트를 받는다).
+  const getObjectiveQuiz = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'objective-quiz', companionType })}`)
+    const data = (await res.json().catch(() => ({}))) as {
+      questions?: ObjectiveQuizQuestion[]
+      quizToken?: string
+      error?: string
+    }
+    if (!res.ok || !data.questions || data.questions.length !== 2 || !data.quizToken) {
+      throw new Error(data.error || '문제를 불러오는 중 오류가 발생했어요.')
+    }
+    return {
+      questions: [data.questions[0], data.questions[1]] as [ObjectiveQuizQuestion, ObjectiveQuizQuestion],
+      quizToken: data.quizToken,
+    }
+  }, [])
+
+  const submitObjectiveQuiz = useCallback(
+    async (companionType: CompanionType, quizToken: string, answers: [number, number]) => {
+      const requestId = crypto.randomUUID()
+      const res = await fetch('/api/character?action=objective-quiz-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType, quizToken, answers, requestId }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        allCorrect?: boolean
+        results?: { questionId: string; correct: boolean }[]
+        message?: string
+        expAwarded?: number
+        exp?: number
+        level?: number
+        leveledUp?: boolean
+        missionProgress?: MissionProgress | null
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
+        focusPercent?: number
+        error?: string
+      }
+      if (!res.ok || data.allCorrect === undefined || data.exp === undefined || data.level === undefined) {
+        throw new Error(data.error || '채점 중 오류가 발생했어요.')
+      }
+      updateCharacterGrowth(companionType, data.level, data.exp, data.newAgeTier)
+      if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
+      return {
+        allCorrect: data.allCorrect,
+        results: data.results ?? [],
+        message: data.message ?? '',
+        expAwarded: data.expAwarded ?? 0,
+        exp: data.exp,
+        level: data.level,
+        leveledUp: data.leveledUp ?? false,
+        missionProgress: data.missionProgress ?? null,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
+      }
+    },
+    [updateCharacterGrowth, updateFocusPercent],
+  )
+
   const submitExam = useCallback(
     async (companionType: CompanionType, answers: { questionId: string; answerIndex: number }[]) => {
       const res = await fetch('/api/character?action=exam-submit', {
@@ -695,6 +782,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         listMessages,
         getQuiz,
         submitQuiz,
+        getObjectiveQuiz,
+        submitObjectiveQuiz,
         getExam,
         submitExam,
         getUsage,

@@ -993,11 +993,16 @@ test('on a mobile viewport, the action menu still stacks below the stage as a gr
 // 바뀌지 않았으므로(InteractionPanel.tsx 참고) 다른 knowledge.spec.ts
 // 테스트들의 동작 자체를 재검증하지는 않고, 이 PR에서 새로 생긴
 // "3개 미션 카드 + 미션 창" 레이아웃 계약만 검증한다.
+// 지시서(학습 플로우 전면 개편) 이후 toddler(8~9살)는 "직접입력3→
+// 객관식2→주관식1" 강제 순서 흐름을 쓰므로 3개 카드가 동시에 보이지
+// 않는다(1단계는 직접 입력만) — 이 "3개 카드 동시 노출" 계약은 teen
+// 이상 단계에서 그대로 유지되는지로 확인한다(사용자 승인: "teen 이후
+// 단계는 기존 자유 선택 UI 그대로 유지").
 test('the teach/study panel shows three distinct gamified mission cards inside a mission-styled sheet', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
-  await mockCharacterApi(page, { characters: [NURI_SINGER] })
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 5 }] })
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
