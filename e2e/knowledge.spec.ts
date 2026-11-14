@@ -52,6 +52,9 @@ async function mockCharacterApi(
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
     // 않은 기본값(10/10, 3/3)을 돌려준다.
     onUsage?: (route: Route) => Promise<void>
+    // 지시서(AI 예시문 3개 자동 생성 기능 복구) 전용.
+    onGenerateExampleDrafts?: (route: Route) => Promise<void>
+    onPurchaseExampleDraftCredit?: (route: Route) => Promise<void>
   },
 ) {
   await page.route('**/api/character**', async (route) => {
@@ -157,6 +160,36 @@ async function mockCharacterApi(
     }
     if (method === 'POST' && action === 'study-generate' && options.onStudyGenerate) {
       await options.onStudyGenerate(route)
+      return
+    }
+    if (method === 'POST' && action === 'generate-example-drafts') {
+      if (options.onGenerateExampleDrafts) {
+        await options.onGenerateExampleDrafts(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          drafts: [
+            { title: '예시 제목 1', content: '예시 아이디어 1' },
+            { title: '예시 제목 2', content: '예시 아이디어 2' },
+            { title: '예시 제목 3', content: '예시 아이디어 3' },
+          ],
+          exampleDraftsFreeRemaining: 2,
+          exampleDraftsFreeLimit: 3,
+          exampleDraftsPaidCredits: 0,
+          usedFree: true,
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'purchase-example-draft-credit') {
+      if (options.onPurchaseExampleDraftCredit) {
+        await options.onPurchaseExampleDraftCredit(route)
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ exampleDraftsPaidCredits: 1 }) })
       return
     }
     if (method === 'GET' && action === 'objective-quiz') {
@@ -1535,12 +1568,15 @@ test('buying 직업 전문 서적 in the universal market (만능마켓) works l
 })
 
 // 지시서(한도 소진 시 구매 유도 UI): "예시 만들어주기"(studyRemaining)가
-// 0이 되면 버튼이 비활성화되고 그 옆에 구매 버튼이 뜬다 — teen(10대)
-// 단계로 올려서 확인한다(toddler는 이 카드 자체가 안 보임, 위 다른
-// 테스트들과 같은 이유). 구매 버튼을 누르면 만능마켓이 학습·교육관
-// 탭으로 바로 열리는지도 함께 확인한다(실제 구매는 지갑이 필요해
-// 아래 지식 검증 테스트에서 온보딩과 함께 확인한다).
-test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기 is disabled and a market buy button appears, routing to the 학습·교육관 tab', async ({ page }) => {
+// 0이 되면 버튼이 비활성화된다 — teen(10대) 단계로 올려서 확인한다
+// (toddler는 이 카드 자체가 안 보임, 위 다른 테스트들과 같은 이유).
+// 지시서(AI 예시문 3개 자동 생성 기능 복구) 이후: 이 카드의 구매
+// 버튼(과거 "AI 추천 충전권" 연결)은 제거됐다 — 그 아이템의 실제 효과가
+// "AI 예시문 생성권"으로 바뀌었고, studyGenerate의 하루 한도를 실제로
+// 늘려주는 구매 경로는 여전히 없기 때문이다(혼동을 피하려고 여기서는
+// 더 이상 구매를 유도하지 않는다). "AI 추천 충전권" 구매 버튼은 이제
+// 아래 "AI 예시문 3개 만들어주기" 카드에서 확인한다.
+test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기 is disabled, with no market buy button on this card', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1559,16 +1595,7 @@ test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기
   await page.getByRole('button', { name: '가르치기' }).click()
 
   await expect(page.getByRole('button', { name: '✨ 예시 만들어주기' })).toBeDisabled()
-  const buyRecommendButton = page.getByTestId('buy-recommend-uses-button')
-  await expect(buyRecommendButton).toBeVisible()
-  await expect(buyRecommendButton).toHaveText(/만능마켓에서 AI 추천 구매하기/)
-
-  await buyRecommendButton.click()
-  const market = page.getByRole('dialog', { name: '만능마켓' })
-  await expect(market).toBeVisible()
-  // initialCategory='education'으로 바로 열렸다면 탭을 누르지 않고도
-  // 학습·교육관 아이템이 보여야 한다.
-  await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
+  await expect(page.getByTestId('buy-recommend-uses-button')).toHaveCount(0)
 })
 
 // 지시서(한도 소진 시 구매 유도 UI): "AI검증하기"(teachRemaining)가
@@ -1656,6 +1683,178 @@ test('when the daily 지식 검증(teach) limit is exhausted, AI검증하기 is 
   // AI검증하기는 여전히 비활성화 상태고 구매 버튼도 계속 보여야 한다.
   await expect(page.getByRole('button', { name: 'AI검증하기' })).toBeDisabled()
   await expect(page.getByTestId('buy-validation-uses-button')).toBeVisible()
+})
+
+// 지시서(AI 예시문 3개 자동 생성 기능 복구): '직접 입력하기' 바로 위에
+// 새 버튼이 뜨고, 클릭하면 Gemini가 만든 예시문 3개가 카드로 보이며,
+// 하나를 고르면 제목·본문 입력창에 그대로 채워져(기존 선택지 칩과 같은
+// 동작) 자유롭게 고쳐 쓸 수 있는지 확인한다. 선택만으로는 검증/저장이
+// 전혀 일어나지 않는다 — 이어서 기존 AI검증하기 흐름을 그대로 탄다.
+test('the AI 예시문 3개 만들어주기 button sits above 직접 입력하기, generates 3 drafts, and selecting one fills the inputs for editing', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let verifyRequested = false
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      verifyRequested = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-example-draft',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('example-drafts-remaining')).toContainText('무료 3/3 남음')
+
+  const generateButton = page.getByTestId('generate-example-drafts-button')
+  const directInputHeading = page.getByText('📌 직접 입력하기', { exact: true })
+  await expect(directInputHeading).toBeVisible()
+  // '직접 입력하기' 바로 위에 있는지 — 화면상 y좌표가 더 작아야(=더
+  // 위에 있어야) 한다.
+  const buttonBox = await generateButton.boundingBox()
+  const headingBox = await directInputHeading.boundingBox()
+  expect(buttonBox?.y ?? Infinity).toBeLessThan(headingBox?.y ?? -Infinity)
+
+  await generateButton.click()
+  const cards = page.getByTestId('example-draft-card')
+  await expect(cards).toHaveCount(3)
+  await expect(cards.first()).toContainText('예시 제목 1')
+  await expect(cards.first()).toContainText('예시 아이디어 1')
+
+  await cards.nth(1).click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('예시 제목 2')
+  await expect(page.getByTestId('knowledge-content-textarea')).toHaveValue('예시 아이디어 2')
+  // 선택 목록은 하나를 고르면 닫힌다(다시 받으려면 버튼을 또 눌러야 함).
+  await expect(page.getByTestId('example-draft-card')).toHaveCount(0)
+
+  // 지시서: "사용자가 내용을 수정할 수 있도록 한다" — 자유롭게 고친 뒤,
+  // 기존 AI검증하기 흐름을 그대로 탄다.
+  await page.getByTestId('knowledge-content-textarea').fill('예시 아이디어 2를 내가 직접 고쳐서 더 자세히 적었다')
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+  expect(verifyRequested).toBe(true)
+  await expect(page.getByText('적합', { exact: true })).toBeVisible()
+})
+
+// 지시서(추가 예시문 구매): 무료 3개와 구매한 생성권을 모두 소진하면
+// 버튼이 비활성화되고 구매 버튼이 뜨며, 그 버튼은 만능마켓 학습·교육관
+// 탭(기존 "AI 추천 충전권")으로 바로 연결된다.
+test('when both free and purchased example-draft credits are exhausted, the generate button is disabled and a market buy button appears', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [{ ...NURI_ACCOUNTANT, example_drafts_free_used: 3, example_drafts_paid_credits: 0 }],
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('example-drafts-remaining')).toContainText('무료 0/3 남음')
+  await expect(page.getByTestId('generate-example-drafts-button')).toBeDisabled()
+
+  const buyButton = page.getByTestId('buy-example-drafts-button')
+  await expect(buyButton).toBeVisible()
+  await expect(buyButton).toHaveText(/만능마켓에서 예시문 생성권 구매하기/)
+
+  await buyButton.click()
+  const market = page.getByRole('dialog', { name: '만능마켓' })
+  await expect(market).toBeVisible()
+  await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
+})
+
+// 지시서(추가 예시문 구매 + 새로고침 후 유지): 만능마켓에서 "AI 추천
+// 충전권"을 구매하면 가상용돈이 차감되고, 그 구매가 실제로
+// purchase-example-draft-credit을 호출해 캐릭터에 생성권을 지급한다 —
+// 그 직후 다시 열어도(이 e2e에서는 같은 세션 안에서 모의 응답을 다시
+// 받아오는 것으로 확인) 충전된 크레딧 1개가 그대로 보여야 한다.
+test('buying 예시문 생성권(AI 추천 충전권) in the market deducts the wallet, grants a real credit via purchase-example-draft-credit, and the credit is reflected after reopening', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let purchaseRequested = false
+  // 지갑(가상용돈)이 있어야 실제 구매를 확인할 수 있으므로(온보딩 전
+  // 캐릭터는 지갑이 없음), 새 캐릭터를 만드는 흐름으로 진행한다 — 막
+  // 만든 캐릭터인데도 무료 3번을 이미 다 쓴 상태로 시작한다(구매 유도
+  // 버튼이 뜨는 상태를 바로 보기 위한 설정).
+  await mockCharacterApi(page, {
+    characters: [],
+    onPurchaseExampleDraftCredit: async (route) => {
+      purchaseRequested = true
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ exampleDraftsPaidCredits: 1 }) })
+    },
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        example_drafts_free_used: 3,
+        example_drafts_paid_credits: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        example_drafts_free_used: 3,
+        example_drafts_paid_credits: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByTestId('buy-example-drafts-button').click()
+
+  const market = page.getByRole('dialog', { name: '만능마켓' })
+  await market.getByRole('button', { name: 'AI 추천 충전권' }).click()
+  await page.getByRole('button', { name: '구입하기' }).click()
+  await expect(market.getByTestId('universal-market-balance')).toContainText('90,000원')
+  expect(purchaseRequested).toBe(true)
+
+  await page.getByRole('button', { name: '닫기' }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('example-drafts-remaining')).toContainText('무료 0/3 남음 · 구매한 생성권 1개')
+  await expect(page.getByTestId('generate-example-drafts-button')).toBeEnabled()
 })
 
 // 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가

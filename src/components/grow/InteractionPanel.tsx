@@ -12,6 +12,7 @@ import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
+import { FREE_EXAMPLE_DRAFTS_LIMIT, type ExampleDraft } from '../../data/exampleDrafts'
 import type { AccountTierState } from '../../hooks/useAccountTier'
 import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
@@ -90,7 +91,7 @@ export default function InteractionPanel({
   // "만능마켓에서 구매하기" 버튼 클릭 — 호출부가 만능마켓 시트를 열어준다.
   onBuyMoreUses?: () => void
 }) {
-  const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
+  const { verifyKnowledge, studyGenerate, generateExampleDrafts, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
   // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
   // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
@@ -198,7 +199,7 @@ export default function InteractionPanel({
   const [knowledgeCategory, setKnowledgeCategory] = useState<KnowledgeCategory | null>(null)
   // 가르치기와 스스로 공부하기 중 어느 쪽이 지금 진행 중인지 — 두 액션은
   // 동시에 실행되지 않도록 서로를 막는다(버튼 disabled 공유).
-  const [busyAction, setBusyAction] = useState<'teach' | 'study' | null>(null)
+  const [busyAction, setBusyAction] = useState<'teach' | 'study' | 'example-drafts' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [verification, setVerification] = useState<KnowledgeVerification | null>(null)
   // The exact title/content that `verification` above was computed from —
@@ -241,6 +242,13 @@ export default function InteractionPanel({
   // 기존 검증·저장·스탯/경제 로직에는 전혀 관여하지 않는다.
   const [nodCount, setNodCount] = useState(0)
   const [celebrateCount, setCelebrateCount] = useState(0)
+
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): 생성된 draft 3개(선택하기
+  // 전까지만 보여주는 목록)와 그 에러 — 둘 다 이 버튼 자체의 상태라
+  // actionError/verification과는 분리해 둔다(저장·검증 흐름과 전혀
+  // 섞이지 않도록).
+  const [exampleDrafts, setExampleDrafts] = useState<ExampleDraft[] | null>(null)
+  const [exampleDraftsError, setExampleDraftsError] = useState<string | null>(null)
 
   const isStale = verification !== null && (verifiedSnapshot?.title !== title || verifiedSnapshot?.content !== content)
 
@@ -331,6 +339,34 @@ export default function InteractionPanel({
     setRequiredAgeTier(null)
   }
 
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): Gemini로 "짧은 아이디어"
+  // 3개를 받아온다 — 검증·저장과 전혀 무관한 호출이라(돌아온 draft는
+  // 아직 아무것도 평가되지 않았다), 성공해도 XP/미션 진행도가 전혀
+  // 바뀌지 않는다("예시문 생성이나 선택만으로 XP를 지급하지 않는다").
+  const handleGenerateExampleDrafts = async () => {
+    setBusyAction('example-drafts')
+    setExampleDraftsError(null)
+    try {
+      const result = await generateExampleDrafts(character.companionType)
+      setExampleDrafts(result.drafts)
+    } catch (err) {
+      setExampleDrafts(null)
+      setExampleDraftsError(err instanceof Error ? err.message : '예시문을 만드는 중 오류가 발생했어요.')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  // 지시서: "예시문 선택 시 제목과 본문 입력창에 자동 입력한다" + "사용자가
+  // 내용을 수정할 수 있도록 한다" — 기존 선택지 칩(applyTopicSuggestion)
+  // 과 정확히 같은 동작(입력창 채우기 + missionType 태깅 + 검증 상태
+  // 초기화)이라 그대로 재사용한다. 고른 뒤에는 나머지 2개도 함께
+  // 닫는다(다시 보려면 버튼을 또 눌러야 한다 — 무료/유료 횟수를 아끼게).
+  const selectExampleDraft = (draft: ExampleDraft) => {
+    applyTopicSuggestion(draft)
+    setExampleDrafts(null)
+  }
+
   const handleSave = async () => {
     if (!verification || isStale || verification.status !== 'appropriate' || ageBlocked || !verifiedSnapshot || !verificationToken) return
     setSaving(true)
@@ -400,6 +436,11 @@ export default function InteractionPanel({
   const hasUnlimitedValidation = accountTier.isUnlimitedValidation || accountTier.userTier === 'premium'
   const recommendExhausted = !hasUnlimitedRecommend && studyRemaining !== null && studyRemaining.remaining <= 0
   const validationExhausted = !hasUnlimitedValidation && teachRemaining !== null && teachRemaining.remaining <= 0
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): "캐릭터당 평생 3번 무료" +
+  // 구매한 생성권 — 둘 다 character 행에서 그대로 읽는다(usage prop처럼
+  // 별도로 들고 있지 않아도 character가 이미 최신값이다, GrowthContext의
+  // updateExampleDraftsUsage 참고).
+  const exampleDraftsExhausted = character.exampleDraftsFreeRemaining <= 0 && character.exampleDraftsPaidCredits <= 0
 
   // PR #62 요청 1~2번: 화면 전체를 "게임 속 미션 창" 톤(다크 글래스 +
   // 청록 홀로그램)으로 바꾸고, 입력 방식을 3개의 또렷이 구분된 미션
@@ -523,28 +564,14 @@ export default function InteractionPanel({
       {!isToddlerStagedFlow && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
           <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleSelfStudy()}
-              disabled={busy || recommendExhausted}
-              className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
-            >
-              {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
-            </button>
-            {/* 지시서(한도 소진 시 구매 유도 UI): aiRecommendCount(studyRemaining)
-                가 0이 되면 버튼을 비활성화하고 그 옆에 구매 버튼을 노출한다. */}
-            {recommendExhausted && (
-              <button
-                type="button"
-                data-testid="buy-recommend-uses-button"
-                onClick={() => onBuyMoreUses?.()}
-                className="flex w-full items-center justify-center gap-1.5 self-start rounded-xl border border-amber-400/50 bg-amber-500/20 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/30 sm:w-auto"
-              >
-                🛍️ 만능마켓에서 AI 추천 구매하기
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => void handleSelfStudy()}
+            disabled={busy || recommendExhausted}
+            className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
+          >
+            {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
+          </button>
           <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
             AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
             내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
@@ -552,15 +579,6 @@ export default function InteractionPanel({
           {studyRemaining && (
             <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
               오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
-            </p>
-          )}
-          {/* 지시서(향후 구독 확장을 위한 상태 설계): 구매한 충전권은
-              체험판 표시값이다 — 실제 서버 하루 한도는 아직 늘어나지
-              않으므로, 혼동 없게 그 사실을 바로 옆에 적어둔다(다음
-              PR에서 서버 한도 검사 로직을 함께 바꿔 실제로 연결한다). */}
-          {accountTier.aiRecommendBonus > 0 && (
-            <p data-testid="ai-recommend-bonus" className="text-sm font-semibold text-amber-300/90">
-              🎫 구매한 AI 추천 충전권: {accountTier.aiRecommendBonus}개 (실제 사용 횟수 연동은 다음 업데이트에서 제공돼요)
             </p>
           )}
         </div>
@@ -597,6 +615,67 @@ export default function InteractionPanel({
         <p data-testid="toddler-staged-flow-complete" className="text-base font-bold text-emerald-300">
           오늘 학습을 모두 마쳤어요! 🎉
         </p>
+      )}
+
+      {/* 지시서(AI 예시문 3개 자동 생성 기능 복구): "직접 입력하기" 영역
+          바로 위에 배치한다 — 기존 선택지 칩(①)·AI 추천(②)·직접
+          입력(③)은 전혀 건드리지 않고 별도로 추가했다. toddler 단계에서는
+          1단계(direct)일 때만 보인다(③과 같은 조건 — 2·3단계에서는 이미
+          전용 컴포넌트가 입력을 받는다). */}
+      {(!isToddlerStagedFlow || toddlerStep === 'direct') && (
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-fuchsia-400/25 bg-fuchsia-400/5 p-4 shadow-[0_0_14px_rgba(232,121,249,0.08)]">
+          <p className="text-lg font-extrabold text-fuchsia-200 sm:text-xl">✨ AI 예시문 3개 만들어주기</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="generate-example-drafts-button"
+              onClick={() => void handleGenerateExampleDrafts()}
+              disabled={busy || exampleDraftsExhausted}
+              className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-fuchsia-500/40 bg-fuchsia-600/30 px-4 py-2.5 text-sm font-bold text-fuchsia-200 transition-all hover:bg-fuchsia-600/50 disabled:opacity-50 sm:w-auto"
+            >
+              {busyAction === 'example-drafts' ? '예시문 만드는 중...' : '✨ AI 예시문 3개 만들어주기'}
+            </button>
+            {/* 지시서(추가 예시문 구매): 무료 3개와 구매한 생성권을 모두
+                소진하면 버튼을 비활성화하고 구매 버튼을 노출한다 — 기존
+                만능마켓 "AI 추천 충전권"(10,000원, 학습·교육관)을
+                그대로 이 생성권으로 연결했다(사용자 승인). */}
+            {exampleDraftsExhausted && (
+              <button
+                type="button"
+                data-testid="buy-example-drafts-button"
+                onClick={() => onBuyMoreUses?.()}
+                className="flex w-full items-center justify-center gap-1.5 self-start rounded-xl border border-amber-400/50 bg-amber-500/20 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/30 sm:w-auto"
+              >
+                🛍️ 만능마켓에서 예시문 생성권 구매하기
+              </button>
+            )}
+          </div>
+          <p className="text-sm font-semibold text-fuchsia-200/70 sm:text-base">
+            AI가 짧은 아이디어 3개를 만들어줘요 — 하나를 고르면 아래 입력칸에 채워져요. 자유롭게 고쳐 쓴 뒤 "AI검증하기"를 눌러야 저장할 수
+            있어요(예시문을 만들거나 고르기만 해서는 경험치가 지급되지 않아요).
+          </p>
+          <p data-testid="example-drafts-remaining" className="text-sm font-semibold text-fuchsia-200/70 sm:text-base">
+            무료 {character.exampleDraftsFreeRemaining}/{FREE_EXAMPLE_DRAFTS_LIMIT} 남음
+            {character.exampleDraftsPaidCredits > 0 && ` · 구매한 생성권 ${character.exampleDraftsPaidCredits}개`}
+          </p>
+          {exampleDraftsError && <p className="text-base font-bold text-rose-300">{exampleDraftsError}</p>}
+          {exampleDrafts && (
+            <div className="flex flex-col gap-2" data-testid="example-drafts-list">
+              {exampleDrafts.map((draft, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  data-testid="example-draft-card"
+                  onClick={() => selectExampleDraft(draft)}
+                  className="flex flex-col items-start gap-0.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-400/10 p-3 text-left hover:border-fuchsia-300 hover:bg-fuchsia-400/20"
+                >
+                  <span className="text-base font-bold text-fuchsia-100">{draft.title}</span>
+                  <span className="text-sm text-fuchsia-200/70">{draft.content}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력

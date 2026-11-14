@@ -280,6 +280,25 @@ export function ensureCharacterTables() {
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS mission_unlocked_tier TEXT
           CHECK (mission_unlocked_tier IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
       `
+
+      // 지시서(AI 예시문 3개 자동 생성 기능 복구): "캐릭터당 평생 3번
+      // 무료"(사용자 승인) — 하루마다 리셋되는 daily_teach_usage/
+      // daily_study_usage와 달리 캐릭터 한 번 만들면 끝까지 유지되는
+      // 값이라, 별도 usage 테이블이 아니라 characters 행에 직접 둔다
+      // (레벨/경험치처럼 그 캐릭터의 평생 상태). example_drafts_paid_credits
+      // 는 만능마켓에서 "AI 추천 충전권"(가상용돈, 체험판)을 구매할
+      // 때마다 +1 되는 실제 DB 영속 값이다 — 가상용돈 자체는 여전히
+      // 체험판(새로고침 시 초기화)이지만, 그 돈으로 산 이 크레딧만큼은
+      // 실제로 저장해 새로고침 후에도 남는다(사용자 승인된 비대칭
+      // 구조 — api/_lib/exampleDraftsLimit.ts 참고).
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS example_drafts_free_used INTEGER
+          NOT NULL DEFAULT 0 CHECK (example_drafts_free_used BETWEEN 0 AND 3)
+      `
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS example_drafts_paid_credits INTEGER
+          NOT NULL DEFAULT 0 CHECK (example_drafts_paid_credits >= 0)
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -633,6 +652,8 @@ export interface CharacterRow {
   exp: number
   mission_unlocked_tier: AgeTierValue | null
   focus_percent: number
+  example_drafts_free_used: number
+  example_drafts_paid_credits: number
   created_at: string
 }
 

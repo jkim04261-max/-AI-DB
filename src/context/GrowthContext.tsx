@@ -4,6 +4,7 @@ import type { ProfessionId } from '../data/characterProfessions'
 import type { AgeTier } from '../data/characterAge'
 import type { MissionType, MissionProgress } from '../data/characterMissions'
 import type { KnowledgeCategory } from '../data/knowledgeCategories'
+import { FREE_EXAMPLE_DRAFTS_LIMIT, type ExampleDraft } from '../data/exampleDrafts'
 
 export type CompanionType = 'nuri' | 'duri'
 
@@ -76,6 +77,14 @@ export interface Character {
   // 된다) — 서버가 계산한 "진짜" 연령대를 그대로 쓴다(api/character.ts의
   // toCharacterJson).
   ageTier: AgeTier
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): "캐릭터당 평생 3번 무료"
+  // 중 아직 남은 횟수 — teachRemaining/studyRemaining(계정 전체, 매일
+  // 리셋)과 달리 캐릭터별로 평생 유지되는 값이라 getUsage()가 아니라
+  // 이 캐릭터 행 자체에 함께 내려온다(api/character.ts의 toCharacterJson,
+  // ...row 그대로 스프레드). exampleDraftsPaidCredits는 만능마켓에서
+  // 구매한 생성권(실제 DB 영속, 가상용돈 자체는 체험판인 것과는 별개).
+  exampleDraftsFreeRemaining: number
+  exampleDraftsPaidCredits: number
   createdAt: string
 }
 
@@ -180,6 +189,14 @@ interface GrowthContextValue {
     requiredAgeTier: AgeTier
     focusPercent: number
   }>
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구)
+  generateExampleDrafts: (companionType: CompanionType) => Promise<{
+    drafts: ExampleDraft[]
+    exampleDraftsFreeRemaining: number
+    exampleDraftsFreeLimit: number
+    exampleDraftsPaidCredits: number
+  }>
+  purchaseExampleDraftCredit: (companionType: CompanionType) => Promise<{ exampleDraftsPaidCredits: number }>
   saveKnowledge: (
     companionType: CompanionType,
     title: string,
@@ -241,6 +258,8 @@ interface CharacterApiRow {
   exp: number
   age_tier: AgeTier
   focus_percent: number
+  example_drafts_free_used: number
+  example_drafts_paid_credits: number
   created_at: string
 }
 
@@ -255,6 +274,8 @@ function fromApiRow(row: CharacterApiRow): Character {
     exp: row.exp ?? 0,
     ageTier: row.age_tier ?? 'toddler',
     focusPercent: row.focus_percent ?? 90,
+    exampleDraftsFreeRemaining: Math.max(0, FREE_EXAMPLE_DRAFTS_LIMIT - (row.example_drafts_free_used ?? 0)),
+    exampleDraftsPaidCredits: row.example_drafts_paid_credits ?? 0,
     createdAt: row.created_at,
   }
 }
@@ -346,6 +367,19 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   const updateFocusPercent = useCallback((companionType: CompanionType, focusPercent: number) => {
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, focusPercent } : c)))
   }, [])
+
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): generate-example-drafts/
+  // purchase-example-draft-credit 둘 다 응답에 최신 "남은 무료/구매한
+  // 유료 크레딧" 값을 실어 보낸다 — updateFocusPercent와 같은 원칙으로,
+  // 전체 캐릭터 목록을 다시 불러오지 않고 이 값만 로컬에 반영한다.
+  const updateExampleDraftsUsage = useCallback(
+    (companionType: CompanionType, exampleDraftsFreeRemaining: number, exampleDraftsPaidCredits: number) => {
+      setCharacters((prev) =>
+        prev.map((c) => (c.companionType === companionType ? { ...c, exampleDraftsFreeRemaining, exampleDraftsPaidCredits } : c)),
+      )
+    },
+    [],
+  )
 
   const createCharacter = useCallback(async (companionType: CompanionType) => {
     const res = await fetch('/api/character', {
@@ -455,6 +489,65 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       focusPercent: data.focusPercent ?? 90,
     }
   }, [updateFocusPercent])
+
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): "AI 예시문 3개 만들어주기"
+  // 전용 — studyGenerate와 달리 검증·서명 토큰이 없다. 돌아온 drafts는
+  // 순수한 title/content 제안일 뿐이고, 사용자가 그중 하나를 골라 입력칸에
+  // 채운 뒤 반드시 verifyKnowledge를 따로 거쳐야 저장할 수 있다(이 호출
+  // 자체는 아무것도 저장하지 않는다).
+  const generateExampleDrafts = useCallback(
+    async (companionType: CompanionType) => {
+      const res = await fetch('/api/character?action=generate-example-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        drafts?: ExampleDraft[]
+        exampleDraftsFreeRemaining?: number
+        exampleDraftsFreeLimit?: number
+        exampleDraftsPaidCredits?: number
+        error?: string
+      }
+      // 402(무료+유료 모두 소진)와 그 외 실패 모두, 서버가 함께 내려준
+      // 최신 남은 값을 반영한다 — 소진 상태를 화면에 정확히 보여주려면
+      // 실패 응답에도 그 값이 필요하다(handleGenerateExampleDrafts 참고).
+      if (data.exampleDraftsFreeRemaining !== undefined && data.exampleDraftsPaidCredits !== undefined) {
+        updateExampleDraftsUsage(companionType, data.exampleDraftsFreeRemaining, data.exampleDraftsPaidCredits)
+      }
+      if (!res.ok || !data.drafts) {
+        throw new Error(data.error || '예시문을 만드는 중 오류가 발생했어요.')
+      }
+      return {
+        drafts: data.drafts,
+        exampleDraftsFreeRemaining: data.exampleDraftsFreeRemaining ?? 0,
+        exampleDraftsFreeLimit: data.exampleDraftsFreeLimit ?? FREE_EXAMPLE_DRAFTS_LIMIT,
+        exampleDraftsPaidCredits: data.exampleDraftsPaidCredits ?? 0,
+      }
+    },
+    [updateExampleDraftsUsage],
+  )
+
+  // 만능마켓에서 "AI 추천 충전권"을 가상용돈(체험판)으로 구매한 직후
+  // 호출된다 — 가상용돈 차감 자체는 useMockWallet이 처리하고, 이 호출은
+  // 그 구매로 생긴 예시문 생성권 +1을 실제 DB에 영속시키기만 한다.
+  const purchaseExampleDraftCredit = useCallback(
+    async (companionType: CompanionType) => {
+      const res = await fetch('/api/character?action=purchase-example-draft-credit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { exampleDraftsPaidCredits?: number; error?: string }
+      if (!res.ok || data.exampleDraftsPaidCredits === undefined) {
+        throw new Error(data.error || '이용권을 지급하는 중 오류가 발생했어요.')
+      }
+      const character = characters.find((c) => c.companionType === companionType)
+      updateExampleDraftsUsage(companionType, character?.exampleDraftsFreeRemaining ?? 0, data.exampleDraftsPaidCredits)
+      return { exampleDraftsPaidCredits: data.exampleDraftsPaidCredits }
+    },
+    [characters, updateExampleDraftsUsage],
+  )
 
   const saveKnowledge = useCallback(
     async (
@@ -776,6 +869,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         setProfession,
         verifyKnowledge,
         studyGenerate,
+        generateExampleDrafts,
+        purchaseExampleDraftCredit,
         saveKnowledge,
         getMissionProgress,
         listKnowledge,

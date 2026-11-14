@@ -15,10 +15,12 @@ import {
   GeminiConfigError,
   verifyKnowledge,
   generateSelfStudy,
+  generateExampleDrafts,
   type KnowledgeVerificationResult,
 } from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
+import { FREE_EXAMPLE_DRAFTS_LIMIT, reserveExampleDraft, refundExampleDraft, grantExampleDraftCredits } from './_lib/exampleDraftsLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import {
   buildTeachReply,
@@ -262,6 +264,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGenerateStudy(req, res, session.sub)
       return
     }
+    if (action === 'generate-example-drafts') {
+      await handleGenerateExampleDrafts(req, res, session.sub)
+      return
+    }
+    if (action === 'purchase-example-draft-credit') {
+      await handlePurchaseExampleDraftCredit(req, res, session.sub)
+      return
+    }
     if (action === 'quiz-submit') {
       await handleSubmitQuiz(req, res, session.sub)
       return
@@ -293,7 +303,7 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) return null
 
   const result = await sql<CharacterRow>`
-    SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+    SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, example_drafts_free_used, example_drafts_paid_credits, created_at
     FROM characters
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
@@ -313,7 +323,7 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+      SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, example_drafts_free_used, example_drafts_paid_credits, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
@@ -388,7 +398,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, example_drafts_free_used, example_drafts_paid_credits, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -445,7 +455,7 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
       UPDATE characters
       SET profession = ${profession}, custom_profession_label = ${normalizedCustomLabel}
       WHERE user_id = ${userId} AND companion_type = ${companionType}
-      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, example_drafts_free_used, example_drafts_paid_credits, created_at
     `
     const character = updated.rows[0]
     if (!character) {
@@ -785,6 +795,112 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
   } catch (err) {
     console.error('[api/character] unexpected error on study-generate', err)
     res.status(500).json({ error: '스스로 공부하기 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(AI 예시문 3개 자동 생성 기능 복구): "AI 예시문 3개 만들어주기"
+// 버튼 전용 — generateSelfStudy(스스로 공부하기)와 결정적으로 다르다.
+// 여기서 만드는 3개는 검증도, 서명 토큰도 없는 "짧은 아이디어" draft일
+// 뿐이다 — 사용자가 하나를 골라 제목/본문 입력창에 채운 뒤, 자유롭게
+// 고쳐 쓰고 기존 'AI검증하기'(handleVerifyKnowledge)를 반드시 따로
+// 거쳐야 저장할 수 있다. 그래서 character_messages에도 아무것도 쓰지
+// 않는다(실제로 캐릭터가 뭔가를 배우거나 대답한 게 아니라, 순수한 작성
+// 도우미일 뿐이므로 — "예시문 생성이나 선택만으로 XP를 지급하지
+// 않는다"와 같은 이유).
+async function handleGenerateExampleDrafts(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType } = (req.body ?? {}) as { companionType?: unknown }
+
+  try {
+    await ensureCharacterTables()
+    await ensureKnowledgeTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    // 캐릭터당 평생 3번 무료, 그 이후는 구매한 크레딧을 쓴다(둘 다
+    // characters 행에 직접 저장 — api/_lib/exampleDraftsLimit.ts 참고).
+    // Gemini에 닿기 전에 먼저 예약하므로, 소진된 요청은 비용이 전혀
+    // 들지 않는다.
+    const reserved = await reserveExampleDraft(userId, character.id)
+    if (!reserved.ok) {
+      res.status(402).json({
+        error: '무료 예시문과 구매한 생성권을 모두 사용했어요. 만능마켓에서 더 구매해주세요.',
+        exampleDraftsFreeRemaining: reserved.freeRemaining,
+        exampleDraftsFreeLimit: FREE_EXAMPLE_DRAFTS_LIMIT,
+        exampleDraftsPaidCredits: reserved.paidCredits,
+      })
+      return
+    }
+
+    const knownTitlesResult = await sql<{ title: string }>`
+      SELECT title FROM character_knowledge_entries
+      WHERE character_id = ${character.id} AND user_id = ${userId}
+      ORDER BY created_at DESC
+      LIMIT ${SELF_STUDY_KNOWN_TITLES_LIMIT}
+    `
+
+    let drafts
+    try {
+      drafts = await generateExampleDrafts(
+        resolveProfessionLabel(character),
+        knownTitlesResult.rows.map((r) => r.title),
+        effectiveAgeTier(character),
+      )
+    } catch (err) {
+      // 쓸 수 있는 결과가 없으므로 방금 소비한 쪽(무료/유료)을 정확히
+      // 되돌린다(지시서 "API 실패 시 유료 이용권을 소비하지 않도록
+      // 처리" — 무료도 같은 원칙으로 보호한다).
+      await refundExampleDraft(userId, character.id, reserved.usedFree)
+      const { status, message } = resolveGeminiFailureMessage(err)
+      res.status(status).json({ error: message })
+      return
+    }
+
+    res.status(200).json({
+      drafts,
+      exampleDraftsFreeRemaining: reserved.freeRemaining,
+      exampleDraftsFreeLimit: FREE_EXAMPLE_DRAFTS_LIMIT,
+      exampleDraftsPaidCredits: reserved.paidCredits,
+      usedFree: reserved.usedFree,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on generate-example-drafts', err)
+    res.status(500).json({ error: '예시문을 만드는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(AI 예시문 3개 자동 생성 기능 복구): 만능마켓에서 "AI 추천
+// 충전권"을 가상용돈(체험판)으로 구매한 직후 호출된다 — 가상용돈 차감
+// 자체는 클라이언트 쪽 체험판 지갑(useMockWallet)이 처리하고, 이 호출은
+// 그 구매로 생긴 "예시문 3개 생성권" +1을 실제 DB에 영속시키는 역할만
+// 한다(사용자 승인: "용돈은 계속 체험판, 구매한 이용권만 실제 DB에
+// 영속"). amount는 받지 않고 항상 1개씩만 지급한다 — 클라이언트가 보낸
+// 수량을 그대로 믿고 반영하면 임의로 큰 값을 보내 크레딧을 조작할 수
+// 있으므로, 서버가 수량을 고정한다.
+async function handlePurchaseExampleDraftCredit(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType } = (req.body ?? {}) as { companionType?: unknown }
+
+  try {
+    await ensureCharacterTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    const paidCredits = await grantExampleDraftCredits(userId, character.id, 1)
+    res.status(200).json({ exampleDraftsPaidCredits: paidCredits })
+  } catch (err) {
+    console.error('[api/character] unexpected error on purchase-example-draft-credit', err)
+    res.status(500).json({ error: '이용권을 지급하는 중 오류가 발생했어요.' })
   }
 }
 

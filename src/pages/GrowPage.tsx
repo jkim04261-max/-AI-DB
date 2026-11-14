@@ -137,7 +137,8 @@ const QUIZ_SNACK_COST_WON = 20_000
 export default function GrowPage() {
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge, getUsage } = useGrowth()
+  const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge, getUsage, purchaseExampleDraftCredit } =
+    useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
   const [error, setError] = useState<string | null>(null)
@@ -214,15 +215,27 @@ export default function GrowPage() {
     setMarketInitialCategory('education')
     setOpenSheet('universalMarket')
   }, [])
+  const character = characters.find((c) => c.companionType === selected) ?? null
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): "AI 추천 충전권" 구매
+  // 효과가 더 이상 체험판 표시값(accountTier.aiRecommendBonus, 실제
+  // 효과 없음)이 아니라 실제 기능(예시문 3개 생성권, DB 영속)으로
+  // 연결됐다 — 지금 선택된 캐릭터에 그 크레딧을 실제로 지급한다
+  // (사용자 승인: "기존 'AI 추천 충전권'을 그대로 재사용"). 캐릭터가
+  // 아직 없으면(만능마켓은 캐릭터 생성 전에도 열 수 있다) 조용히
+  // 건너뛴다 — 지급할 대상 캐릭터가 없으므로.
   const handleMarketEffect = useCallback(
-    (effect: MarketItemEffect) => {
-      if (effect.type === 'ai_recommend_bonus') accountTier.addRecommendBonus(effect.amount)
+    async (effect: MarketItemEffect) => {
+      if (effect.type === 'ai_recommend_bonus' && character) {
+        // 실패하면 그대로 throw해 UniversalMarket의 confirmPurchase가
+        // 구매 실패로 보여주게 한다 — 가상용돈은 이미 체험판으로
+        // 차감됐지만(새로고침하면 어차피 초기화되는 가짜 돈), 실제로
+        // 지급되지 않은 크레딧을 지급된 것처럼 조용히 넘기지 않는다.
+        await purchaseExampleDraftCredit(character.companionType)
+      }
       if (effect.type === 'knowledge_validation_bonus') accountTier.addValidationBonus(effect.amount)
     },
-    [accountTier],
+    [accountTier, character, purchaseExampleDraftCredit],
   )
-
-  const character = characters.find((c) => c.companionType === selected) ?? null
   // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
   // goalText를 대체한다. GrowthHUD의 문구와 QuestBanner/말풍선이 서로
   // 다른 소스를 보여주며 어긋나는 일이 없도록 한다.
