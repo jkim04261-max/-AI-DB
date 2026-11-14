@@ -33,17 +33,20 @@ export const MARKET_CATEGORY_LABEL: Record<MarketCategoryId, string> = {
   hobby: '게임·취미관',
 }
 
-// 지시서(한도 소진 시 구매 유도 UI): "예시 만들어주기"/"AI검증하기"
-// 하루 한도를 소진했을 때 만능마켓에서 살 수 있는 충전권 전용 효과 —
-// 구매하면 UniversalMarket이 이 effect를 호출부(GrowPage)에 알려주고,
-// 호출부는 useAccountTier의 보너스 카운터(aiRecommendBonus/
-// dailyValidationBonus)를 올린다. 중요: 이 보너스는 체험판 표시값일
-// 뿐이다 — 실제 서버의 하루 한도(Gemini 호출 자체를 막는
-// daily_teach_usage/daily_study_usage 테이블, api/_lib/knowledgeLimit.ts·
-// studyLimit.ts)는 전혀 바뀌지 않는다. 그 한도까지 실제로 늘리는 건 DB
-// 구조에 큰 영향을 주는 별도 범위라(CLAUDE.md 8번 규칙), 이번 PR은 UI·
-// 가상용돈 차감·상태 설계까지만 다루기로 사용자가 승인했다 — 실제 서버
-// 한도 연동은 별도 설계·승인 후 다음 PR에서 진행한다.
+// 지시서(한도 소진 시 구매 유도 UI / AI 예시문 3개 자동 생성 기능
+// 복구): "예시 만들어주기"/"AI검증하기"/"AI 예시문 3개 만들어주기"
+// 한도를 소진했을 때 만능마켓에서 살 수 있는 충전권 전용 효과 —
+// 구매하면 UniversalMarket이 이 effect를 호출부(GrowPage)에 알려준다.
+// - ai_recommend_bonus("AI 추천 충전권"): 처음엔 체험판 표시값(실제
+//   효과 없음)이었지만, 이제 실제 DB에 영속되는 "AI 예시문 생성권"을
+//   지급한다(사용자 승인: "기존 아이템을 그대로 재사용" — 새 아이템을
+//   추가하지 않고 이 아이템의 실제 효과만 채웠다). api/_lib/
+//   exampleDraftsLimit.ts 참고.
+// - knowledge_validation_bonus("지식 검증 충전권"): 아직 체험판
+//   표시값일 뿐이다 — 실제 서버의 하루 한도(Gemini 호출 자체를 막는
+//   daily_teach_usage 테이블, api/_lib/knowledgeLimit.ts)는 전혀
+//   바뀌지 않는다. DB 구조에 큰 영향을 주는 별도 범위라(CLAUDE.md 8번
+//   규칙), 실제 연동은 별도 설계·승인 후 다음 PR에서 진행한다.
 export type MarketItemEffect =
   | { type: 'ai_recommend_bonus'; amount: number }
   | { type: 'knowledge_validation_bonus'; amount: number }

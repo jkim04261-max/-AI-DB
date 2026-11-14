@@ -27,20 +27,26 @@ export default function UniversalMarket({
   initialCategory,
   // 충전권처럼 효과가 있는 아이템을 구매했을 때 호출부(GrowPage)에
   // 알려준다 — 순수 장식용 아이템은 effect가 없어 호출되지 않는다.
+  // 지시서(AI 예시문 3개 자동 생성 기능 복구): 효과 중 일부는 이제 실제
+  // DB 쓰기(예시문 생성권 지급)로 이어지므로 실패할 수 있다 — Promise를
+  // 돌려주면(reject 시) 가상용돈은 이미 차감됐어도 "구매 완료" 목록에
+  // 올리지 않고 에러를 보여준다(지급 안 된 걸 지급된 것처럼 조용히
+  // 넘기지 않는다).
   onApplyEffect,
 }: {
   wallet: MockWallet
   initialCategory?: MarketCategoryId
-  onApplyEffect?: (effect: MarketItemEffect) => void
+  onApplyEffect?: (effect: MarketItemEffect) => void | Promise<void>
 }) {
   const [category, setCategory] = useState<MarketCategoryId>(initialCategory ?? CATEGORIES[0])
   const [pendingItem, setPendingItem] = useState<MarketItem | null>(null)
   const [purchased, setPurchased] = useState<MarketItem[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   const items = UNIVERSAL_MARKET_CATALOG.filter((i) => i.category === category)
 
-  const confirmPurchase = () => {
+  const confirmPurchase = async () => {
     if (!pendingItem) return
     const result = processPurchase(wallet, pendingItem.price, 'market_purchase')
     if (!result.ok) {
@@ -48,7 +54,18 @@ export default function UniversalMarket({
       setPendingItem(null)
       return
     }
-    if (pendingItem.effect) onApplyEffect?.(pendingItem.effect)
+    if (pendingItem.effect) {
+      setConfirming(true)
+      try {
+        await onApplyEffect?.(pendingItem.effect)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '구매한 효과를 적용하는 중 오류가 발생했어요.')
+        setConfirming(false)
+        setPendingItem(null)
+        return
+      }
+      setConfirming(false)
+    }
     setPurchased((prev) => [pendingItem, ...prev])
     setPendingItem(null)
   }
@@ -137,10 +154,11 @@ export default function UniversalMarket({
               </button>
               <button
                 type="button"
-                onClick={confirmPurchase}
-                className="flex-1 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-xs font-bold text-white shadow-[0_2px_0_rgba(146,64,14,0.4)] hover:from-amber-600 hover:to-yellow-600"
+                onClick={() => void confirmPurchase()}
+                disabled={confirming}
+                className="flex-1 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-xs font-bold text-white shadow-[0_2px_0_rgba(146,64,14,0.4)] hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50"
               >
-                구입하기
+                {confirming ? '처리 중...' : '구입하기'}
               </button>
             </div>
           </div>

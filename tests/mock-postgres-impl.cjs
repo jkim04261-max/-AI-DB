@@ -469,6 +469,76 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [{ focus_percent: row.focus_percent }] })
   }
 
+  // --- api/_lib/exampleDraftsLimit.ts: reserveExampleDraft's free-tier
+  // atomic consume (checked before the generic 'UPDATE characters'
+  // profession matcher below, same reasoning as mission_unlocked_tier/
+  // focus_percent above). ---
+  if (has(text, 'UPDATE characters', 'SET example_drafts_free_used = example_drafts_free_used + 1')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row || (row.example_drafts_free_used ?? 0) >= 3) return Promise.resolve({ rows: [] })
+    row.example_drafts_free_used = (row.example_drafts_free_used ?? 0) + 1
+    return Promise.resolve({
+      rows: [{ example_drafts_free_used: row.example_drafts_free_used, example_drafts_paid_credits: row.example_drafts_paid_credits ?? 0 }],
+    })
+  }
+
+  // --- reserveExampleDraft's paid-tier atomic consume (free already
+  // exhausted). ---
+  if (has(text, 'UPDATE characters', 'SET example_drafts_paid_credits = example_drafts_paid_credits - 1')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row || (row.example_drafts_paid_credits ?? 0) <= 0) return Promise.resolve({ rows: [] })
+    row.example_drafts_paid_credits = (row.example_drafts_paid_credits ?? 0) - 1
+    return Promise.resolve({
+      rows: [{ example_drafts_free_used: row.example_drafts_free_used ?? 0, example_drafts_paid_credits: row.example_drafts_paid_credits }],
+    })
+  }
+
+  // --- refundExampleDraft's free-tier undo (Gemini call failed after a
+  // free generation was reserved). ---
+  if (has(text, 'UPDATE characters', 'SET example_drafts_free_used = example_drafts_free_used - 1')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row && (row.example_drafts_free_used ?? 0) > 0) row.example_drafts_free_used -= 1
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- refundExampleDraft's paid-tier undo — no RETURNING clause, unlike
+  // grantExampleDraftCredits below (checked first since both match the
+  // same 'SET example_drafts_paid_credits = example_drafts_paid_credits +'
+  // prefix; the literal '+ 1' here vs the bound '+ $amount' there is what
+  // tells them apart). ---
+  if (
+    has(text, 'UPDATE characters', 'SET example_drafts_paid_credits = example_drafts_paid_credits + 1') &&
+    !text.includes('RETURNING')
+  ) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row) row.example_drafts_paid_credits = (row.example_drafts_paid_credits ?? 0) + 1
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- grantExampleDraftCredits: 만능마켓 "AI 추천 충전권" 구매 직후 호출
+  // — 바운드 파라미터는 실제 쿼리에 등장하는 순서 그대로다: SET 절의
+  // ${amount}가 WHERE절의 ${characterId}/${userId}보다 먼저 나온다.
+  if (has(text, 'UPDATE characters', 'SET example_drafts_paid_credits = example_drafts_paid_credits +', 'RETURNING example_drafts_paid_credits')) {
+    const [amount, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.example_drafts_paid_credits = (row.example_drafts_paid_credits ?? 0) + amount
+    return Promise.resolve({ rows: [{ example_drafts_paid_credits: row.example_drafts_paid_credits }] })
+  }
+
+  // --- reserveExampleDraft's final "both exhausted" peek (no mutation). ---
+  if (has(text, 'SELECT example_drafts_free_used, example_drafts_paid_credits FROM characters')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    return Promise.resolve({
+      rows: row ? [{ example_drafts_free_used: row.example_drafts_free_used ?? 0, example_drafts_paid_credits: row.example_drafts_paid_credits ?? 0 }] : [],
+    })
+  }
+
   // --- api/character.ts: change/set profession (checked before the
   // generic 'FROM characters' list matcher below, since this statement has
   // no FROM clause at all). PR #65: now also sets custom_profession_label
@@ -493,6 +563,8 @@ function sql(strings, ...values) {
           exp: row.exp ?? 0,
           mission_unlocked_tier: row.mission_unlocked_tier ?? null,
           focus_percent: row.focus_percent ?? 90,
+          example_drafts_free_used: row.example_drafts_free_used ?? 0,
+          example_drafts_paid_credits: row.example_drafts_paid_credits ?? 0,
           created_at: now,
         },
       ],
@@ -521,6 +593,8 @@ function sql(strings, ...values) {
               exp: row.exp ?? 0,
               mission_unlocked_tier: row.mission_unlocked_tier ?? null,
               focus_percent: row.focus_percent ?? 90,
+              example_drafts_free_used: row.example_drafts_free_used ?? 0,
+              example_drafts_paid_credits: row.example_drafts_paid_credits ?? 0,
               created_at: now,
             },
           ]
@@ -545,6 +619,8 @@ function sql(strings, ...values) {
         exp: c.exp ?? 0,
         mission_unlocked_tier: c.mission_unlocked_tier ?? null,
         focus_percent: c.focus_percent ?? 90,
+        example_drafts_free_used: c.example_drafts_free_used ?? 0,
+        example_drafts_paid_credits: c.example_drafts_paid_credits ?? 0,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -571,6 +647,8 @@ function sql(strings, ...values) {
       exp: 0,
       mission_unlocked_tier: null,
       focus_percent: 90,
+      example_drafts_free_used: 0,
+      example_drafts_paid_credits: 0,
     })
     return Promise.resolve({
       rows: [
@@ -585,6 +663,8 @@ function sql(strings, ...values) {
           exp: 0,
           mission_unlocked_tier: null,
           focus_percent: 90,
+          example_drafts_free_used: 0,
+          example_drafts_paid_credits: 0,
           created_at: now,
         },
       ],

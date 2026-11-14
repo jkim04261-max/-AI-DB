@@ -8,6 +8,13 @@ import { useCallback, useState } from 'react'
 // 따로 설계·승인받는다). 실제 구독 서버 상태로 바꿀 때는 이 훅의 반환
 // 모양을 그대로 두고 내부만 GrowthContext 스타일 fetch 훅으로 교체하면
 // 되도록 설계했다 — useMockWallet.ts와 같은 설계 의도.
+//
+// 지시서(AI 예시문 3개 자동 생성 기능 복구): 이전에는 "AI 추천 충전권"
+// 구매 효과를 여기(aiRecommendBonus, 체험판 표시값, 실제 효과 없음)에
+// 임시로 쌓아뒀지만, 그 자리를 채울 실제 기능(예시문 3개 생성권)이
+// 이제 생겨서 그쪽(character.exampleDraftsPaidCredits, 실제 DB 영속 —
+// GrowthContext.tsx 참고)으로 옮겼다. dailyValidationBonus("지식 검증
+// 충전권")는 아직 그 실제 기능이 없어 여기 그대로 남아있다.
 export type UserTier = 'basic' | 'pro' | 'premium'
 
 export interface AccountTierState {
@@ -19,14 +26,12 @@ export interface AccountTierState {
   // 한다(프리미엄은 숫자가 0이어도 소진된 게 아니다).
   isUnlimitedRecommend: boolean
   isUnlimitedValidation: boolean
-  // 만능마켓에서 구매한 충전권 개수 — 체험판 표시값이다. 실제 서버의
-  // 하루 한도(daily_teach_usage/daily_study_usage)는 이 값과 무관하게
-  // 그대로 동작하므로, 오늘 남은 실제 사용 가능 횟수에는 아직 반영되지
-  // 않는다("완료 후 검증" 참고 — 다음 PR에서 서버 한도 검사 로직을
-  // 함께 바꿔 실제로 연결한다).
-  aiRecommendBonus: number
+  // 만능마켓에서 구매한 "지식 검증 충전권" 개수 — 체험판 표시값이다.
+  // 실제 서버의 하루 한도(daily_teach_usage)는 이 값과 무관하게 그대로
+  // 동작하므로, 오늘 남은 실제 사용 가능 횟수에는 아직 반영되지 않는다
+  // (별도 설계·승인 후 다음 PR에서 서버 한도 검사 로직을 함께 바꿔
+  // 실제로 연결한다).
   dailyValidationBonus: number
-  addRecommendBonus: (amount: number) => void
   addValidationBonus: (amount: number) => void
 }
 
@@ -37,12 +42,8 @@ export function useAccountTier(): AccountTierState {
   const isUnlimitedRecommend = false
   const isUnlimitedValidation = false
 
-  const [aiRecommendBonus, setAiRecommendBonus] = useState(0)
   const [dailyValidationBonus, setDailyValidationBonus] = useState(0)
 
-  const addRecommendBonus = useCallback((amount: number) => {
-    setAiRecommendBonus((prev) => prev + amount)
-  }, [])
   const addValidationBonus = useCallback((amount: number) => {
     setDailyValidationBonus((prev) => prev + amount)
   }, [])
@@ -51,9 +52,7 @@ export function useAccountTier(): AccountTierState {
     userTier,
     isUnlimitedRecommend,
     isUnlimitedValidation,
-    aiRecommendBonus,
     dailyValidationBonus,
-    addRecommendBonus,
     addValidationBonus,
   }
 }
