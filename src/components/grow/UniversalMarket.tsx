@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { Wallet } from 'lucide-react'
 import type { MockWallet } from '../../hooks/useMockWallet'
-import { charge } from '../../services/paymentService'
-import { MARKET_CATEGORY_LABEL, UNIVERSAL_MARKET_CATALOG, type MarketCategoryId, type MarketItem } from '../../data/universalMarketCatalog'
+import { processPurchase } from '../../services/paymentService'
+import {
+  MARKET_CATEGORY_LABEL,
+  UNIVERSAL_MARKET_CATALOG,
+  type MarketCategoryId,
+  type MarketItem,
+  type MarketItemEffect,
+} from '../../data/universalMarketCatalog'
 
 const CATEGORIES = Object.keys(MARKET_CATEGORY_LABEL) as MarketCategoryId[]
 
@@ -11,8 +17,23 @@ const CATEGORIES = Object.keys(MARKET_CATEGORY_LABEL) as MarketCategoryId[]
 // 용돈(useMockWallet)으로 "체험판 쇼핑"을 해보는 화면이다. 실제 결제·
 // DB 저장은 전혀 없다(useMockWallet과 같은 원칙) — 구매 내역도 세션
 // 안에서만 보이고 새로고침하면 사라진다.
-export default function UniversalMarket({ wallet }: { wallet: MockWallet }) {
-  const [category, setCategory] = useState<MarketCategoryId>(CATEGORIES[0])
+export default function UniversalMarket({
+  wallet,
+  // 지시서(한도 소진 시 구매 유도 UI): 가르치기 패널의 "만능마켓에서
+  // 구매하기" 버튼이 이 카테고리를 넘겨 바로 education 탭이 열리게
+  // 한다. 생략하면(= 기존 GameMenu "만능마켓" 버튼 경로) 첫 번째
+  // 카테고리를 그대로 보여준다 — 이 컴포넌트는 openSheet가 바뀔 때마다
+  // 새로 마운트되므로(GrowPage.tsx 참고) 이 초기값만으로 충분하다.
+  initialCategory,
+  // 충전권처럼 효과가 있는 아이템을 구매했을 때 호출부(GrowPage)에
+  // 알려준다 — 순수 장식용 아이템은 effect가 없어 호출되지 않는다.
+  onApplyEffect,
+}: {
+  wallet: MockWallet
+  initialCategory?: MarketCategoryId
+  onApplyEffect?: (effect: MarketItemEffect) => void
+}) {
+  const [category, setCategory] = useState<MarketCategoryId>(initialCategory ?? CATEGORIES[0])
   const [pendingItem, setPendingItem] = useState<MarketItem | null>(null)
   const [purchased, setPurchased] = useState<MarketItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -21,12 +42,13 @@ export default function UniversalMarket({ wallet }: { wallet: MockWallet }) {
 
   const confirmPurchase = () => {
     if (!pendingItem) return
-    const ok = charge(wallet, pendingItem.price, 'market_purchase')
-    if (!ok) {
-      setError('가상 용돈이 부족하거나 아직 지급되지 않았어요.')
+    const result = processPurchase(wallet, pendingItem.price, 'market_purchase')
+    if (!result.ok) {
+      setError(result.error ?? '가상 용돈이 부족하거나 아직 지급되지 않았어요.')
       setPendingItem(null)
       return
     }
+    if (pendingItem.effect) onApplyEffect?.(pendingItem.effect)
     setPurchased((prev) => [pendingItem, ...prev])
     setPendingItem(null)
   }

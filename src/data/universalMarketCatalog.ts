@@ -33,12 +33,29 @@ export const MARKET_CATEGORY_LABEL: Record<MarketCategoryId, string> = {
   hobby: '게임·취미관',
 }
 
+// 지시서(한도 소진 시 구매 유도 UI): "예시 만들어주기"/"AI검증하기"
+// 하루 한도를 소진했을 때 만능마켓에서 살 수 있는 충전권 전용 효과 —
+// 구매하면 UniversalMarket이 이 effect를 호출부(GrowPage)에 알려주고,
+// 호출부는 useAccountTier의 보너스 카운터(aiRecommendBonus/
+// dailyValidationBonus)를 올린다. 중요: 이 보너스는 체험판 표시값일
+// 뿐이다 — 실제 서버의 하루 한도(Gemini 호출 자체를 막는
+// daily_teach_usage/daily_study_usage 테이블, api/_lib/knowledgeLimit.ts·
+// studyLimit.ts)는 전혀 바뀌지 않는다. 그 한도까지 실제로 늘리는 건 DB
+// 구조에 큰 영향을 주는 별도 범위라(CLAUDE.md 8번 규칙), 이번 PR은 UI·
+// 가상용돈 차감·상태 설계까지만 다루기로 사용자가 승인했다 — 실제 서버
+// 한도 연동은 별도 설계·승인 후 다음 PR에서 진행한다.
+export type MarketItemEffect =
+  | { type: 'ai_recommend_bonus'; amount: number }
+  | { type: 'knowledge_validation_bonus'; amount: number }
+
 export interface MarketItem {
   id: string
   category: MarketCategoryId
   name: string
   price: number
   icon: string
+  // 선택값 — 대부분의 아이템처럼 순수 장식용이면 생략한다.
+  effect?: MarketItemEffect
 }
 
 export const UNIVERSAL_MARKET_CATALOG: MarketItem[] = [
@@ -51,6 +68,24 @@ export const UNIVERSAL_MARKET_CATALOG: MarketItem[] = [
   { id: 'career-job-book', category: 'career', name: '직업 전문 서적', price: 18000, icon: '📖' },
   { id: 'education-workbook', category: 'education', name: 'AI 맞춤형 학습 교재', price: 15000, icon: '📚' },
   { id: 'education-language', category: 'education', name: '외국어 회화 강좌', price: 20000, icon: '🌐' },
+  // 지시서(한도 소진 시 구매 유도 UI): 하루 3회/10회를 다 쓰면 가르치기
+  // 패널에 뜨는 두 구매 버튼이 이 두 아이템으로 연결된다.
+  {
+    id: 'education-ai-recommend-ticket',
+    category: 'education',
+    name: 'AI 추천 충전권',
+    price: 10000,
+    icon: '🎫',
+    effect: { type: 'ai_recommend_bonus', amount: 1 },
+  },
+  {
+    id: 'education-validation-ticket',
+    category: 'education',
+    name: '지식 검증 충전권',
+    price: 10000,
+    icon: '🔖',
+    effect: { type: 'knowledge_validation_bonus', amount: 1 },
+  },
   { id: 'agriculture-seed-set', category: 'agriculture', name: '텃밭 씨앗 세트', price: 10000, icon: '🌱' },
   { id: 'agriculture-pot', category: 'agriculture', name: '화분 · 가드닝 도구', price: 18000, icon: '🪴' },
   { id: 'travel-backpack', category: 'travel', name: '여행용 배낭', price: 22000, icon: '🎒' },

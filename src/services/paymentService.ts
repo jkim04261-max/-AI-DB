@@ -39,3 +39,28 @@ export function charge(wallet: MockWallet, amountWon: number, _reason: PaymentRe
 export function reward(wallet: MockWallet, amountWon: number, _reason: PaymentReason): void {
   wallet.earn(amountWon)
 }
+
+export interface PurchaseResult {
+  ok: boolean
+  // ok=false일 때만 채워지는 사용자 안내 문구.
+  error?: string
+}
+
+// 지시서(결제 서비스 추상화 연동): 마켓에서 아이템을 살 때 거치는 단일
+// 진입점 — 지금은 charge()를 그대로 호출하는 가상용돈 결제 1:1
+// 패스스루다(사용자 승인: "가상용돈 결제만 작동"). 성공/실패를
+// boolean 대신 { ok, error } 모양으로 돌려줘서, 호출부가 매번 똑같은
+// 실패 문구를 직접 만들지 않아도 되게 한다.
+//
+// TODO(실제 결제 연동): 나중에 PG(토스페이먼츠 등) 연동 및 일반/프로/
+// 프리미엄 구독을 붙일 때, 여기서 "지금 로그인한 사용자의 구독
+// 등급"(useAccountTier.ts)을 조회해 실제 카드 결제 API를 호출하거나,
+// 등급별 할인/면제를 적용하도록 분기한다. 호출부(UniversalMarket 등)는
+// 이 함수의 시그니처가 그대로라면 전혀 바뀔 필요가 없다.
+export function processPurchase(wallet: MockWallet, amountWon: number, reason: PaymentReason): PurchaseResult {
+  const ok = charge(wallet, amountWon, reason)
+  if (!ok) {
+    return { ok: false, error: '가상 용돈이 부족하거나 아직 지급되지 않았어요.' }
+  }
+  return { ok: true }
+}

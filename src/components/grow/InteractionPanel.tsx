@@ -12,6 +12,7 @@ import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
+import type { AccountTierState } from '../../hooks/useAccountTier'
 import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
 import FinalSubjectiveStep from './FinalSubjectiveStep'
@@ -66,6 +67,9 @@ export default function InteractionPanel({
   profession,
   onPoseChange,
   onKnowledgeSaved,
+  usage,
+  accountTier,
+  onBuyMoreUses,
 }: {
   character: Character
   profession: ProfessionId
@@ -75,6 +79,16 @@ export default function InteractionPanel({
   // 이벤트를 띄울지는 전부 GrowPage가 결정하고, 이 패널은 "저장
   // 성공"이라는 사실만 알려준다.
   onKnowledgeSaved?: () => void
+  // 지시서(한도 소진 시 구매 유도 UI): 계정 전체 하루 한도(GrowPage가
+  // 로그인 시점·패널 닫을 때마다 getUsage()로 불러와 두는 값)를 패널이
+  // 열릴 때 그대로 물려받는다 — teachRemaining/studyRemaining state의
+  // 초기값으로만 쓰이고, 그 이후로는 기존처럼 각 액션(handleTeach/
+  // handleSelfStudy) 응답이 최신 값으로 덮어쓴다. 새 fetch를 추가하지
+  // 않기 위한 재사용이다.
+  usage: { teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }
+  accountTier: AccountTierState
+  // "만능마켓에서 구매하기" 버튼 클릭 — 호출부가 만능마켓 시트를 열어준다.
+  onBuyMoreUses?: () => void
 }) {
   const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
@@ -200,8 +214,16 @@ export default function InteractionPanel({
   // 숨기고, 몇 살이 되면 다시 가르칠 수 있는지 안내한다.
   const [ageBlocked, setAgeBlocked] = useState(false)
   const [requiredAgeTier, setRequiredAgeTier] = useState<AgeTier | null>(null)
-  const [teachRemaining, setTeachRemaining] = useState<{ remaining: number; limit: number } | null>(null)
-  const [studyRemaining, setStudyRemaining] = useState<{ remaining: number; limit: number } | null>(null)
+  // 지시서(한도 소진 시 구매 유도 UI): 패널이 열리는 순간부터 소진
+  // 여부를 바로 판단할 수 있어야(한 번 실패해 봐야 아는 게 아니라) 해서,
+  // GrowPage가 이미 들고 있는 계정 전체 하루 한도(usage prop)로 초깃값을
+  // 채운다 — 이후에는 기존처럼 각 액션 응답이 최신 값으로 덮어쓴다.
+  const [teachRemaining, setTeachRemaining] = useState<{ remaining: number; limit: number } | null>(
+    usage.teachLimit > 0 ? { remaining: usage.teachRemaining, limit: usage.teachLimit } : null,
+  )
+  const [studyRemaining, setStudyRemaining] = useState<{ remaining: number; limit: number } | null>(
+    usage.studyLimit > 0 ? { remaining: usage.studyRemaining, limit: usage.studyLimit } : null,
+  )
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -369,6 +391,16 @@ export default function InteractionPanel({
 
   const busy = busyAction !== null
 
+  // 지시서(한도 소진 시 구매 유도 UI): "무제한" 여부는 숫자(count)보다
+  // userTier/isUnlimited...를 먼저 확인하는 방어 코드 — 프리미엄
+  // 등급이면 남은 횟수가 0이어도 소진된 게 아니다. 지금은 구독이 없어
+  // 항상 false/'basic'이지만, 나중에 실제 구독이 붙어도 이 두 플래그만
+  // 보면 되도록 미리 이렇게 짜 둔다.
+  const hasUnlimitedRecommend = accountTier.isUnlimitedRecommend || accountTier.userTier === 'premium'
+  const hasUnlimitedValidation = accountTier.isUnlimitedValidation || accountTier.userTier === 'premium'
+  const recommendExhausted = !hasUnlimitedRecommend && studyRemaining !== null && studyRemaining.remaining <= 0
+  const validationExhausted = !hasUnlimitedValidation && teachRemaining !== null && teachRemaining.remaining <= 0
+
   // PR #62 요청 1~2번: 화면 전체를 "게임 속 미션 창" 톤(다크 글래스 +
   // 청록 홀로그램)으로 바꾸고, 입력 방식을 3개의 또렷이 구분된 미션
   // 카드(① 선택지 고르기 ② AI 추천 받기 ③ 직접 입력)로 재배치한다.
@@ -491,14 +523,28 @@ export default function InteractionPanel({
       {!isToddlerStagedFlow && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
           <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
-          <button
-            type="button"
-            onClick={() => void handleSelfStudy()}
-            disabled={busy}
-            className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
-          >
-            {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSelfStudy()}
+              disabled={busy || recommendExhausted}
+              className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
+            >
+              {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
+            </button>
+            {/* 지시서(한도 소진 시 구매 유도 UI): aiRecommendCount(studyRemaining)
+                가 0이 되면 버튼을 비활성화하고 그 옆에 구매 버튼을 노출한다. */}
+            {recommendExhausted && (
+              <button
+                type="button"
+                data-testid="buy-recommend-uses-button"
+                onClick={() => onBuyMoreUses?.()}
+                className="flex w-full items-center justify-center gap-1.5 self-start rounded-xl border border-amber-400/50 bg-amber-500/20 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/30 sm:w-auto"
+              >
+                🛍️ 만능마켓에서 AI 추천 구매하기
+              </button>
+            )}
+          </div>
           <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
             AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
             내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
@@ -506,6 +552,15 @@ export default function InteractionPanel({
           {studyRemaining && (
             <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
               오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
+            </p>
+          )}
+          {/* 지시서(향후 구독 확장을 위한 상태 설계): 구매한 충전권은
+              체험판 표시값이다 — 실제 서버 하루 한도는 아직 늘어나지
+              않으므로, 혼동 없게 그 사실을 바로 옆에 적어둔다(다음
+              PR에서 서버 한도 검사 로직을 함께 바꿔 실제로 연결한다). */}
+          {accountTier.aiRecommendBonus > 0 && (
+            <p data-testid="ai-recommend-bonus" className="text-sm font-semibold text-amber-300/90">
+              🎫 구매한 AI 추천 충전권: {accountTier.aiRecommendBonus}개 (실제 사용 횟수 연동은 다음 업데이트에서 제공돼요)
             </p>
           )}
         </div>
@@ -600,7 +655,7 @@ export default function InteractionPanel({
           <button
             type="button"
             onClick={() => void handleTeach()}
-            disabled={busy || !title.trim() || !content.trim()}
+            disabled={busy || !title.trim() || !content.trim() || validationExhausted}
             className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 text-sm font-bold text-slate-200 shadow-md transition-all hover:bg-slate-700 disabled:opacity-50 sm:w-auto"
           >
             {busyAction === 'teach' ? 'AI 검증 중...' : 'AI검증하기'}
@@ -608,6 +663,24 @@ export default function InteractionPanel({
           <p className="text-sm font-semibold text-slate-400 sm:text-base">
             입력한 지식을 AI가 검토해요. 검증 성공 후 저장해야 경험치가 지급됩니다.
           </p>
+          {/* 지시서(한도 소진 시 구매 유도 UI): dailyValidationCount
+              (teachRemaining)가 0이 되면 검증 영역 하단에 구매 버튼을
+              노출한다. */}
+          {validationExhausted && (
+            <button
+              type="button"
+              data-testid="buy-validation-uses-button"
+              onClick={() => onBuyMoreUses?.()}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-amber-400/50 bg-amber-500/20 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/30 sm:w-auto"
+            >
+              🛍️ 만능마켓에서 지식 검증 횟수 구매하기
+            </button>
+          )}
+          {accountTier.dailyValidationBonus > 0 && (
+            <p data-testid="validation-bonus" className="text-sm font-semibold text-amber-300/90">
+              🔖 구매한 지식 검증 충전권: {accountTier.dailyValidationBonus}개 (실제 사용 횟수 연동은 다음 업데이트에서 제공돼요)
+            </p>
+          )}
         </div>
       </div>
       )}

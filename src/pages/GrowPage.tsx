@@ -31,7 +31,9 @@ import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
+import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
+import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -199,6 +201,26 @@ export default function GrowPage() {
   // 않은 상태라, 이번 단계에서는 새 DB 쓰기를 하나도 추가하지 않기로
   // 했다.
   const wallet = useMockWallet()
+  // 지시서(한도 소진 시 구매 유도 UI + 향후 구독 확장 설계): userTier/
+  // isUnlimited...·구매 충전권 보너스를 담는 상태 — 자세한 설계 의도는
+  // useAccountTier.ts 참고.
+  const accountTier = useAccountTier()
+  // 가르치기 패널의 "만능마켓에서 구매하기" 버튼이 이 값을 채우고
+  // openSheet를 'universalMarket'으로 바꾼다 — 기존 GameMenu의
+  // "만능마켓" 버튼(handleMenuSelect)은 그대로 첫 카테고리를 보여줘야
+  // 하므로, 그 경로에서는 매번 null로 되돌린다.
+  const [marketInitialCategory, setMarketInitialCategory] = useState<MarketCategoryId | null>(null)
+  const handleBuyMoreUses = useCallback(() => {
+    setMarketInitialCategory('education')
+    setOpenSheet('universalMarket')
+  }, [])
+  const handleMarketEffect = useCallback(
+    (effect: MarketItemEffect) => {
+      if (effect.type === 'ai_recommend_bonus') accountTier.addRecommendBonus(effect.amount)
+      if (effect.type === 'knowledge_validation_bonus') accountTier.addValidationBonus(effect.amount)
+    },
+    [accountTier],
+  )
 
   const character = characters.find((c) => c.companionType === selected) ?? null
   // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
@@ -738,6 +760,11 @@ export default function GrowPage() {
     // 새로 열지 않는다 — 다녀오는 동안 가르치기 등을 열면 연출과
     // 화면이 서로 겹친다.
     if (workingOnJob) return
+    // 지시서(한도 소진 시 구매 유도 UI): 가르치기 패널의 구매 버튼이
+    // 아니라 이 메뉴에서 직접 "만능마켓"을 골랐다면, 이전에 구매
+    // 버튼이 남겨둔 카테고리 지정을 지워 기존처럼 첫 카테고리부터
+    // 보여준다.
+    setMarketInitialCategory(null)
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
     // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외). 지시서(누리AI
     // 만능마켓): 같은 이유로 만능마켓도 예외에 추가한다.
@@ -1143,6 +1170,9 @@ export default function GrowPage() {
               profession={character.profession}
               onPoseChange={handlePoseChange}
               onKnowledgeSaved={handleKnowledgeSaved}
+              usage={usage}
+              accountTier={accountTier}
+              onBuyMoreUses={handleBuyMoreUses}
             />
           )}
           {openSheet === 'quiz' && character.profession && (
@@ -1168,7 +1198,9 @@ export default function GrowPage() {
             />
           )}
           {openSheet === 'market' && <ItemMarket companionType={character.companionType} inventory={inventory} />}
-          {openSheet === 'universalMarket' && <UniversalMarket wallet={wallet} />}
+          {openSheet === 'universalMarket' && (
+            <UniversalMarket wallet={wallet} initialCategory={marketInitialCategory ?? undefined} onApplyEffect={handleMarketEffect} />
+          )}
         </BottomSheet>
       )}
 
