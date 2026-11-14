@@ -314,3 +314,81 @@ body {
     transform: translateX(-50%) !important;
   }
 }
+
+/* 지시서(배고픔 이벤트 시 2.5D 동네 배경 걷기 애니메이션 구현): 모달이
+   열리면 배경은 천천히 위아래로 움직이는 패럴랙스를, 캐릭터는 제자리
+   걷기 바운스를 보여준다. "밥 먹이기"를 누르면 패럴랙스 대신 배경이
+   한 번 확대되고(zoom), 음식 아이콘이 나타났다 사라진다. */
+.grow-hungry-town-bg {
+  background-image:
+    radial-gradient(circle at 78% 18%, rgba(255, 244, 191, 0.85) 0%, rgba(255, 244, 191, 0) 55%),
+    linear-gradient(to bottom, #86c5f3 0%, #bfe6f7 34%, #cdeccb 46%, #8fd48a 62%, #5c9f5c 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 130%;
+  background-position: center 8%;
+}
+/* 실제 동네 배경 이미지를 받기 전까지의 임시(placeholder) 건물 실루엣 —
+   특정 게임·건축물을 모사하지 않는 추상적인 사각 블록 패턴. */
+.grow-hungry-town-skyline {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(120, 98, 146, 0.55) 0px,
+    rgba(120, 98, 146, 0.55) 26px,
+    rgba(120, 98, 146, 0) 26px,
+    rgba(120, 98, 146, 0) 34px,
+    rgba(154, 126, 180, 0.5) 34px,
+    rgba(154, 126, 180, 0.5) 54px,
+    rgba(154, 126, 180, 0) 54px,
+    rgba(154, 126, 180, 0) 64px
+  );
+}
+@keyframes grow-hungry-bg-parallax {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.02);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.02);
+  }
+}
+@keyframes grow-hungry-feed-zoom {
+  0% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1.14);
+  }
+}
+@keyframes grow-hungry-walk-bounce {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-7px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(0) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+}
+@keyframes grow-hungry-food-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.5);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-14px) scale(1.25);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-34px) scale(0.85);
+  }
+}

@@ -1147,7 +1147,7 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
 
   // 3번째 저장 직후 패널이 자동으로 닫히고, 배고픔 이벤트 모달이 뜬다.
   await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
-  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파요. 밥 먹으러 갈까요?')
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파해요. 밥 먹으러 갑니다!')
 
   // 체험판 용돈을 아직 지급받지 않은 캐릭터라, "밥 먹이기"를 눌러도
   // 금액 표기 없이 바로 먹는다.
@@ -1198,7 +1198,9 @@ test('a failed-to-load eating image falls back to the idle portrait instead of a
     },
   })
 
-  // "식사" 전신 그림(eating) 요청을 전부 실패시켜 깨짐 상황을 재현한다.
+  // "걷는 중"/"식사" 전신 그림(walking/eating) 요청을 전부 실패시켜
+  // 깨짐 상황을 재현한다.
+  await page.route('**/*walking*.webp', (route) => route.abort())
   await page.route('**/*eating*.webp', (route) => route.abort())
 
   await page.goto('/grow')
@@ -1212,8 +1214,14 @@ test('a failed-to-load eating image falls back to the idle portrait instead of a
   }
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
-  // 모달의 그림이 깨진 "eating" 경로 대신 평상시 전신 그림(idle)으로
-  // 대체됐는지 확인한다 — src에 "-eating"이 없어야 한다.
+  // 모달이 뜨자마자 보이는 "걷는 중" 그림이 깨진 경로 대신 평상시
+  // 전신 그림(idle)으로 대체됐는지 확인한다 — src에 "-walking"이
+  // 없어야 한다.
+  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-walking)/)
+
+  // "밥 먹이기"를 누르면 "식사" 그림으로 바뀌는데, 이 역시 같은 이유로
+  // 평상시 전신 그림으로 대체돼야 한다 — src에 "-eating"도 없어야 한다.
+  await page.getByTestId('hungry-event-feed-button').click()
   await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-eating)/)
 })
 
@@ -1301,7 +1309,7 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
     if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
   }
 
-  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파요. 밥 먹으러 갈까요?')
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파해요. 밥 먹으러 갑니다!')
   await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기 (-10,000원)')
   await page.getByTestId('hungry-event-feed-button').click()
   await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
@@ -1415,6 +1423,122 @@ test('insufficient balance blocks feeding and shows an inline warning, without c
   )
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('5,000원')
+})
+
+// 지시서(배고픔 이벤트 시 2.5D 동네 배경 걷기 애니메이션 구현): "밥
+// 먹이기"를 누르면 음식 아이콘 연출이 잠깐 나타난 뒤에야 모달이
+// 닫히는지 확인한다(즉시 닫히지 않는다).
+test('feeding plays a brief food-icon animation before the modal closes', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-anim',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  await expect(page.getByTestId('hungry-warning-banner')).toHaveCount(0)
+})
+
+// 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
+// 누르면 연출 없이 곧바로 모달이 닫히고, isHungry 경고 배너가 뜬 채로
+// 유지되는지 확인한다(퀴즈 3회를 풀기 전까지) — 지금까지는 이
+// 분기에 대한 e2e 커버리지가 없었다.
+test('"나중에 먹기" closes the modal immediately and keeps the hungry warning banner', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-later',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-later-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
+  await expect(page.getByTestId('hungry-warning-banner')).toContainText('배고파요... 밥 사주세요!')
 })
 
 // 지시서(누리AI 만능마켓): 온보딩으로 지급된 체험판 가상 용돈으로
