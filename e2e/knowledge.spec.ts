@@ -218,11 +218,9 @@ test('a character with no profession shows guidance instead of a teach form', as
 
 // PR #52 후속 요청 1번(5차에서 2~3살→8~9살로 상향): 가르치기 폼에 쉬운
 // 예시 주제가 떠서, 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지
-// 않도록 자연스럽게 유도한다. 지시서(학습 플로우 전면 개편) 이후
-// toddler(8~9살) 단계는 1~3단계 강제 순서 흐름을 써서 이 선택지 칩
-// 자체가 보이지 않으므로(1단계는 직접 입력만), teen(10대) 단계로
-// 올려서 이 기존 기능이 그대로 동작하는지 확인한다(사용자 승인: "teen
-// 이후 단계는 기존 자유 선택 UI 그대로 유지").
+// 않도록 자연스럽게 유도한다. teen(10대) 단계는 자유 선택 3카드 UI를
+// 그대로 쓰므로 여기서 확인한다 — toddler(8~9살) 1단계(direct)의
+// 동일 기능은 아래 "선택예시하기(3개)" 테스트에서 별도로 확인한다.
 test('the teach form suggests age-appropriate example topics for a teen-stage character, and clicking one fills the form', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -236,6 +234,29 @@ test('the teach form suggests age-appropriate example topics for a teen-stage ch
   await page.getByTestId('topic-suggestion-chip').filter({ hasText: '기본 용어 정리' }).click()
 
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('기본 용어 정리')
+  await expect(page.getByTestId('knowledge-content-textarea')).not.toHaveValue('')
+})
+
+// 지시서(선택예시하기(3개) 버튼 복구): 학습 플로우 전면 개편(PR #108)이
+// toddler(8~9살) 전체 구간에서 이 예시 칩을 숨겼는데, 1단계(direct, 아직
+// knowhow 3문제를 다 못 채운 상태)에서 "문제 예시를 볼 수 없다"는 사용자
+// 불편으로 이어져 다시 노출하기로 했다 — 기본 캐릭터(NURI_ACCOUNTANT,
+// level 지정 없음)가 바로 toddler/direct 상태다.
+test('the teach form suggests 3 example topics at the toddler (8~9살) direct-input stage, and clicking one fills the form', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [NURI_ACCOUNTANT] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('8~9살 단계에 맞는 예시예요', { exact: false })).toBeVisible()
+  const chips = page.getByTestId('topic-suggestion-chip')
+  await expect(chips).toHaveCount(3)
+  await chips.filter({ hasText: '이 직업이 하는 일' }).click()
+
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('이 직업이 하는 일')
   await expect(page.getByTestId('knowledge-content-textarea')).not.toHaveValue('')
 })
 
@@ -706,11 +727,12 @@ test('reopening the panel (e.g. after a refresh) reloads the persisted conversat
 // 입력)로 채웠는지가 저장 요청의 missionType으로 그대로 실려가는지
 // 확인한다. 셋 다 기존 검증/저장 로직 자체는 전혀 건드리지 않았으므로,
 // 여기서는 missionType 태깅만 검증한다. 지시서(학습 플로우 전면 개편)
-// 이후 toddler(8~9살)는 강제 순서 흐름을 쓰므로(선택지 칩/AI 추천
-// 카드가 안 보임), 이 두 카드가 여전히 올바른 missionType으로 태깅
-// 되는지는 teen 단계로 올려서 확인한다 — knowhow(직접 입력)는 toddler
-// 1단계에서 이미 그대로 검증된다(아래 "typing the title/content
-// directly" 테스트).
+// 이후 toddler(8~9살)는 강제 순서 흐름을 쓰므로(AI 추천 카드가 안
+// 보임), "AI 추천 받기"는 teen 단계로 올려서 확인한다 — knowhow(직접
+// 입력)는 toddler 1단계에서 이미 그대로 검증된다(아래 "typing the
+// title/content directly" 테스트). 선택지 칩은 teen에서는 objective로,
+// toddler 1단계에서는 knowhow로 태깅되므로(아래 두 테스트) 둘 다 확인
+// 한다.
 
 test('filling the form from a topic suggestion chip and saving tags the save request as missionType=objective', async ({ page }) => {
   await failUnmockedApiCalls(page)
@@ -757,6 +779,57 @@ test('filling the form from a topic suggestion chip and saving tags the save req
 
   await expect.poll(() => saveRequestBody).toBeTruthy()
   expect(saveRequestBody?.missionType).toBe('objective')
+})
+
+// 지시서(선택예시하기(3개) 버튼 복구): toddler(8~9살) 1단계(direct)에서는
+// 이 예시 칩이 ①번 카드(선택지 고르기)가 아니라 ③번 카드(직접 입력)
+// 자리에 뜨므로, 저장 요청은 objective가 아니라 knowhow로 태깅돼야
+// 한다 — 그래야 1단계가 기다리는 knowhow 미션 진행도가 올라간다.
+test('filling the form from a topic suggestion chip at the toddler direct-input stage tags the save request as missionType=knowhow', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-toddler-chip',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: 1, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByTestId('topic-suggestion-chip').first().click()
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.missionType).toBe('knowhow')
 })
 
 test('clicking 스스로 공부하기 and saving tags the save request as missionType=subjective', async ({ page }) => {

@@ -291,10 +291,17 @@ export default function InteractionPanel({
   // PR #52 후속: 거절(ageBlocked) 직후에도 쉬운 예시를 바로 고를 수 있게
   // — 입력칸을 통째로 비우고 다시 검증 전 상태로 되돌려서 새로
   // 가르치기를 시작한 것처럼 만든다.
+  //
+  // 지시서(선택예시하기(3개) 버튼 복구): toddler(8~9살) 1단계(direct)에서
+  // 이 예시 칩을 쓸 때는 이 단계가 채우는 미션이 knowhow(직접 입력)이지
+  // objective(선택지에서 고르기)가 아니다 — 그래서 여기서만 'knowhow'로
+  // 태깅해 미션 진행도가 올바른 유형에 쌓이게 한다. teen 이후의 자유
+  // 선택 3카드 UI에서는 이 칩이 그대로 ①번 카드(선택지 고르기)이므로
+  // 기존 동작(objective)을 그대로 유지한다.
   const applyTopicSuggestion = (topic: { title: string; content: string }) => {
     setTitle(topic.title)
     setContent(topic.content)
-    setMissionType('objective')
+    setMissionType(isToddlerStagedFlow && toddlerStep === 'direct' ? 'knowhow' : 'objective')
     setVerification(null)
     setVerifiedSnapshot(null)
     setVerificationToken(null)
@@ -443,10 +450,17 @@ export default function InteractionPanel({
         </div>
       )}
 
-      {/* 미션 ① 선택지에서 고르기 — 8~9살 눈높이에서 제일 쉬운, 터치 한
-          번으로 끝나는 입력 방식. 입력칸이 비어 있을 때만 보여주는 기존
-          조건은 그대로 유지했다. */}
-      {!isToddlerStagedFlow && !title.trim() && !content.trim() && topicSuggestions.length > 0 && (
+      {/* 미션 ① 선택지에서 고르기(= "선택예시하기(3개)") — 8~9살 눈높이에서
+          제일 쉬운, 터치 한 번으로 끝나는 입력 방식. 입력칸이 비어 있을
+          때만 보여주는 기존 조건은 그대로 유지했다.
+          지시서(선택예시하기(3개) 버튼 복구): 학습 플로우 전면 개편(PR
+          #108)에서 toddler(8~9살) 전체 구간을 이 카드에서 제외했는데,
+          실제로는 1단계(direct, 직접 입력 카드)와 똑같이 "문제 예시를 볼
+          데가 없다"는 사용자 불편으로 이어졌다 — 그 직접 입력 카드(아래
+          ③)와 정확히 같은 조건(!isToddlerStagedFlow || toddlerStep ===
+          'direct')으로 되돌려, 1단계에서만 다시 보이게 한다(2·3단계의
+          전용 컴포넌트는 그대로 둔다). */}
+      {(!isToddlerStagedFlow || toddlerStep === 'direct') && !title.trim() && !content.trim() && topicSuggestions.length > 0 && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-cyan-400/25 bg-cyan-400/5 p-4 shadow-[0_0_14px_rgba(34,211,238,0.08)]">
           <p className="text-lg font-extrabold text-cyan-200 sm:text-xl">🎯 선택지에서 고르기</p>
           <p className="text-sm font-semibold text-cyan-200/70 sm:text-base">
