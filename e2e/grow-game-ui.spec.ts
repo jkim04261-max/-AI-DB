@@ -590,6 +590,28 @@ test('the character shows a specific age-number badge above the stage, not just 
   await expect(page.getByTestId('age-number-badge')).toHaveText('8세')
 })
 
+// 지시서(8세→10대 레벨업 미작동 버그 수정): 6미션 게이트 진화는 레벨과
+// 무관하게 일어날 수 있다(toddler→teen은 레벨 조건이 없다, PR #63/#108
+// 유닛테스트 참고) — 그래서 서버가 "진짜" age_tier를 'teen'으로
+// 고정해 내려줘도 level은 여전히 1일 수 있다. 이 시나리오에서
+// age-number-badge가 (레벨만 보고 다시 계산해) 8세에 머무르지 않고,
+// age_tier를 따라 10대 숫자로 바뀌는지 확인한다 — 이 버그가 고쳐지기
+// 전에는 이 테스트가 '8세'를 보고 실패했다.
+test('after a mission-gate evolution to teen while still level 1, the age-number badge shows a teen-range number, not 8', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 1, age_tier: 'teen' }] })
+
+  await page.goto('/grow')
+
+  await expect(page.getByTestId('age-stage-label')).toContainText('청소년')
+  const badgeText = await page.getByTestId('age-number-badge').textContent()
+  const ageNumber = Number(badgeText?.replace('세', ''))
+  expect(ageNumber).toBeGreaterThanOrEqual(10)
+  expect(ageNumber).toBeLessThanOrEqual(19)
+})
+
 // 마스터 단계(Lv.40+)는 요청하신 "장인증서" 배지로 바뀌어야 한다 —
 // 레벨이 달라지면 같은 화면에서 다른 배지가 실제로 뜨는지 확인한다.
 test('a master-tier (Lv.40+) character shows the 장인증서 badge instead of the toddler one', async ({ page }) => {

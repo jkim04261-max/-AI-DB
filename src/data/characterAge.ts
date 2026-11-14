@@ -79,13 +79,25 @@ const AGE_NUMBER_AGE_RANGE: Record<AgeTier, [number, number]> = {
   master_50s: [50, 65],
 }
 
-export function ageNumberForLevel(level: number): number {
-  const tier = ageTierForLevel(level)
+// 지시서(8세→10대 레벨업 미작동 버그 수정): PR #63부터 6미션 게이트
+// 진화는 레벨과 무관하게 일어날 수 있다(유닛테스트: "Lv.1이어도
+// 유형별로 정해진 개수를 채우면 즉시 진화한다") — 그래서 "지금 진짜
+// 연령대"는 character.ageTier(서버가 mission_unlocked_tier로 고정해
+// 내려줌)가 유일한 정답이고, level에서 다시 계산한 tier는 미션 게이트를
+// 무시해버릴 수 있다(GrowPage.tsx의 ageTier 변수가 바로 이 이유로
+// character.ageTier를 쓴다). 이 함수는 그 올바른 tier를 밖에서 받아,
+// level은 그 tier 안에서의 세부 보정(같은 티어 안에서 레벨이 오를수록
+// 나이도 조금씩 올라가는 것)에만 쓴다.
+export function ageNumberForTier(tier: AgeTier, level: number): number {
   const [lvLo, lvHi] = AGE_NUMBER_LEVEL_RANGE[tier]
   const [ageLo, ageHi] = AGE_NUMBER_AGE_RANGE[tier]
   const clampedLevel = Math.min(Math.max(level, lvLo), lvHi)
   const ratio = lvHi === lvLo ? 0 : (clampedLevel - lvLo) / (lvHi - lvLo)
   return Math.round(ageLo + ratio * (ageHi - ageLo))
+}
+
+export function ageNumberForLevel(level: number): number {
+  return ageNumberForTier(ageTierForLevel(level), level)
 }
 
 export function ageTierIndex(tier: AgeTier): number {

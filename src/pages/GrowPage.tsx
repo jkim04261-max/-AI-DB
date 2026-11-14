@@ -25,7 +25,7 @@ import UniversalMarket from '../components/grow/UniversalMarket'
 import HungryEventModal from '../components/grow/HungryEventModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
-import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForLevel, type AgeTier } from '../data/characterAge'
+import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
@@ -800,8 +800,15 @@ export default function GrowPage() {
   // 참고).
   const ageTier = character?.ageTier ?? 'toddler'
   // PR #52 후속 5차 요청 3번: 티어보다 더 구체적인 "지금 몇 살인지" 숫자
-  // 뱃지용 — 역시 character.level에서 그때그때 계산하는 표시용 값이다.
-  const ageNumber = character ? ageNumberForLevel(character.level) : 8
+  // 뱃지용 — 표시용 값이다.
+  //
+  // 지시서(8세→10대 레벨업 미작동 버그 수정): 반드시 위 ageTier(진짜
+  // 연령대, 6미션 게이트가 고정한 값)를 기준으로 계산해야 한다. 과거엔
+  // character.level만 보고 다시 tier를 계산했는데(ageNumberForLevel),
+  // 미션 게이트로 레벨과 무관하게 진화한 경우(흔한 경우 — 미션 게이트는
+  // 레벨 조건이 없다) 그 재계산이 진화를 무시해버려 나이 숫자가 8~9에서
+  // 멈춰 있는 버그가 있었다.
+  const ageNumber = character ? ageNumberForTier(ageTier, character.level) : 8
   const tendencyLabel = statGauges ? dominantStatLabel(statGauges) : '균형형'
 
   return (
