@@ -1075,6 +1075,66 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
   await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
 })
 
+// 지시서(밥 먹는 캐릭터 에셋 깨짐 방지): 식사 그림(eating) 로드가
+// 실패하는 상황(네트워크 오류, 캐시 문제 등)을 인위적으로 재현해도,
+// 깨진 이미지 아이콘이 아니라 평상시 전신 그림으로 조용히 대체되는지
+// 확인한다.
+test('a failed-to-load eating image falls back to the idle portrait instead of a broken image icon', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-broken-asset',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  // "식사" 전신 그림(eating) 요청을 전부 실패시켜 깨짐 상황을 재현한다.
+  await page.route('**/*eating*.webp', (route) => route.abort())
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  // 모달의 그림이 깨진 "eating" 경로 대신 평상시 전신 그림(idle)으로
+  // 대체됐는지 확인한다 — src에 "-eating"이 없어야 한다.
+  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-eating)/)
+})
+
 // 위 테스트와 같은 식사 이벤트지만, Stage 1 온보딩으로 체험판 가상
 // 용돈을 먼저 받은 캐릭터라면 김밥값 10,000원이 실제로(체험판 안에서)
 // 차감되는지까지 확인한다.
@@ -1333,6 +1393,65 @@ test('buying an item in the universal market (만능마켓) deducts from the moc
   await expect(dialog.getByText('최근 구입한 물건')).toBeVisible()
 })
 
+// 지시서(서점 팝업 흐름 수정): 자동으로 뜨던 서점 외출 팝업을 없애고,
+// "직업 관련 서적 구매"를 만능마켓의 직업관 카테고리에서 사용자가
+// 직접 고를 수 있게 옮겼다 — 다른 만능마켓 아이템과 똑같이 구매가
+// 되는지 확인한다.
+test('buying 직업 전문 서적 in the universal market (만능마켓) works like any other career-category item', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  await page.getByRole('button', { name: '만능마켓' }).click()
+  const dialog = page.getByRole('dialog', { name: '만능마켓' })
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('100,000원')
+
+  await dialog.getByRole('button', { name: '직업 전문 서적' }).click()
+  await page.getByRole('button', { name: '구입하기' }).click()
+
+  await expect(dialog.getByTestId('universal-market-balance')).toContainText('82,000원')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('82,000원')
+  await expect(dialog.getByText('최근 구입한 물건')).toBeVisible()
+})
+
 // 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가
 // 'eating'이 되면 기존 🍙 이모지 오버레이 대신 연령대별 전신 식사
 // 일러스트가 뜨고, 식사가 끝나 pose가 'idle'로 돌아가면 원래의 평상시
@@ -1431,90 +1550,15 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
   await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 4000 })
 })
 
-// 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
-// "3회 저장" 신호를 공유하며 번갈아 뜬다 — 1번째 3회(round 0)는 식사,
-// 2번째 3회(round 1, 누적 6회)는 서점 외출이어야 한다.
-test('a second round of 3 saves (6 total) triggers the bookstore outing: +300P, walk there, review card, reward, walk back', async ({ page }) => {
-  await failUnmockedApiCalls(page)
-  await mockMe(page, { user: USER })
-  await mockEmptyConversations(page)
-  let saveCount = 0
-  await mockCharacterApi(page, {
-    characters: [NURI_ACCOUNTANT],
-    onVerify: async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-          verificationToken: 'tok-bookstore',
-          characterReply: '알려주셔서 고마워요!',
-          remaining: 9,
-          dailyTeachLimit: 10,
-        }),
-      })
-    },
-    onSave: async (route) => {
-      saveCount += 1
-      await route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
-          savedReply: '배웠어요!',
-          expAwarded: 10,
-          exp: saveCount * 10,
-          level: 1,
-          leveledUp: false,
-        }),
-      })
-    },
-  })
-
-  await page.goto('/grow')
-
-  const teachThreeTimes = async (roundLabel: string) => {
-    await page.getByRole('button', { name: '가르치기' }).click()
-    for (let i = 0; i < 3; i++) {
-      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
-      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
-      await page.getByRole('button', { name: 'AI검증하기' }).click()
-      await page.getByRole('button', { name: '저장' }).click()
-      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
-    }
-  }
-
-  // 1번째 3회 — 배고픔 이벤트(기존 동작, 여기서는 지나가는 것만 확인).
-  await teachThreeTimes('round0')
-  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
-  await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
-
-  // 2번째 3회(누적 6회) — 서점 외출 이벤트.
-  await teachThreeTimes('round1')
-
-  await expect(page.getByRole('dialog', { name: '가르치기 · 스스로 공부하기' })).toHaveCount(0)
-  await expect(page.getByTestId('points-popup')).toContainText('+300P')
-  await expect(page.getByTestId('bookstore-outing-overlay')).toBeVisible()
-  // 지시서(연령대별 걷는 모습 이미지 적용): "걸어가는 중"(2초짜리 단계,
-  // 도착 카드로 바뀌기 전) 연출이 더 이상 SVG 도형이 아니라 연령대별
-  // 전신 걷는 일러스트를 보여준다 — 도착 카드로 넘어가기 전에 먼저
-  // 확인한다.
-  await expect(page.getByTestId('bookstore-walk-sprite').locator('img')).toHaveAttribute('src', /nuri-toddler-walking/)
-  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
-
-  await page.getByTestId('bookstore-leave-review-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('인체해부도')
-  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('다녀왔어요')
-})
-
-// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사(1번째 3회) → 서점
-// 외출(2번째 3회)에 이어, 3번째 3회(누적 9회)는 알바 이벤트가 뜨고
-// 체험판 용돈이 늘어나야 한다. 온보딩으로 받은 100,000원에서 식사비
-// 10,000원이 빠지고 알바 수입 20,000원이 더해지면 110,000원이다
-// (서점 이벤트의 +300P는 용돈이 아닌 별도 체험판 골드라 영향 없음).
-test('a third round of 3 saves (9 total) triggers the part-time job event and adds 20,000원 to the mock allowance', async ({ page }) => {
+// 지시서(서점 팝업 흐름 수정): 자동으로 뜨던 서점 외출 팝업을 완전히
+// 제거했다 — 10대 레벨업 트랜지션 직후에 끼어드는 것이 기획과 맞지
+// 않다는 지적에 따라, "직업 관련 서적 구매"는 사용자가 필요할 때
+// 만능마켓에서 직접 고르도록 옮겼다(universalMarketCatalog.ts의
+// '직업 전문 서적' 아이템 참고). 이제 식사·알바 두 이벤트만 "3회
+// 저장" 신호를 공유하며 번갈아 뜬다(1번째 3회=식사, 2번째 3회=알바).
+// 온보딩으로 받은 100,000원에서 식사비 10,000원이 빠지고 알바 수입
+// 20,000원이 더해지면 110,000원이다.
+test('a second round of 3 saves (6 total) triggers the part-time job event and adds 20,000원 to the mock allowance', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1603,12 +1647,7 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
   await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
-  await teachThreeTimes('round1') // 서점: 용돈이 아니라 체험판 골드 +300P
-  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
-  await page.getByTestId('bookstore-leave-review-button').click()
-  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 5000 })
-
-  await teachThreeTimes('round2') // 알바: +20,000원
+  await teachThreeTimes('round1') // 알바: +20,000원
   await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
   await expect(page.getByTestId('money-popup')).toContainText('20,000원')
   await expect(page.getByTestId('speech-bubble')).toContainText('아르바이트해서')
@@ -1621,11 +1660,12 @@ test('a third round of 3 saves (9 total) triggers the part-time job event and ad
 // 2단계 객관식 2문제(세트 전부 정답, objective) → 3단계 주관식
 // 1문제(subjective)"라는 고정 순서로 정확히 6개(3+2+1)를 채워야
 // 진화한다(사용자 승인: "게이트를 3:2:1로 변경"). 이 테스트는 그 세
-// 단계를 실제 UI로 끝까지 따라가, 토들러의 "6개 저장" 보상(서점 외출,
-// 정확히 2단계의 객관식 통과+3단계 완료가 겹치는 6번째 저장에서 함께
-// 발동함)과 겹치는 실제 상황에서도 진화 배너·캐릭터 그림·상태창이
-// 전부 올바르게 바뀌는지 확인한다.
-test('evolving from toddler to teen via the new 3-stage flow (direct×3 → objective quiz×2 → subjective×1) shows the evolution banner and swaps the portrait to teen — even though it coincides with the bookstore outing event', async ({ page }) => {
+// 단계를 실제 UI로 끝까지 따라가, 토들러의 "6개 저장" 보상(지시서(서점
+// 팝업 흐름 수정) 이후로는 식사·알바 2단계 로테이션이라 정확히 2번째
+// 로테이션인 알바 이벤트가 2단계의 객관식 통과+3단계 완료가 겹치는
+// 6번째 저장에서 함께 발동함)과 겹치는 실제 상황에서도 진화 배너·
+// 캐릭터 그림·상태창이 전부 올바르게 바뀌는지 확인한다.
+test('evolving from toddler to teen via the new 3-stage flow (direct×3 → objective quiz×2 → subjective×1) shows the evolution banner and swaps the portrait to teen — even though it coincides with the part-time job event', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1759,20 +1799,18 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
 
   // 3단계: 주관식 1문제(개인 노하우) — 이 저장이 "유형별로 정해진
   // 개수(3+2+1)"를 완성시키는 마지막 저장이고, 토들러의 "6개 저장"
-  // 보상(서점 외출)도 정확히 같은 저장에서 함께 발동한다.
+  // 보상(알바 이벤트)도 정확히 같은 저장에서 함께 발동한다.
   await page.getByTestId('final-subjective-textarea').fill('모르는 건 부끄러운 게 아니야, 꼭 물어봐도 괜찮아!')
   await page.getByTestId('final-subjective-complete-button').click()
 
-  // 진화 배너가 뜬다 — 같은 저장에서 동시에 열리는 서점 외출 오버레이에
-  // 가려지지 않고 실제로 보이는지 확인한다(핵심 회귀 포인트).
+  // 진화 배너가 뜬다 — 같은 저장에서 동시에 열리는 알바 연출에 가려지지
+  // 않고 실제로 보이는지 확인한다(핵심 회귀 포인트).
   await expect(page.getByTestId('evolution-banner')).toBeVisible()
   await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
 
-  // 서점 외출 흐름을 끝까지 따라간다(기존 "bookstore outing" 테스트와 동일).
-  await expect(page.getByTestId('bookstore-outing-overlay')).toBeVisible()
-  await expect(page.getByTestId('bookstore-leave-review-button')).toBeVisible()
-  await page.getByTestId('bookstore-leave-review-button').click()
-  await expect(page.getByTestId('bookstore-outing-overlay')).toHaveCount(0, { timeout: 5000 })
+  // 알바 흐름을 끝까지 따라간다(기존 "part-time job" 테스트와 동일).
+  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
+  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
 
   // 모든 연출이 끝난 뒤 — 실제 화면의 캐릭터 그림이 teen(10대) 일러스트로
   // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고

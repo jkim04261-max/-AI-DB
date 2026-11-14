@@ -9,6 +9,7 @@ import type { OutfitId } from '../../data/characterCustomization'
 import type { AgeTier } from '../../data/characterAge'
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { eatingPortraitSrc } from '../../data/characterEating'
+import { useImageFallback } from '../../hooks/useImageFallback'
 
 const COMPANION_NAME: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -156,11 +157,17 @@ export default function GameStage({
   // 'junior_20s'(기존 "기본 모습"과 같은 뜻으로 쓰던 단계)를 기본값으로
   // 쓴다.
   const outfitHasVisualOverride = Boolean(outfitId && OUTFIT_PALETTE_OVERRIDE[outfitId])
-  const portraitSrc = outfitHasVisualOverride
+  const idlePortraitSrc = fullBodyPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
+  const rawPortraitSrc = outfitHasVisualOverride
     ? null
     : pose === 'eating'
       ? eatingPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
-      : fullBodyPortraitSrc(companionType, ageTier ?? 'junior_20s', ageNumber)
+      : idlePortraitSrc
+  // 지시서(밥 먹는 캐릭터 에셋 깨짐 방지): 식사 포즈 그림이 어떤
+  // 이유로든 로드에 실패하면 평상시 전신 그림으로 조용히 되돌린다 —
+  // 브라우저 기본 "깨진 이미지" 아이콘이 그대로 보이던 문제를 없앤다.
+  const { src: fallbackSafeSrc, onError: handlePortraitError } = useImageFallback(rawPortraitSrc ?? '', idlePortraitSrc)
+  const portraitSrc = outfitHasVisualOverride ? null : fallbackSafeSrc
   const name = COMPANION_NAME[companionType]
   const moodIcon = MOOD_ICON[pose]
 
@@ -225,6 +232,7 @@ export default function GameStage({
             <img
               data-testid={`illustrated-age-portrait-${companionType}`}
               src={portraitSrc}
+              onError={handlePortraitError}
               alt=""
               aria-hidden
               // 캐릭터와 '○세' 나이 배지 겹침 수정: 92%였던 높이를 줄여서
@@ -414,6 +422,7 @@ export default function GameStage({
               >
                 <img
                   src={portraitSrc}
+                  onError={handlePortraitError}
                   alt=""
                   aria-hidden
                   className="h-auto w-full object-contain"

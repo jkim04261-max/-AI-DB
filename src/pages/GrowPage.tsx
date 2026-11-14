@@ -22,7 +22,6 @@ import TurnTransition from '../components/grow/TurnTransition'
 import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import UniversalMarket from '../components/grow/UniversalMarket'
-import BookstoreOutingOverlay, { type BookstoreOutingStage } from '../components/grow/BookstoreOutingOverlay'
 import HungryEventModal from '../components/grow/HungryEventModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
@@ -102,21 +101,16 @@ const MEAL_COST_WON = 10_000
 // 끝나고 다음 단계로 넘어가면 배고픔 상태가 해제").
 const HUNGRY_QUIZ_PENALTY_COUNT = 5
 
-// 지시서(8~9살 기초지식 완료 후 서점 외출 미션): 식사 이벤트와 같은
-// "8~9살 가르치기 3회 저장마다" 신호를 재사용하되, 번갈아(식사 →
-// 서점 → 식사 → 서점...) 띄워서 서로 겹치지 않게 한다. 실제 네이버
-// 스마트플레이스 API 연동이나 실제 리뷰 게시는 하지 않는다 — API 키가
-// 없고, 실제 존재하는 특정 서점 체인 이름을 그대로 쓰면서 "진짜 리뷰를
-// 남긴다"처럼 보이면 안 되기 때문에(CLAUDE.md 9번 지식재산권 지침),
-// 이 체험판 전용 가상 서점으로 구현했다 — 자세한 설계 의도는
-// BookstoreOutingOverlay.tsx 참고.
-const BOOKSTORE_NAME = '늘봄서점 자양점'
-const BOOKSTORE_REWARD_ITEM = '인체해부도 교구'
-const BOOKSTORE_POINT_REWARD = 300
+// 지시서(서점 팝업 흐름 수정): 10대 레벨업 트랜지션 직후 서점 외출
+// 팝업이 뜨는 것이 기획과 맞지 않아 자동 트리거를 완전히 제거했다
+// (BookstoreOutingOverlay.tsx 파일 자체는 삭제하지 않음 — CLAUDE.md
+// "기존 파일 삭제 금지" 규칙). "직업 관련 서적 구매"는 대신 만능마켓의
+// 서점 카테고리에서 사용자가 직접 고를 수 있다
+// (universalMarketCatalog.ts 참고).
 
-// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사·서점 이벤트와 같은
-// "3회 저장" 신호를 3단계로 돌려(식사 → 서점 → 알바 → 식사 → ...)
-// 세 번째 자리에 넣는다. 체험판 용돈(useMockWallet)에만 더해지고,
+// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사 이벤트와 같은
+// "3회 저장" 신호를 번갈아(식사 → 알바 → 식사 → ...) 띄운다. 체험판
+// 용돈(useMockWallet)에만 더해지고,
 // 실제 character.exp/DB는 건드리지 않는다 — 지출(식사)과 짝을 이루는
 // 수입 이벤트.
 const PART_TIME_JOB_EARNING_WON = 20_000
@@ -176,17 +170,10 @@ export default function GrowPage() {
   // (InteractionPanel/ExamPanel을 전혀 건드리지 않는 기존 leveledUpTo
   // 패턴과 동일한 원칙).
   const [evolvedTo, setEvolvedTo] = useState<AgeTier | null>(null)
-  // 지시서(서점 외출 미션): 외출 보상으로 뜨는 "+300P" 팝업 — 실제
-  // character.exp(ResourceBar의 "포인트")는 서버 권위값이라 건드리지
-  // 않고, 순수 연출용 숫자다(아래 triggerBookstoreOuting 참고).
-  const [pointsPopup, setPointsPopup] = useState<number | null>(null)
-  // 지시서(서점 외출 미션): 가는 길/도착/오는 길 3단계 — null이면
-  // 외출 중이 아님.
-  const [bookstoreOuting, setBookstoreOuting] = useState<BookstoreOutingStage | null>(null)
   // 지시서(알바/경제 활동 이벤트): 잠깐 "일하는 중" 턴 연출 중인지 —
   // 기존 TurnTransition을 그대로 재사용한다.
   const [workingOnJob, setWorkingOnJob] = useState(false)
-  // 알바 보상으로 뜨는 "+N원" 팝업 — pointsPopup과 같은 순수 연출용.
+  // 알바 보상으로 뜨는 "+N원" 팝업 — 순수 연출용.
   const [moneyPopup, setMoneyPopup] = useState<number | null>(null)
   // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 자동으로 차감만
   // 하던 기존 식사 연출을 "밥 먹이기/나중에 먹기"를 고르는 모달로
@@ -257,11 +244,10 @@ export default function GrowPage() {
   // ref로 둔다. DB에 저장되지 않는 세션 전용 값이라, 캐릭터를 전환하면
   // 아래 효과에서 0으로 되돌린다.
   const knowledgeSaveCountRef = useRef(0)
-  // 지시서(서점 외출 미션, 알바/경제 활동 이벤트): 식사·서점·알바
-  // 세 이벤트가 매번 같은 "3회 저장" 신호를 공유하므로, 셋이 순서대로
-  // 돌아가며 뜨도록 한다(0=다음은 식사, 1=다음은 서점, 2=다음은 알바) —
-  // 캐릭터 전환 시 함께 초기화한다.
-  const outingCycleRef = useRef<0 | 1 | 2>(0)
+  // 지시서(알바/경제 활동 이벤트): 식사·알바 두 이벤트가 매번 같은
+  // "3회 저장" 신호를 공유하므로, 둘이 번갈아 뜨도록 한다(0=다음은
+  // 식사, 1=다음은 알바) — 캐릭터 전환 시 함께 초기화한다.
+  const outingCycleRef = useRef<0 | 1>(0)
   // 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힌 누적
   // 횟수 — knowledgeSaveCountRef와 같은 이유(화면에 직접 안 보이는
   // 세션 전용 카운터)로 ref에 두고, 캐릭터 전환 시 함께 초기화한다.
@@ -618,55 +604,6 @@ export default function GrowPage() {
     setHungryQuizRemaining(HUNGRY_QUIZ_PENALTY_COUNT)
   }
 
-  // 지시서(서점 외출 미션): 패널을 닫고 "+300P" 팝업 + 서점으로 가야
-  // 하는 이유를 말풍선으로 띄운 뒤, 걸어가는 연출 → 도착(리뷰 남기기
-  // 카드) → 리뷰 제출 시 교구 획득 → 걸어오는 연출 → 귀가로 이어진다.
-  // handleBookstoreReviewSubmit이 사용자의 "리뷰 남기기" 클릭을 기다려야
-  // 하므로, 식사 이벤트(순수 타임아웃 연쇄)와 달리 중간에 사용자 입력이
-  // 섞인다.
-  const triggerBookstoreOuting = () => {
-    setOpenSheet(null)
-    inventory.addGold(BOOKSTORE_POINT_REWARD)
-    setPointsPopup(BOOKSTORE_POINT_REWARD)
-    const popupTimeout = setTimeout(() => setPointsPopup(null), 1800)
-    outingTimeoutsRef.current.push(popupTimeout)
-    showBubble('한의사가 되기 위해 인체해부도가 필요해요! 서점에 다녀올게요!')
-    const t1 = setTimeout(() => {
-      setBookstoreOuting('walking-there')
-    }, 1400)
-    outingTimeoutsRef.current.push(t1)
-  }
-
-  // "가는 길" 걷기 애니메이션이 한 바퀴(2초) 끝나면 도착 카드로 넘어간다
-  // — BookstoreOutingOverlay 쪽 CSS 애니메이션 길이와 맞춘 고정 지연.
-  useEffect(() => {
-    if (bookstoreOuting !== 'walking-there') return
-    const t = setTimeout(() => {
-      setBookstoreOuting('arrived')
-      showBubble(`${BOOKSTORE_NAME}에 도착했어요!`)
-    }, 2000)
-    outingTimeoutsRef.current.push(t)
-    return () => clearTimeout(t)
-  }, [bookstoreOuting])
-
-  // "오는 길"도 같은 길이만큼 걷고 나면 외출을 완전히 종료한다.
-  useEffect(() => {
-    if (bookstoreOuting !== 'walking-back') return
-    const t = setTimeout(() => {
-      setBookstoreOuting(null)
-      showBubble('다녀왔어요!')
-    }, 2000)
-    outingTimeoutsRef.current.push(t)
-    return () => clearTimeout(t)
-  }, [bookstoreOuting])
-
-  // 도착 카드의 "⭐ 리뷰 남기고 교구 받기" 버튼 — 실제 네이버 리뷰를
-  // 게시하지 않는, 이 체험판 안에서만 끝나는 보상 트리거다.
-  const handleBookstoreReviewSubmit = () => {
-    showBubble(`${BOOKSTORE_REWARD_ITEM}를 손에 넣었어요! 다시 집으로 돌아갈게요.`)
-    setBookstoreOuting('walking-back')
-  }
-
   // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 패널을 닫고 짧게
   // "일하는 중" 연출(기존 TurnTransition 재사용)을 보여준 뒤, 체험판
   // 용돈에 수입을 더한다. 지갑이 아직 없는 캐릭터(Stage 1 온보딩 전)는
@@ -690,13 +627,15 @@ export default function GrowPage() {
   }
 
   // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 지정된
-  // 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다 식사 → 서점 외출 →
-  // 알바 이벤트를 순서대로 띄운 뒤 다시 0부터 센다. 지시서(연령대별
-  // 스테이지 볼륨업: "경제 전략 루틴이 각 스테이지에 자연스럽게
-  // 녹아들도록")에 따라 8~9살 전용이던 제한을 없애고 모든 연령대에서
-  // 똑같이 동작한다 — 연령대가 올라가 한 단계를 졸업하는 데 필요한
-  // 지식 개수가 늘어날수록(6→10→...→50) 이 3회 단위 휴식 이벤트도
-  // 자연히 더 자주 끼어든다.
+  // 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다 식사 → 알바 이벤트를
+  // 번갈아 띄운 뒤 다시 0부터 센다. 지시서(연령대별 스테이지
+  // 볼륨업: "경제 전략 루틴이 각 스테이지에 자연스럽게 녹아들도록")에
+  // 따라 8~9살 전용이던 제한을 없애고 모든 연령대에서 똑같이
+  // 동작한다 — 연령대가 올라가 한 단계를 졸업하는 데 필요한 지식
+  // 개수가 늘어날수록(6→10→...→50) 이 3회 단위 휴식 이벤트도 자연히
+  // 더 자주 끼어든다. 지시서(서점 팝업 흐름 수정): 여기 있던 서점
+  // 외출 자동 트리거는 레벨업 직후에 뜨는 것이 기획과 맞지 않아
+  // 제거했다(식사/알바 2단계로 축소).
   const handleKnowledgeSaved = () => {
     if (!character) return
     knowledgeSaveCountRef.current += 1
@@ -705,9 +644,6 @@ export default function GrowPage() {
       if (outingCycleRef.current === 0) {
         outingCycleRef.current = 1
         triggerHungryEvent()
-      } else if (outingCycleRef.current === 1) {
-        outingCycleRef.current = 2
-        triggerBookstoreOuting()
       } else {
         outingCycleRef.current = 0
         triggerPartTimeJob()
@@ -718,7 +654,7 @@ export default function GrowPage() {
   // 지시서(문제 풀기 용돈 이벤트): ExamPanel이 서버 채점 결과 "정답"일
   // 때만 호출한다 — 오답은 세지 않는다. 두 트리거는 독립적이라(3의
   // 배수와 정확히 5는 절대 동시에 맞아떨어지지 않음) if/else로 묶지
-  // 않는다. 패널은 식사/서점/알바 이벤트와 같은 이유로 닫아서, 스테이지
+  // 않는다. 패널은 식사/알바 이벤트와 같은 이유로 닫아서, 스테이지
   // 위에 뜨는 팝업·말풍선이 모달에 가리지 않게 한다.
   const handleQuizAnswerCorrect = () => {
     if (!character) return
@@ -798,10 +734,10 @@ export default function GrowPage() {
   // 모를 경우를 대비해 여기서도 한 번 더 막는다(방어적 가드).
   const examSupported = character?.profession ? EXAM_SUPPORTED_PROFESSIONS.has(character.profession) : false
   const handleMenuSelect = (action: GameMenuAction) => {
-    // 지시서(서점 외출 미션, 알바/경제 활동 이벤트): 외출·알바 중(집에
-    // 없음)에는 어떤 메뉴도 새로 열지 않는다 — 다녀오는 동안 가르치기
-    // 등을 열면 연출과 화면이 서로 겹친다.
-    if (bookstoreOuting || workingOnJob) return
+    // 지시서(알바/경제 활동 이벤트): 알바 중(집에 없음)에는 어떤 메뉴도
+    // 새로 열지 않는다 — 다녀오는 동안 가르치기 등을 열면 연출과
+    // 화면이 서로 겹친다.
+    if (workingOnJob) return
     // PR #50: 커스터마이징 룸/아이템 마켓은 직업 선택과 무관하게 항상
     // 열 수 있다(GameMenu의 alwaysEnabled와 동일한 예외). 지시서(누리AI
     // 만능마켓): 같은 이유로 만능마켓도 예외에 추가한다.
@@ -1004,14 +940,6 @@ export default function GrowPage() {
                       +{xpPopup} XP
                     </span>
                   )}
-                  {pointsPopup !== null && (
-                    <span
-                      data-testid="points-popup"
-                      className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-emerald-300 drop-shadow-[0_0_10px_rgba(110,231,183,0.8)] sm:text-2xl"
-                    >
-                      +{pointsPopup}P 적립!
-                    </span>
-                  )}
                   {moneyPopup !== null && (
                     <span
                       data-testid="money-popup"
@@ -1037,16 +965,6 @@ export default function GrowPage() {
                   )}
                   {turnTransition && <TurnTransition label={TURN_TRANSITION_LABEL[turnTransition] ?? ''} />}
                   {workingOnJob && <TurnTransition label="아르바이트하는 중..." />}
-                  {bookstoreOuting && (
-                    <BookstoreOutingOverlay
-                      stage={bookstoreOuting}
-                      companionType={character.companionType}
-                      storeName={BOOKSTORE_NAME}
-                      onLeaveReview={handleBookstoreReviewSubmit}
-                      ageTier={ageTier}
-                      ageNumber={ageNumber}
-                    />
-                  )}
                   {hungryEventOpen && (
                     <HungryEventModal
                       companionType={character.companionType}

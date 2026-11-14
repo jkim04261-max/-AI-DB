@@ -44,6 +44,11 @@ export interface MarketItem {
 export const UNIVERSAL_MARKET_CATALOG: MarketItem[] = [
   { id: 'career-doctor-kit', category: 'career', name: '의사 가운 세트', price: 25000, icon: '👩‍⚕️' },
   { id: 'career-firefighter-kit', category: 'career', name: '소방관 장비 세트', price: 25000, icon: '👨‍🚒' },
+  // 지시서(서점 팝업 흐름 수정): 자동으로 뜨던 서점 외출 팝업을 없애고,
+  // "직업 관련 서적 구매"를 사용자가 필요할 때 직접 고르는 마켓 아이템
+  // 으로 옮겼다 — 다른 만능마켓 아이템들과 동일하게 순수 장식용(체험판
+  // 용돈만 차감, 실제 지식 게이지·DB에는 영향 없음)이다(사용자 승인).
+  { id: 'career-job-book', category: 'career', name: '직업 전문 서적', price: 18000, icon: '📖' },
   { id: 'education-workbook', category: 'education', name: 'AI 맞춤형 학습 교재', price: 15000, icon: '📚' },
   { id: 'education-language', category: 'education', name: '외국어 회화 강좌', price: 20000, icon: '🌐' },
   { id: 'agriculture-seed-set', category: 'agriculture', name: '텃밭 씨앗 세트', price: 10000, icon: '🌱' },
