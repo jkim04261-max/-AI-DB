@@ -27,6 +27,7 @@ export type PaymentReason =
   | 'card_match_reward'
   | 'job_quiz_reward'
   | 'errand'
+  | 'job_event'
 
 // 가상용돈을 차감한다(= 결제). 지갑이 아직 없거나(온보딩 전) 잔액이
 // 모자라면 아무것도 바꾸지 않고 false를 돌려준다 — useMockWallet.spend와

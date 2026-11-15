@@ -2,6 +2,7 @@ import { test, expect, type Page, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
 import { ageTierForLevel } from '../src/data/characterAge'
 import { HOUSEWORK_QUIZ_QUESTIONS } from '../src/data/householdQuizzes'
+import { ALL_PART_TIME_JOB_QUESTIONS } from '../src/data/partTimeJobQuizzes'
 
 // 지식 가르치기 + Gemini 검증 (PR #44) — all mocked, no real DB/Gemini call.
 // See e2e/README.md. ChatProvider also mounts at the app root and fetches
@@ -271,6 +272,24 @@ async function mockCharacterApi(
     }
     await route.fallback()
   })
+}
+
+// 지시서(10대 전용 알바 시스템): JobEventModal은 걷기 연출이 끝나면
+// 자동으로 질문 화면으로 넘어간다(타이머) — 화면에 보이는 질문
+// 텍스트로 ALL_PART_TIME_JOB_QUESTIONS에서 정답 보기를 찾아
+// allCorrect가 true면 3문제 모두, false면 첫 문제만 일부러 틀리게
+// 고른다("1문제라도 틀리면 0원" 규칙 검증용).
+async function answerJobEventQuiz(page: Page, allCorrect: boolean) {
+  await expect(page.getByTestId('job-event-question')).toBeVisible()
+  for (let i = 0; i < 3; i++) {
+    const questionText = (await page.getByTestId('job-event-question').textContent())?.trim()
+    const matched = ALL_PART_TIME_JOB_QUESTIONS.find((q) => q.question === questionText)
+    if (!matched) throw new Error(`Unknown job-event question: ${questionText}`)
+    const answerCorrectly = allCorrect || i !== 0
+    const indexToClick = answerCorrectly ? matched.correctIndex : (matched.correctIndex + 1) % matched.choices.length
+    await page.getByTestId('job-event-choice').nth(indexToClick).click()
+    await page.getByTestId('job-event-next-button').click()
+  }
 }
 
 const NURI_ACCOUNTANT = { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'accountant', created_at: new Date().toISOString() }
@@ -2664,8 +2683,21 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
     await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
   }
 
-  // ③단계: 직접입력 1문제(knowhow) — 카드 게임 클리어 직후, 패널을
-  // 다시 열지 않고 같은 패널 안에서 곧바로 다음 단계로 넘어간다.
+  // 지시서(10대 전용 알바 시스템): 카드 맞추기 클리어 직후, 기존
+  // "3회 저장" 로테이션과 무관한 전용 트리거(onTeenJobEventDue)로 알바
+  // 이벤트 ①회차가 곧바로 뜬다 — 걷기 연출(타이머)이 끝나면 설거지/
+  // 서빙/편의점 중 한 곳에 도착해 3문제를 낸다. 3문제 모두 맞혀
+  // 30,000원을 받는다.
+  await expect(page.getByTestId('job-event-modal')).toBeVisible()
+  await expect(page.getByTestId('job-event-shop-label')).toContainText(/설거지 알바|서빙 알바|편의점 알바/)
+  await answerJobEventQuiz(page, true)
+  await expect(page.getByTestId('job-event-success-message')).toBeVisible()
+  await page.getByTestId('job-event-return-button').click()
+  await expect(page.getByTestId('money-popup')).toContainText('30,000원')
+
+  // ③단계: 직접입력 1문제(knowhow) — 알바 이벤트가 끝난 뒤 패널을 다시
+  // 열어서 이어간다(식사/알바 이벤트와 같은 "패널 닫고 다시 열기" 패턴).
+  await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('teen-direct-step-label')).toContainText('③단계')
   await teachKnowhow(4)
 
@@ -2678,12 +2710,16 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await page.getByTestId('objective-quiz-choice-2-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
 
-  // 객관식 3문제 통과가 정확히 "3회 저장" 경계와 겹쳐 알바 이벤트가
-  // 곧바로 발동한다(토들러 진화 테스트와 같은 겹침 패턴).
-  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
-  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
+  // 객관식 3문제 통과가 정확히 기존 "3회 저장" 로테이션의 알바 자리와
+  // 겹친다 — teen은 이 자리에서 (toddler의 심부름처럼) 알바 이벤트
+  // ②회차를 받는다. 이번엔 일부러 1문제를 틀려 "1문제라도 틀리면 0원"
+  // 규칙을 검증한다.
+  await expect(page.getByTestId('job-event-modal')).toBeVisible()
+  await answerJobEventQuiz(page, false)
+  await expect(page.getByTestId('job-event-fail-message')).toBeVisible()
+  await page.getByTestId('job-event-return-button').click()
 
-  // ⑤단계: 개인 꿀팁/노하우 2문제(knowhow) — 알바 연출이 끝난 뒤 다시
+  // ⑤단계: 개인 꿀팁/노하우 2문제(knowhow) — 알바 이벤트가 끝난 뒤 다시
   // 열어서 이어간다. 그 첫 번째 저장이 또 한 번 "3회 저장" 경계와
   // 맞아떨어져 식사 이벤트가 한 번 더 끼어든다.
   await page.getByRole('button', { name: '가르치기' }).click()
