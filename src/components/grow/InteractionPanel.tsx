@@ -595,9 +595,16 @@ export default function InteractionPanel({
           차분한 톤으로 바꿨다 — 기능(disabled 조건, handleSelfStudy
           호출)은 그대로다. 지시서(10대 커리큘럼: 직업 카드 맞추기
           통합): teen의 고정 10단계 커리큘럼에는 이 카드(AI 추천 받기/
-          subjective)가 없으므로 teen에서도 숨긴다 — junior_20s 이후는
-          범위 밖이라 그대로 보인다. */}
-      {!isToddlerStagedFlow && !isTeenStagedFlow && (
+          subjective)가 없으므로 teen에서는 계속 숨긴다 — junior_20s
+          이후는 범위 밖이라 그대로 보인다.
+          지시서(8세 학습 창 AI 추천 버튼 복구): toddler(8~9살)는 1단계
+          (direct, 직접 입력 카드와 같은 자리)에서만 다시 보이게
+          한다 — 2단계(객관식)·3단계(주관식 전용 컴포넌트)는 그대로
+          둔다(showDirectInputCards와 같은 원리로, 거기에 teen 제외
+          조건만 더했다). handleSelfStudy가 이미 missionType을
+          'subjective'로 태깅하므로 1단계에서 저장해도 toddler의
+          subjective(1개) 미션 진행도가 그대로 올라간다. */}
+      {(!isToddlerStagedFlow || toddlerStep === 'direct') && !isTeenStagedFlow && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
           <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
           <div className="flex flex-wrap items-center gap-2">
