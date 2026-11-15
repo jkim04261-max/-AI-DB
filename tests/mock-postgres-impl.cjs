@@ -37,8 +37,15 @@ const state = {
   calls: [],
 }
 
-function seedUser(id, { email = `u${id}@test.com`, tokenVersion = 0, passwordHash = null } = {}) {
-  state.users.set(id, { id, email, password_hash: passwordHash, token_version: tokenVersion })
+function seedUser(id, { email = `u${id}@test.com`, tokenVersion = 0, passwordHash = null, aiRecommendTickets = 0, knowledgeValidationTickets = 0 } = {}) {
+  state.users.set(id, {
+    id,
+    email,
+    password_hash: passwordHash,
+    token_version: tokenVersion,
+    ai_recommend_tickets: aiRecommendTickets,
+    knowledge_validation_tickets: knowledgeValidationTickets,
+  })
   state.usersByEmail.set(email, id)
   if (id >= state.nextUserId) state.nextUserId = id + 1
 }
@@ -112,7 +119,7 @@ function sql(strings, ...values) {
   if (has(text, 'INSERT INTO users')) {
     const [email, passwordHash] = values
     const id = state.nextUserId++
-    const user = { id, email, password_hash: passwordHash, token_version: 0 }
+    const user = { id, email, password_hash: passwordHash, token_version: 0, ai_recommend_tickets: 0, knowledge_validation_tickets: 0 }
     state.users.set(id, user)
     state.usersByEmail.set(email, id)
     return Promise.resolve({ rows: [{ id, email, token_version: 0 }] })
@@ -658,6 +665,68 @@ function sql(strings, ...values) {
     const key = `${userId}|${state.fakeDateKST}`
     const row = state.studyUsage.get(key)
     return Promise.resolve({ rows: row ? [{ used_count: row.used_count }] : [] })
+  }
+
+  // --- api/_lib/ticketLimit.ts: consumeAiRecommendTicket (atomic
+  // conditional decrement — checked before the plain "+1 refund" and
+  // "+amount purchase" matchers below, since all three share the
+  // 'ai_recommend_tickets' substring but this one alone contains '- 1'). ---
+  if (has(text, 'ai_recommend_tickets = ai_recommend_tickets - 1')) {
+    const [userId] = values
+    const u = state.users.get(userId)
+    if (!u || u.ai_recommend_tickets <= 0) return Promise.resolve({ rows: [] })
+    u.ai_recommend_tickets -= 1
+    return Promise.resolve({ rows: [{ ai_recommend_tickets: u.ai_recommend_tickets }] })
+  }
+  // --- api/_lib/ticketLimit.ts: refundAiRecommendTicket ---
+  if (has(text, 'ai_recommend_tickets = ai_recommend_tickets + 1')) {
+    const [userId] = values
+    const u = state.users.get(userId)
+    if (u) u.ai_recommend_tickets += 1
+    return Promise.resolve({ rows: [] })
+  }
+  // --- api/_lib/ticketLimit.ts: addAiRecommendTickets (purchase) ---
+  if (has(text, 'SET ai_recommend_tickets = ai_recommend_tickets +', 'RETURNING')) {
+    const [amount, userId] = values
+    const u = state.users.get(userId)
+    if (u) u.ai_recommend_tickets += amount
+    return Promise.resolve({
+      rows: u ? [{ ai_recommend_tickets: u.ai_recommend_tickets, knowledge_validation_tickets: u.knowledge_validation_tickets }] : [],
+    })
+  }
+
+  // --- api/_lib/ticketLimit.ts: consumeKnowledgeValidationTicket ---
+  if (has(text, 'knowledge_validation_tickets = knowledge_validation_tickets - 1')) {
+    const [userId] = values
+    const u = state.users.get(userId)
+    if (!u || u.knowledge_validation_tickets <= 0) return Promise.resolve({ rows: [] })
+    u.knowledge_validation_tickets -= 1
+    return Promise.resolve({ rows: [{ knowledge_validation_tickets: u.knowledge_validation_tickets }] })
+  }
+  // --- api/_lib/ticketLimit.ts: refundKnowledgeValidationTicket ---
+  if (has(text, 'knowledge_validation_tickets = knowledge_validation_tickets + 1')) {
+    const [userId] = values
+    const u = state.users.get(userId)
+    if (u) u.knowledge_validation_tickets += 1
+    return Promise.resolve({ rows: [] })
+  }
+  // --- api/_lib/ticketLimit.ts: addKnowledgeValidationTickets (purchase) ---
+  if (has(text, 'SET knowledge_validation_tickets = knowledge_validation_tickets +', 'RETURNING')) {
+    const [amount, userId] = values
+    const u = state.users.get(userId)
+    if (u) u.knowledge_validation_tickets += amount
+    return Promise.resolve({
+      rows: u ? [{ ai_recommend_tickets: u.ai_recommend_tickets, knowledge_validation_tickets: u.knowledge_validation_tickets }] : [],
+    })
+  }
+
+  // --- api/_lib/ticketLimit.ts: peekTickets (소비 없는 조회) ---
+  if (has(text, 'SELECT ai_recommend_tickets, knowledge_validation_tickets FROM users')) {
+    const [userId] = values
+    const u = state.users.get(userId)
+    return Promise.resolve({
+      rows: u ? [{ ai_recommend_tickets: u.ai_recommend_tickets, knowledge_validation_tickets: u.knowledge_validation_tickets }] : [],
+    })
   }
 
   // --- api/character.ts: handleSaveKnowledge's idempotency lookup (checked

@@ -52,8 +52,21 @@ async function mockCharacterApi(
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
     // 않은 기본값(10/10, 3/3)을 돌려준다.
     onUsage?: (route: Route) => Promise<void>
+    // 지시서(만능마켓 구매 즉시 이용권 실시간 연동) 전용 — 지정하지
+    // 않으면 구매할 때마다 1장씩 쌓이는 기본 동작(실제 서버와 같은
+    // 모양)을 흉내낸다. 아래 두 모의 변수(aiRecommendTickets/
+    // knowledgeValidationTickets)로 호출마다 쌓인 값을 유지한다.
+    onPurchaseAiRecommendTicket?: (route: Route) => Promise<void>
+    onPurchaseKnowledgeValidationTicket?: (route: Route) => Promise<void>
   },
 ) {
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 기본 동작은 실제
+  // 서버처럼 "구매마다 +1, 응답에 두 수량 모두 포함"을 흉내낸다 —
+  // mockCharacterApi가 테스트당 새로 호출되므로 이 클로저도 테스트마다
+  // 새로 시작된다.
+  let aiRecommendTickets = 0
+  let knowledgeValidationTickets = 0
+
   await page.route('**/api/character**', async (route) => {
     const url = new URL(route.request().url())
     const action = url.searchParams.get('action')
@@ -157,6 +170,32 @@ async function mockCharacterApi(
     }
     if (method === 'POST' && action === 'study-generate' && options.onStudyGenerate) {
       await options.onStudyGenerate(route)
+      return
+    }
+    if (method === 'POST' && action === 'purchase-ai-recommend-ticket') {
+      if (options.onPurchaseAiRecommendTicket) {
+        await options.onPurchaseAiRecommendTicket(route)
+        return
+      }
+      aiRecommendTickets += 1
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ aiRecommendTickets, knowledgeValidationTickets }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'purchase-knowledge-validation-ticket') {
+      if (options.onPurchaseKnowledgeValidationTicket) {
+        await options.onPurchaseKnowledgeValidationTicket(route)
+        return
+      }
+      knowledgeValidationTickets += 1
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ aiRecommendTickets, knowledgeValidationTickets }),
+      })
       return
     }
     if (method === 'GET' && action === 'objective-quiz') {
@@ -626,7 +665,7 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
   await expect(page.getByTestId('knowledge-content-textarea')).toHaveValue('거래를 차변과 대변에 동시에 기록한다.')
   // The character "explains in its own words" what it studied.
   await expect(page.getByText(/오늘은 '복식부기'에 대해 혼자 공부해봤어요/)).toBeVisible()
-  await expect(page.getByText('오늘 남은 스스로 공부하기 횟수: 2/3')).toBeVisible()
+  await expect(page.getByText('남은 횟수: 무료 2회 / 구매 0회')).toBeVisible()
 
   const saveButton = page.getByRole('button', { name: '저장' })
   await expect(saveButton).toBeEnabled()
@@ -1695,15 +1734,15 @@ test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기
   await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
 })
 
-// 지시서(한도 소진 시 구매 유도 UI): "AI검증하기"(teachRemaining)가
-// 0이 되면 검증 영역 하단에 구매 버튼이 뜬다. 지갑이 있어야 실제
-// 구매를 확인할 수 있으므로(onboarding 전 캐릭터는 지갑이 없음), 새
-// 캐릭터를 만드는 흐름으로 진행한다 — toddler(8~9살) 1단계라
-// "직접 입력하기" 카드가 그대로 보인다. 구매 후에도 실제 서버 하루
-// 한도는 바뀌지 않는다는 이번 범위의 전제(사용자 승인: "UI만 먼저")를
-// 그대로 확인한다 — 구매 버튼과 충전권 카운터는 구매 직후에도 계속
-// 보여야 한다.
-test('when the daily 지식 검증(teach) limit is exhausted, AI검증하기 is disabled, and buying 지식 검증 충전권 deducts the wallet and shows a bonus counter (without lifting the real server limit yet)', async ({
+// 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI검증하기"
+// (teachRemaining)가 0이 되면 검증 영역 하단에 구매 버튼이 뜬다. 지갑이
+// 있어야 실제 구매를 확인할 수 있으므로(onboarding 전 캐릭터는 지갑이
+// 없음), 새 캐릭터를 만드는 흐름으로 진행한다 — toddler(8~9살) 1단계라
+// "직접 입력하기" 카드가 그대로 보인다. 구매하면 이제 실제로 하루
+// 한도를 한 번 더 늘려주므로(계정 단위 이용권, 서버 영속), 구매 직후
+// 버튼이 다시 활성화되고 실제로 클릭해 검증을 끝까지 통과할 수 있어야
+// 한다 — 그리고 그 이용권은 소비되어 0으로 돌아간다.
+test('when the daily 지식 검증(teach) limit is exhausted, buying 지식 검증 충전권 immediately re-enables AI검증하기 and the ticket is consumed on use', async ({
   page,
 }) => {
   await failUnmockedApiCalls(page)
@@ -1716,6 +1755,22 @@ test('when the daily 지식 검증(teach) limit is exhausted, AI검증하기 is 
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ teachRemaining: 0, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }),
+      })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-ticket-used',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 0,
+          dailyTeachLimit: 10,
+          // 무료 한도가 0이라 이용권 1장을 써서 통과했다 — 응답에 소비
+          // 후 남은 수량(0)이 함께 내려온다(지시서 1번: 실시간 동기화).
+          knowledgeValidationTickets: 0,
+        }),
       })
     },
     onCreate: async (route) => {
@@ -1775,10 +1830,22 @@ test('when the daily 지식 검증(teach) limit is exhausted, AI검증하기 is 
   await page.getByRole('button', { name: '닫기' }).click()
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  await expect(page.getByTestId('validation-bonus')).toContainText('구매한 지식 검증 충전권: 1개')
-  // 사용자 승인된 이번 범위: 구매해도 실제 서버 하루 한도는 그대로라,
-  // AI검증하기는 여전히 비활성화 상태고 구매 버튼도 계속 보여야 한다.
-  await expect(page.getByRole('button', { name: 'AI검증하기' })).toBeDisabled()
+  // 구매 직후, 새로고침·재조회 없이 바로 "남은 횟수: 무료 0회 / 구매
+  // 1회"로 보이고, 구매 유도 버튼도 사라진다.
+  await expect(page.getByTestId('validation-remaining')).toContainText('남은 횟수: 무료 0회 / 구매 1회')
+  await expect(page.getByTestId('buy-validation-uses-button')).toHaveCount(0)
+
+  // (버튼은 제목/내용을 채우기 전까지는 그 이유로 비활성 상태다 — 채우고
+  // 나면 이용권이 있으니 AI검증하기가 눌릴 수 있어야 한다.)
+  await page.getByPlaceholder('지식 제목').fill('아무 제목')
+  await page.getByTestId('knowledge-content-textarea').fill('아무 내용')
+  await expect(page.getByRole('button', { name: 'AI검증하기' })).toBeEnabled()
+  await page.getByRole('button', { name: 'AI검증하기' }).click()
+  await expect(page.getByText('적합', { exact: true })).toBeVisible()
+
+  // 이용권 1장을 써서 통과했으므로, 그 즉시 "구매 0회"로 줄어들고
+  // 버튼은 다시 막히며 구매 유도 버튼이 재등장한다.
+  await expect(page.getByTestId('validation-remaining')).toContainText('남은 횟수: 무료 0회 / 구매 0회')
   await expect(page.getByTestId('buy-validation-uses-button')).toBeVisible()
 })
 

@@ -445,6 +445,37 @@ async function run() {
   t.assert(over.statusCode === 429, '하루 11번째 검증 요청은 429로 차단된다(기본 하루 10회 제한)')
   t.assert(over.body.remaining === 0, '한도 초과 응답의 remaining은 0이다')
 
+  // --- 지시서(만능마켓 구매 즉시 이용권 실시간 연동): carol의 지식 검증
+  // (teachRemaining=0, 바로 위에서 이미 소진됨)으로 "지식 검증" 이용권을
+  // 확인한다. ---
+  {
+    const purchase = mockRes()
+    await characterHandler(carolReq({ method: 'POST', query: { action: 'purchase-knowledge-validation-ticket' }, body: {} }), purchase)
+    t.assert(purchase.statusCode === 200, '지식 검증 충전권 구매가 성공한다 (200)')
+    t.assert(purchase.body.knowledgeValidationTickets === 1, '구매 직후 응답에 최신 지식 검증 이용권 수량(1)이 즉시 포함된다')
+    t.assert(purchase.body.aiRecommendTickets === 0, 'carol은 AI 추천 충전권을 산 적이 없으니 0이다(다른 이용권과 섞이지 않는다)')
+
+    geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' } }
+    const usedTicket = mockRes()
+    await characterHandler(
+      carolReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '추가 지식', content: '추가 내용' } }),
+      usedTicket,
+    )
+    t.assert(usedTicket.statusCode === 200, '하루 검증 한도가 0이어도 구매한 지식 검증 이용권이 있으면 성공한다 (200)')
+    t.assert(usedTicket.body.knowledgeValidationTickets === 0, '이용권 1장을 써서 응답의 knowledgeValidationTickets가 0으로 줄어든다')
+
+    const blockedAgain = mockRes()
+    await characterHandler(
+      carolReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: '또 다른 지식', content: '또 다른 내용' } }),
+      blockedAgain,
+    )
+    t.assert(blockedAgain.statusCode === 429, '지식 검증 이용권까지 다 쓰면 다시 429로 차단된다')
+    t.assert(
+      blockedAgain.body.error === '오늘의 무료 검증 횟수를 모두 사용했고, 구매한 이용권도 없습니다. 만능마켓에서 구매 후 이용해 주세요.',
+      '지식 검증 이용권까지 없을 때의 안내 문구가 내려온다',
+    )
+  }
+
   // Failing on the chat daily question limit must not affect this counter,
   // and vice versa — they're separate tables (daily_question_usage vs
   // daily_teach_usage), never cross-checked by either code path. This is
@@ -641,6 +672,64 @@ async function run() {
     const second = mockRes()
     await characterHandler(erinReq({ method: 'GET', query: { action: 'usage' } }), second)
     t.assert(second.body.studyRemaining === 0 && second.body.teachRemaining === 8, 'usage 조회는 여러 번 호출해도 값을 소비하지 않는다(똑같은 값)')
+    t.assert(second.body.aiRecommendTickets === 0, 'usage 응답에 구매한 AI 추천 이용권 수량(0)도 함께 내려온다')
+    t.assert(second.body.knowledgeValidationTickets === 0, 'usage 응답에 구매한 지식 검증 이용권 수량(0)도 함께 내려온다')
+  }
+
+  // --- 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 하루 무료 한도가
+  // 바닥난 뒤에도, 구매한 이용권으로 한 번 더 쓸 수 있는지 — erin의
+  // study-generate(studyRemaining=0)로 "AI 추천" 이용권을 확인한다. ---
+  {
+    // 무료 한도도 없고 구매한 이용권도 없으면 여전히 차단된다.
+    const stillBlocked = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), stillBlocked)
+    t.assert(stillBlocked.statusCode === 429, '무료 한도와 이용권이 둘 다 없으면 여전히 429로 차단된다')
+    t.assert(
+      stillBlocked.body.error === '오늘의 무료 횟수를 모두 사용했고, 구매한 이용권도 없습니다. 만능마켓에서 구매 후 이용해 주세요.',
+      '이용권까지 없을 때의 안내 문구가 내려온다',
+    )
+    t.assert(stillBlocked.body.aiRecommendTickets === 0, '이용권 없이 차단된 응답의 aiRecommendTickets도 0이다')
+
+    // 만능마켓에서 "AI 추천 충전권"을 구매 — 서버가 클라이언트 입력과
+    // 무관하게 항상 1장만 지급한다.
+    const purchase = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'purchase-ai-recommend-ticket' }, body: {} }), purchase)
+    t.assert(purchase.statusCode === 200, 'AI 추천 충전권 구매가 성공한다 (200)')
+    t.assert(purchase.body.aiRecommendTickets === 1, '구매 직후 응답에 최신 AI 추천 이용권 수량(1)이 즉시 포함된다')
+    t.assert(purchase.body.knowledgeValidationTickets === 0, '구매 응답에는 지식 검증 이용권 수량도 같이 내려오지만, 이번엔 안 건드렸으니 0이다')
+
+    // 이제 무료 한도는 여전히 0이지만, 구매한 이용권 1장으로 한 번 더
+    // 생성에 성공해야 한다 — 그리고 그 1장이 소비돼 0으로 돌아와야 한다.
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '무대 매너', content: '관객과 눈을 맞추며 노래한다.', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+    }
+    const usedTicket = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), usedTicket)
+    t.assert(usedTicket.statusCode === 200, '무료 한도가 0이어도 구매한 이용권이 있으면 성공한다 (200)')
+    t.assert(usedTicket.body.remaining === 0, '이용권으로 처리된 요청의 remaining은 0이다(무료 한도와는 별개)')
+    t.assert(usedTicket.body.aiRecommendTickets === 0, '이용권 1장을 써서 응답의 aiRecommendTickets가 0으로 줄어든다')
+
+    // 이용권도 다 썼으니 다시 차단된다.
+    const blockedAgain = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), blockedAgain)
+    t.assert(blockedAgain.statusCode === 429, '이용권까지 다 쓰면 다시 429로 차단된다')
+
+    // --- 환불: Gemini 호출 자체가 실패하면 이번에 쓴 이용권을 돌려준다 ---
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'purchase-ai-recommend-ticket' }, body: {} }), mockRes())
+    geminiBehavior = { kind: 'network-error' }
+    const failedWithTicket = mockRes()
+    await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), failedWithTicket)
+    t.assert(failedWithTicket.statusCode >= 500, 'Gemini 호출이 실패하면 이용권을 쓴 시도도 오류로 끝난다')
+    const afterRefund = mockRes()
+    await characterHandler(erinReq({ method: 'GET', query: { action: 'usage' } }), afterRefund)
+    t.assert(afterRefund.body.aiRecommendTickets === 1, 'Gemini 호출 실패 시 소비했던 이용권이 환불되어 다시 1장이다')
+
+    // 다른 사용자(grace)는 erin이 산 이용권과 전혀 무관하다(계정 단위 격리).
+    const graceCookie2 = cookieHeaderFor(auth, 7, 0, 'grace@test.com')
+    const graceUsage = mockRes()
+    await characterHandler({ headers: { cookie: graceCookie2 }, query: { action: 'usage' }, method: 'GET' }, graceUsage)
+    t.assert(graceUsage.body.aiRecommendTickets === 0, 'erin이 구매한 AI 추천 이용권은 다른 계정(grace)에 전혀 영향을 주지 않는다')
   }
 
   // --- PR #52: 연령 제한 지식 흡수 — 아직 어린 캐릭터는 고난도 지식을 거절한다 ---
