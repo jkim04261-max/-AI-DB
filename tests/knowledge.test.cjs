@@ -1501,6 +1501,89 @@ async function run() {
     }
   }
 
+  // --- 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "스스로 공부
+  // 하기(예시 만들어주기)" 하루 무료 한도가 더 이상 모든 연령대에
+  // 똑같은 3이 아니라 연령대가 올라갈수록 2개씩 늘어난다. 위 패턴과
+  // 동일하게 먼저 순수 데이터 테이블을 직접 검증한 뒤, 실제 API
+  // 호출로 그 숫자가 진짜로 집행되는지도 확인한다. ---
+  {
+    const characterAge = bundle('api/_lib/characterAge.ts')
+    const EXPECTED_STUDY_LIMIT_BY_TIER = {
+      toddler: 3,
+      teen: 5,
+      junior_20s: 7,
+      career_30s: 9,
+      veteran_40s: 11,
+      master_50s: 13,
+    }
+    for (const [tier, expectedLimit] of Object.entries(EXPECTED_STUDY_LIMIT_BY_TIER)) {
+      t.assert(
+        characterAge.dailyStudyLimitForTier(tier) === expectedLimit,
+        `${tier} 단계의 하루 AI 추천 한도는 ${expectedLimit}회다`,
+      )
+    }
+    // master_50s 안에서도 60대 이상(ageNumber>=60)은 15회로 한 번 더
+    // 늘어난다 — 기존 포트레이트 이미지의 50/60대 분기와 같은 기준.
+    t.assert(characterAge.dailyStudyLimitForTier('master_50s', 59) === 13, '50대(59세)는 13회 그대로다')
+    t.assert(characterAge.dailyStudyLimitForTier('master_50s', 60) === 15, '60세부터는 15회로 늘어난다')
+  }
+
+  // --- teen(10대, level 5) 캐릭터로 실제 study-generate를 5번 성공
+  // 시키고 6번째는 막히는지 확인한다 — 데이터 테이블만이 아니라
+  // reserveStudy의 원자적 한도 검사 자체가 이 캐릭터의 연령대(5회)를
+  // 실제로 쓰는지 검증한다(기존 toddler=3회 테스트와 같은 패턴). ---
+  {
+    mock.seedUser(21, { email: 'teen-study-limit@test.com' })
+    const studyTeenCookie = cookieHeaderFor(auth, 21, 0, 'teen-study-limit@test.com')
+    const studyTeenReq = (overrides = {}) => ({ headers: { cookie: studyTeenCookie }, query: {}, ...overrides })
+    await characterHandler(studyTeenReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(studyTeenReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const studyTeenNuri = mock.state.characters.find((c) => c.user_id === 21 && c.companion_type === 'nuri')
+    studyTeenNuri.level = 5
+
+    geminiBehavior = {
+      kind: 'json',
+      result: { title: '복식부기', content: '거래를 차변과 대변에 나눠 기록한다.', status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+    }
+
+    for (let i = 1; i <= 5; i++) {
+      const res = mockRes()
+      await characterHandler(studyTeenReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), res)
+      t.assert(res.statusCode === 200, `teen 캐릭터는 ${i}번째 스스로 공부하기도 성공한다(하루 한도 5회)`)
+      t.assert(res.body.dailyStudyLimit === 5, 'teen 캐릭터의 dailyStudyLimit은 5로 응답에 포함된다')
+      t.assert(res.body.remaining === 5 - i, `${i}번째 호출 후 남은 횟수는 ${5 - i}다`)
+    }
+
+    const sixth = mockRes()
+    await characterHandler(studyTeenReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), sixth)
+    t.assert(sixth.statusCode === 429, '6번째 스스로 공부하기는 하루 한도(5회)를 넘겨 429로 막힌다(구매한 이용권도 없음)')
+    t.assert(sixth.body.dailyStudyLimit === 5, '한도 초과 응답에도 teen 캐릭터의 dailyStudyLimit(5)이 그대로 내려온다')
+
+    const usageRes = mockRes()
+    await characterHandler(studyTeenReq({ method: 'GET', query: { action: 'usage', companionType: 'nuri' } }), usageRes)
+    t.assert(usageRes.body.studyLimit === 5, 'usage 조회도 companionType을 넘기면 teen 캐릭터의 한도(5)를 보여준다')
+    t.assert(usageRes.body.studyRemaining === 0, 'teen 캐릭터는 하루 한도를 다 써서 studyRemaining이 0이다')
+  }
+
+  // --- master_50s(50~60대) 캐릭터 중에서도 60세 이상은 usage 조회에서
+  // 실제로 15회를 보여주는지 확인한다 — ageNumberForTier로 "지금 레벨이
+  // 몇 살인지"까지 구해 dailyStudyLimitForTier에 넘기는 전체 경로를
+  // GET action=usage?companionType= 하나로 검증한다(13 vs 15를 둘 다
+  // Gemini 호출 없이 가볍게 확인). ---
+  {
+    mock.seedUser(22, { email: 'master60-study-limit@test.com' })
+    const master60Cookie = cookieHeaderFor(auth, 22, 0, 'master60-study-limit@test.com')
+    const master60Req = (overrides = {}) => ({ headers: { cookie: master60Cookie }, query: {}, ...overrides })
+    await characterHandler(master60Req({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
+    await characterHandler(master60Req({ method: 'PATCH', body: { companionType: 'duri', profession: 'accountant' } }), mockRes())
+    const master60Duri = mock.state.characters.find((c) => c.user_id === 22 && c.companion_type === 'duri')
+    master60Duri.level = 65 // ageNumberForTier('master_50s', 65) === 65(>=60)
+
+    const usageRes = mockRes()
+    await characterHandler(master60Req({ method: 'GET', query: { action: 'usage', companionType: 'duri' } }), usageRes)
+    t.assert(usageRes.body.studyLimit === 15, '60대 이상 master_50s 캐릭터는 usage 조회에서 하루 한도 15회를 보여준다')
+  }
+
   return t.summary()
 }
 

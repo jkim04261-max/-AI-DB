@@ -54,6 +54,60 @@ function ageTierIndex(tier: AgeTier): number {
   return AGE_TIER_ORDER.indexOf(tier)
 }
 
+// PR #52 후속 5차 요청 3번(src/data/characterAge.ts)의 백엔드 사본 —
+// 머리 위 나이 뱃지와 똑같은 "티어 안에서 레벨을 나이로 선형 매핑"
+// 계산이, 아래 dailyStudyLimitForTier의 50~60대 분기에도 필요해서
+// 가져왔다. 두 파일의 레벨/나이 구간은 반드시 같아야 한다.
+const AGE_NUMBER_LEVEL_RANGE: Record<AgeTier, [number, number]> = {
+  toddler: [1, 4],
+  teen: [5, 9],
+  junior_20s: [10, 19],
+  career_30s: [20, 29],
+  veteran_40s: [30, 39],
+  master_50s: [40, 65],
+}
+const AGE_NUMBER_AGE_RANGE: Record<AgeTier, [number, number]> = {
+  toddler: [8, 9],
+  teen: [10, 19],
+  junior_20s: [20, 29],
+  career_30s: [30, 39],
+  veteran_40s: [40, 49],
+  master_50s: [50, 65],
+}
+
+export function ageNumberForTier(tier: AgeTier, level: number): number {
+  const [lvLo, lvHi] = AGE_NUMBER_LEVEL_RANGE[tier]
+  const [ageLo, ageHi] = AGE_NUMBER_AGE_RANGE[tier]
+  const clampedLevel = Math.min(Math.max(level, lvLo), lvHi)
+  const ratio = lvHi === lvLo ? 0 : (clampedLevel - lvLo) / (lvHi - lvLo)
+  return Math.round(ageLo + ratio * (ageHi - ageLo))
+}
+
+// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "스스로 공부하기
+// (예시 만들어주기)" 하루 무료 횟수가 연령대가 올라갈수록 2개씩
+// 늘어난다 — 8~9살(toddler)=3(기존 유지), 10대=5, 20대=7, 30대=9,
+// 40대=11, 50대=13, 60대 이상(master_50s 안에서 ageNumber>=60)=15.
+// 60대 분기는 기존 포트레이트 이미지의 50/60대 분기(characterWalking.ts/
+// characterEating.ts의 MASTER_TIER_60S_*)와 똑같은 ageNumber 기준을
+// 재사용한다 — 이 하나의 상수 외에는 하루 한도 회계(studyLimit.ts의
+// 원자적 reserve/refund) 자체를 전혀 바꾸지 않는다.
+export const DAILY_STUDY_LIMIT_BY_TIER: Record<AgeTier, number> = {
+  toddler: 3,
+  teen: 5,
+  junior_20s: 7,
+  career_30s: 9,
+  veteran_40s: 11,
+  master_50s: 13,
+}
+const MASTER_TIER_60S_DAILY_STUDY_LIMIT = 15
+
+export function dailyStudyLimitForTier(tier: AgeTier, ageNumber?: number): number {
+  if (tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60) {
+    return MASTER_TIER_60S_DAILY_STUDY_LIMIT
+  }
+  return DAILY_STUDY_LIMIT_BY_TIER[tier]
+}
+
 // 다음 연령대 — 마지막 단계(master_50s)면 null.
 export function nextAgeTier(tier: AgeTier): AgeTier | null {
   const idx = ageTierIndex(tier)

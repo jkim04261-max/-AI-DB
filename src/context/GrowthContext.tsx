@@ -246,7 +246,9 @@ interface GrowthContextValue {
     verificationToken: string
     characterReply: string
   }>
-  getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
+  getUsage: (
+    companionType?: CompanionType,
+  ) => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
     answers: { questionId: string; answerIndex: number }[],
@@ -807,9 +809,15 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // PR #49: 메인 화면 상단 "행동력" HUD용 — 오늘 남은 가르치기/스스로
   // 공부하기 횟수를 소비 없이 조회만 한다(서버의 peekTeachUsage/
   // peekStudyUsage, 순수 SELECT). 캐릭터별이 아니라 계정 전체 하루
-  // 한도라 companionType 파라미터가 없다.
-  const getUsage = useCallback(async () => {
-    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'usage' })}`)
+  // 한도지만, 지시서(연령대별 AI 추천 생성 개수 점진적 증가)에 따라
+  // studyLimit 자체는 "지금 보고 있는 캐릭터"의 연령대를 따른다 —
+  // companionType을 선택적으로 넘기면 서버가 그 캐릭터의 연령대로
+  // studyLimit을 계산해 돌려주고, 안 넘기면(로그인 직후처럼 아직
+  // 캐릭터를 모를 때) 기존과 같은 toddler 기준값(3)을 받는다.
+  const getUsage = useCallback(async (companionType?: CompanionType) => {
+    const params = new URLSearchParams({ action: 'usage' })
+    if (companionType) params.set('companionType', companionType)
+    const res = await fetch(`/api/character?${params}`)
     const data = (await res.json().catch(() => ({}))) as {
       teachRemaining?: number
       teachLimit?: number

@@ -104,6 +104,33 @@ export function ageTierIndex(tier: AgeTier): number {
   return AGE_TIER_ORDER.indexOf(tier)
 }
 
+// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "스스로 공부하기
+// (예시 만들어주기)" 하루 무료 횟수가 연령대가 올라갈수록 2개씩
+// 늘어난다 — 8~9살(toddler)=3(기존 유지), 10대=5, 20대=7, 30대=9,
+// 40대=11, 50대=13, 60대 이상(master_50s 안에서 ageNumber>=60)=15.
+// 60대 분기는 기존 포트레이트 이미지의 50/60대 분기(characterWalking.ts/
+// characterEating.ts의 MASTER_TIER_60S_*)와 똑같은 ageNumber 기준을
+// 재사용한다. api/_lib/characterAge.ts의 같은 이름의 백엔드 사본과
+// 반드시 같은 값이어야 한다 — 실제 하루 한도 소비/환불은 서버가
+// 하므로, 여기서는 화면에 "이번 단계에서는 N개" 안내 문구를 보여줄
+// 때만 쓴다.
+export const DAILY_STUDY_LIMIT_BY_TIER: Record<AgeTier, number> = {
+  toddler: 3,
+  teen: 5,
+  junior_20s: 7,
+  career_30s: 9,
+  veteran_40s: 11,
+  master_50s: 13,
+}
+const MASTER_TIER_60S_DAILY_STUDY_LIMIT = 15
+
+export function dailyStudyLimitForTier(tier: AgeTier, ageNumber?: number): number {
+  if (tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60) {
+    return MASTER_TIER_60S_DAILY_STUDY_LIMIT
+  }
+  return DAILY_STUDY_LIMIT_BY_TIER[tier]
+}
+
 // 지금 연령대가 특정 연령대"이상"인지 — 지식 난이도 게이팅에 쓴다.
 export function meetsAgeTier(current: AgeTier, required: AgeTier): boolean {
   return ageTierIndex(current) >= ageTierIndex(required)

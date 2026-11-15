@@ -1892,6 +1892,29 @@ test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기
   await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
 })
 
+// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "✨ AI 추천 받기"
+// 카드의 안내 문구("OO 단계에서는 하루 N개의 예시를 제공해요")가
+// 연령대마다 다른 숫자를 보여주고, 그 숫자가 연령대가 올라갈수록
+// 정확히 2개씩 늘어나는지 확인한다 — 이 문구는 순수 프런트 계산값
+// (character.ageTier/level, data/characterAge.ts의
+// dailyStudyLimitForTier)이라 usage API 응답과는 무관하다.
+test('the AI 추천 받기 card shows a dynamic "하루 N개" count that increases by 2 per age tier (20대=7, 30대=9)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_ACCOUNTANT, level: 10 }] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('20대 단계에서는 하루 7개의 예시를 제공해요.')
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  await mockCharacterApi(page, { characters: [{ ...NURI_ACCOUNTANT, level: 20 }] })
+  await page.reload()
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('30대 단계에서는 하루 9개의 예시를 제공해요.')
+})
+
 // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI검증하기"
 // (teachRemaining)가 0이 되면 검증 영역 하단에 구매 버튼이 뜬다. 지갑이
 // 있어야 실제 구매를 확인할 수 있으므로(onboarding 전 캐릭터는 지갑이

@@ -426,11 +426,14 @@ export default function GrowPage() {
   }, [character?.companionType, character?.profession, getExam, listMessages, listKnowledge])
 
   // 행동력(usage)은 캐릭터별이 아니라 계정 전체 하루 한도라, 로그인
-  // 시점에 한 번 불러온다.
+  // 시점에 한 번 불러온다. 지시서(연령대별 AI 추천 생성 개수 점진적
+  // 증가): studyLimit만은 지금 선택된 캐릭터의 연령대를 따르므로,
+  // 알고 있으면 그 캐릭터의 companionType을 함께 넘긴다(아직 캐릭터가
+  // 없으면 undefined — 서버가 toddler 기준값으로 대체한다).
   useEffect(() => {
     if (!user) return
     let cancelled = false
-    getUsage()
+    getUsage(character?.companionType)
       .then((u) => {
         if (!cancelled) setUsage(u)
       })
@@ -444,7 +447,7 @@ export default function GrowPage() {
   // 행동력을 썼을 수 있으니) 행동력을 다시 불러와 화면에 반영한다.
   useEffect(() => {
     if (prevOpenSheetRef.current && !openSheet) {
-      getUsage()
+      getUsage(character?.companionType)
         .then(setUsage)
         .catch(() => {})
     }
