@@ -129,10 +129,15 @@ async function run() {
     t.assert(res.body.total === 1, "'수정 필요' 시도는 학습 기록(character_knowledge_entries)에는 여전히 추가되지 않는다 — 적합 판정 1건만 존재")
   }
 
-  // --- 스스로 공부하기: 캐릭터 발화 1줄만 기록된다(사용자가 입력한 게 없으므로) ---
+  // --- 스스로 공부하기: 후보가 여럿이어도 캐릭터 발화 1줄만 기록된다
+  // (사용자가 입력한 게 없고, 아직 아무것도 고르지 않았으므로) ---
   geminiBehavior = {
     kind: 'json',
-    result: { title: '발생주의', content: '수익과 비용은 발생 시점에 인식한다.', status: 'appropriate', explanation: '정확해요', relevance: '관련 있음', issues: '', suggestion: '' },
+    result: [
+      { title: '발생주의', content: '수익과 비용은 발생 시점에 인식한다.', status: 'appropriate', explanation: '정확해요', relevance: '관련 있음', issues: '', suggestion: '' },
+      { title: '현금주의', content: '현금이 오가는 시점에 인식한다.', status: 'appropriate', explanation: '정확해요', relevance: '관련 있음', issues: '', suggestion: '' },
+      { title: '복식부기 원리', content: '모든 거래를 차변·대변에 동시에 기록한다.', status: 'appropriate', explanation: '정확해요', relevance: '관련 있음', issues: '', suggestion: '' },
+    ],
   }
   const studyRes = mockRes()
   await characterHandler(authedReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), studyRes)

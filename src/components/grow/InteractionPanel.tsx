@@ -6,9 +6,10 @@ import {
   type KnowledgeVerification,
   type KnowledgeEntry,
   type CharacterMessage,
+  type StudyDraft,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
-import { AGE_TIER_LABEL, ageNumberForTier, dailyStudyLimitForTier, type AgeTier } from '../../data/characterAge'
+import { AGE_TIER_LABEL, ageNumberForTier, selfStudyDraftCountForTier, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
@@ -106,12 +107,12 @@ export default function InteractionPanel({
   // 연령대(6미션 게이트로 고정됐을 수 있음)를 그대로 쓴다.
   const characterAgeTier = character.ageTier
   const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
-  // 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "✨ 예시
-  // 만들어주기"의 하루 무료 횟수 안내 문구("이번 단계에서는 N개의
-  // 예시를 제공해요")에 쓸 값 — 실제 집행(소비/환불/남은 횟수)은 항상
-  // 서버 응답(studyRemaining/studyLimit)이 기준이고, 이 값은 그 숫자가
-  // 왜 그런지 보여주는 안내용이다.
-  const studyLimitForThisCharacter = dailyStudyLimitForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
+  // 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ 예시
+  // 만들어주기"를 한 번 누를 때 한꺼번에 생성되는 예시 개수 안내
+  // 문구("한 번에 N개의 예시를 만들어줘요")에 쓸 값 — 실제 생성은
+  // 항상 서버 응답(studyGenerate의 exampleCount/drafts)이 기준이고,
+  // 이 값은 버튼을 누르기 전에 미리 몇 개가 나올지 보여주는 안내용이다.
+  const exampleCountForThisCharacter = selfStudyDraftCountForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
   // PR #65: profession==='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가
   // 실제로 입력한 직업명을 보여준다 — 기존 49개 직업은 1바이트도 안 바뀜.
   const professionLabel = profession === 'custom' ? character.customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]
@@ -285,6 +286,14 @@ export default function InteractionPanel({
   // 기존 검증·저장·스탯/경제 로직에는 전혀 관여하지 않는다.
   const [nodCount, setNodCount] = useState(0)
   const [celebrateCount, setCelebrateCount] = useState(0)
+  // 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ 예시
+  // 만들어주기" 한 번 클릭이 돌려준, 아직 아무것도 고르지 않은 후보
+  // 목록 — null이면 고를 후보가 없는 상태(평소, 또는 이미 하나를
+  // 고른 뒤)다. 사용자가 이 중 하나를 고르면 handlePickStudyDraft가
+  // title/content/verification 등 기존 단일 흐름 state로 그대로
+  // 옮겨 담고 이 배열을 비운다 — 아래 verification/저장 UI는 전혀
+  // 바뀌지 않는다.
+  const [studyDrafts, setStudyDrafts] = useState<StudyDraft[] | null>(null)
 
   const isStale = verification !== null && (verifiedSnapshot?.title !== title || verifiedSnapshot?.content !== content)
 
@@ -323,28 +332,42 @@ export default function InteractionPanel({
   const handleSelfStudy = async () => {
     setBusyAction('study')
     setActionError(null)
+    setStudyDrafts(null)
     flashPose('studying')
     try {
       const result = await studyGenerate(character.companionType)
-      setTitle(result.knowledge.title)
-      setContent(result.knowledge.content)
-      setMissionType('subjective')
-      setVerification(result.verification)
-      setVerifiedSnapshot({ title: result.knowledge.title, content: result.knowledge.content })
-      setVerificationToken(result.verificationToken)
+      setStudyDrafts(result.drafts)
       setStudyRemaining({ remaining: result.remaining, limit: result.dailyStudyLimit })
-      setAgeBlocked(result.ageBlocked)
-      setRequiredAgeTier(result.requiredAgeTier)
       pushLine('character', result.characterReply)
-      const succeeded = result.verification.status === 'appropriate' && !result.ageBlocked
-      flashPose(succeeded ? 'happy' : 'sad', 2500)
-      if (succeeded) setCelebrateCount((c) => c + 1)
+      flashPose('happy', 2500)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '스스로 공부하는 중 오류가 발생했어요.')
       flashPose('sad', 2500)
     } finally {
       setBusyAction(null)
     }
+  }
+
+  // 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): studyDrafts
+  // 중 하나를 고르면 — 그동안 study-generate가 "자동으로" 채워주던
+  // title/content/verification/verificationToken/ageBlocked을 그대로
+  // 옮겨 담는다. 이 아래부터는 기존 handleSave/저장 버튼/검증 결과
+  // 표시가 전혀 바뀌지 않고 그대로 이어진다 — 나이 게이트로 막혔거나
+  // 적합 판정을 받은 순간의 반응(별 파티클/표정)도 "생성 시점"이 아니라
+  // 이 "고른 시점"으로 옮겨왔을 뿐, 조건은 동일하다.
+  const handlePickStudyDraft = (draft: StudyDraft) => {
+    setTitle(draft.knowledge.title)
+    setContent(draft.knowledge.content)
+    setMissionType('subjective')
+    setVerification(draft.verification)
+    setVerifiedSnapshot({ title: draft.knowledge.title, content: draft.knowledge.content })
+    setVerificationToken(draft.verificationToken)
+    setAgeBlocked(draft.ageBlocked)
+    setRequiredAgeTier(draft.requiredAgeTier)
+    setStudyDrafts(null)
+    const succeeded = draft.verification.status === 'appropriate' && !draft.ageBlocked
+    flashPose(succeeded ? 'happy' : 'sad', 2500)
+    if (succeeded) setCelebrateCount((c) => c + 1)
   }
 
   const handleApplySuggestion = () => {
@@ -624,7 +647,7 @@ export default function InteractionPanel({
             <button
               type="button"
               onClick={() => void handleSelfStudy()}
-              disabled={busy || recommendExhausted}
+              disabled={busy || recommendExhausted || studyDrafts !== null}
               className="flex w-full items-center justify-center gap-2 self-start rounded-xl border border-indigo-500/40 bg-indigo-600/30 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-600/50 disabled:opacity-50 sm:w-auto"
             >
               {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
@@ -644,15 +667,15 @@ export default function InteractionPanel({
             )}
           </div>
           <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
-            AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
-            내용을 생성해요(하루 최대 {studyLimitForThisCharacter}회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
+            AI가 예시를 만들어줘요 — 마음에 드는 걸 고르고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운
+            학습 내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
           </p>
-          {/* 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "이번
-              단계에서는 N개의 예시를 제공해요" 안내 문구 — 연령대가
-              올라갈수록 하루 무료 횟수가 늘어난다는 사실 자체를, 숫자
-              계산 없이도 바로 알 수 있게 보여준다. */}
+          {/* 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "한
+              번에 N개의 예시를 만들어줘요" 안내 문구 — 연령대가 올라갈
+              수록 클릭 1번이 만들어내는 예시 개수가 늘어난다는 사실을,
+              숫자 계산 없이도 바로 알 수 있게 보여준다. */}
           <p data-testid="ai-recommend-tier-count" className="text-xs font-bold text-purple-300/80 sm:text-sm">
-            {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 하루 {studyLimitForThisCharacter}개의 예시를 제공해요.
+            {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 한 번에 예시 {exampleCountForThisCharacter}개를 만들어줘요.
           </p>
           {/* 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "남은 횟수:
               무료 N회 / 구매 N회" 한 줄로 하루 무료 횟수와 구매한
@@ -663,6 +686,41 @@ export default function InteractionPanel({
             <p data-testid="ai-recommend-remaining" className="text-sm font-semibold text-purple-200/70 sm:text-base">
               남은 횟수: 무료 {studyRemaining.remaining}회 / 구매 {tickets.aiRecommendTickets}회
             </p>
+          )}
+          {/* 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): 방금
+              받은 후보 중 하나를 고를 때까지 보여주는 카드 목록 — 고른
+              순간 studyDrafts가 비워지고, 그 아래 기존 title/content/
+              verification/저장 흐름이 그대로 이어받는다. */}
+          {studyDrafts && (
+            <div
+              data-testid="study-draft-picker"
+              className="flex flex-col gap-2 rounded-xl border border-purple-400/30 bg-slate-900/40 p-3"
+            >
+              <p className="text-sm font-bold text-purple-200">예시 {studyDrafts.length}개 중 하나를 골라보세요</p>
+              {studyDrafts.map((draft, index) => (
+                <button
+                  key={`${draft.knowledge.title}-${index}`}
+                  type="button"
+                  data-testid="study-draft-card"
+                  onClick={() => handlePickStudyDraft(draft)}
+                  disabled={draft.ageBlocked}
+                  className="flex flex-col items-start gap-1 rounded-lg border border-purple-400/20 bg-purple-400/5 px-3 py-2 text-left transition-colors hover:border-purple-300/50 hover:bg-purple-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span data-testid="study-draft-title" className="text-sm font-bold text-slate-100">
+                    {draft.knowledge.title}
+                  </span>
+                  <span data-testid="study-draft-status" className="text-xs font-semibold text-purple-300/80">
+                    {draft.ageBlocked
+                      ? '아직은 너무 어려워요'
+                      : draft.verification.status === 'appropriate'
+                        ? '✅ 적합'
+                        : draft.verification.status === 'needs_revision'
+                          ? '✏️ 수정 필요'
+                          : '❓ 확인 불가'}
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}

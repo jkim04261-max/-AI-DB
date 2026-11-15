@@ -104,17 +104,21 @@ export function ageTierIndex(tier: AgeTier): number {
   return AGE_TIER_ORDER.indexOf(tier)
 }
 
-// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "스스로 공부하기
-// (예시 만들어주기)" 하루 무료 횟수가 연령대가 올라갈수록 2개씩
-// 늘어난다 — 8~9살(toddler)=3(기존 유지), 10대=5, 20대=7, 30대=9,
-// 40대=11, 50대=13, 60대 이상(master_50s 안에서 ageNumber>=60)=15.
-// 60대 분기는 기존 포트레이트 이미지의 50/60대 분기(characterWalking.ts/
-// characterEating.ts의 MASTER_TIER_60S_*)와 똑같은 ageNumber 기준을
-// 재사용한다. api/_lib/characterAge.ts의 같은 이름의 백엔드 사본과
-// 반드시 같은 값이어야 한다 — 실제 하루 한도 소비/환불은 서버가
-// 하므로, 여기서는 화면에 "이번 단계에서는 N개" 안내 문구를 보여줄
-// 때만 쓴다.
-export const DAILY_STUDY_LIMIT_BY_TIER: Record<AgeTier, number> = {
+// 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ 예시
+// 만들어주기" 버튼을 한 번 누를 때 한꺼번에 생성되는 예시 개수가
+// 연령대가 올라갈수록 2개씩 늘어난다 — 8~9살(toddler)=3(기존 유지),
+// 10대=5, 20대=7, 30대=9, 40대=11, 50대=13, 60대 이상(master_50s
+// 안에서 ageNumber>=60)=15. 60대 분기는 기존 포트레이트 이미지의
+// 50/60대 분기(characterWalking.ts/characterEating.ts의
+// MASTER_TIER_60S_*)와 똑같은 ageNumber 기준을 재사용한다.
+// api/_lib/characterAge.ts의 같은 이름의 백엔드 사본과 반드시 같은
+// 값이어야 한다 — 실제 생성은 서버(Gemini 배치 호출)가 하므로,
+// 여기서는 화면에 "한 번에 N개" 안내 문구를 보여줄 때만 쓴다.
+//
+// (이전 버전에서는 이 표가 "하루 무료 클릭 횟수"를 뜻했으나, 지시서가
+// 그 횟수(하루 3회)는 그대로 두고 "클릭 1번당 생성 개수"를 늘리라는
+// 뜻이었다고 정정했다.)
+export const SELF_STUDY_DRAFT_COUNT_BY_TIER: Record<AgeTier, number> = {
   toddler: 3,
   teen: 5,
   junior_20s: 7,
@@ -122,13 +126,13 @@ export const DAILY_STUDY_LIMIT_BY_TIER: Record<AgeTier, number> = {
   veteran_40s: 11,
   master_50s: 13,
 }
-const MASTER_TIER_60S_DAILY_STUDY_LIMIT = 15
+const MASTER_TIER_60S_SELF_STUDY_DRAFT_COUNT = 15
 
-export function dailyStudyLimitForTier(tier: AgeTier, ageNumber?: number): number {
+export function selfStudyDraftCountForTier(tier: AgeTier, ageNumber?: number): number {
   if (tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60) {
-    return MASTER_TIER_60S_DAILY_STUDY_LIMIT
+    return MASTER_TIER_60S_SELF_STUDY_DRAFT_COUNT
   }
-  return DAILY_STUDY_LIMIT_BY_TIER[tier]
+  return SELF_STUDY_DRAFT_COUNT_BY_TIER[tier]
 }
 
 // 지금 연령대가 특정 연령대"이상"인지 — 지식 난이도 게이팅에 쓴다.
