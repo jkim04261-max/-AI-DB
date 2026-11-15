@@ -249,7 +249,22 @@ export default function GameStage({
         </div>
 
         {bubbleText && (
-          <div className="absolute top-[4%] z-20 -translate-x-1/2" style={{ left: ILLUSTRATED_PORTRAIT_ANCHOR }}>
+          // 버그 수정(나이 배지 위 '요' 글자 깜빡임): 이 래퍼가 width:auto인
+          // absolute 요소인데 자식(SpeechBubble)도 absolute라 정상 흐름
+          // 콘텐츠가 전혀 없어 너비가 0으로 축소됐다 — 그 안에서
+          // SpeechBubble의 max-w-[85%]가 0%(=0px)로 계산되어 말풍선 전체가
+          // 세로로 한 글자씩 쌓이는 폭 16px짜리 기둥이 됐고, 그 기둥의
+          // 꼬리 글자("요")만 프레임 안쪽(나이 배지 옆)에 삐져나와 보인
+          // 것이었다. inset-x-0로 프레임 전체 너비를 그대로 차지하게 하면
+          // max-w-[85%]가 그 실제 너비 기준으로 정상 계산되어 원래
+          // 의도대로 1~2줄로 줄바꿈된다.
+          // 너비를 고쳐도, 기존 top-[4%]는 SpeechBubble 자신의
+          // -translate-y-full과 합쳐져 말풍선이 프레임 맨 위 경계
+          // (overflow-hidden) 밖으로 일부 잘리고, 동시에 그 자리에 이미
+          // 있는 나이/직업군 배지 줄(top-[1%])과도 겹친다 — top을 20%로
+          // 내려 말풍선 전체가 프레임 안에, 배지 아래쪽에 완전히
+          // 들어오게 했다.
+          <div className="absolute inset-x-0 top-[20%] z-20">
             <SpeechBubble text={bubbleText} />
           </div>
         )}
