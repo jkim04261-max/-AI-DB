@@ -735,6 +735,42 @@ test('picking a profession for the first time shows a toddler-voiced line about 
   await expect(page.getByTestId('speech-bubble')).toContainText('나 회계사 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!')
 })
 
+// 버그 수정(나이 배지 위 '요' 글자 깜빡임): 말풍선을 감싸는 래퍼가
+// width:auto인 absolute 요소인데 자식(SpeechBubble)도 absolute라 정상
+// 흐름 콘텐츠가 전혀 없어 너비가 0으로 축소됐었다 — 그 안에서
+// SpeechBubble의 max-w-[85%]가 0px로 계산되어 말풍선 전체가 세로로
+// 한 글자씩 쌓이는 폭 16px짜리 기둥이 됐고, 그 기둥의 꼬리 글자
+// ("요")만 나이 배지 옆에 삐져나와 보였다(GameStage.tsx 참고). 이
+// 테스트는 말풍선이 (1) 한 글자 너비로 붕괴되지 않고 실제로 넓게
+// 줄바꿈되는지, (2) '8세' 나이 배지와 세로로 겹치지 않는지 직접
+// 측정해 이 회귀를 다시 잡아낸다.
+test('the opening speech bubble renders at full width and never overlaps the age-number badge', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, profession: null }] })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '직업 선택' }).click()
+  const dialog = page.getByRole('dialog', { name: '직업 선택' })
+  await dialog.getByRole('button', { name: '회계사' }).click()
+
+  const bubble = page.getByTestId('speech-bubble')
+  await expect(bubble).toContainText('나 회계사 되고 싶어요! 저에게 지식, 훈련, 강의를 가르쳐주세요!')
+
+  const bubbleBox = await bubble.boundingBox()
+  const badgeBox = await page.getByTestId('age-number-badge').boundingBox()
+  if (!bubbleBox || !badgeBox) throw new Error('말풍선 또는 나이 배지의 위치를 읽지 못했다')
+
+  // 한 글자씩 쌓이는 기둥으로 붕괴되면 너비가 20px 안팎으로 떨어진다 —
+  // 정상적으로 줄바꿈된 말풍선이라면 훨씬 넓어야 한다.
+  expect(bubbleBox.width).toBeGreaterThan(100)
+  // 세로로 겹치는 구간이 전혀 없어야 한다(말풍선의 아래쪽 끝이 배지의
+  // 위쪽 끝보다 위에 있거나, 반대로 완전히 아래에 있어야 함).
+  const verticallyOverlaps = bubbleBox.y < badgeBox.y + badgeBox.height && bubbleBox.y + bubbleBox.height > badgeBox.y
+  expect(verticallyOverlaps).toBe(false)
+})
+
 // PR #49에서 만든 50개 직업 카테고리형 팝업 셀렉터. PR #51(직업 선택
 // 제한 해제)부터는 50개 전부 클릭해서 고를 수 있다 — 실제 시험 문제가
 // 없는 48개는 막혀있지 않고, 대신 "문제 풀기 준비 중" 안내만 붙는다.
