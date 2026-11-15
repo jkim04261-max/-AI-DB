@@ -909,6 +909,107 @@ test('filling the form from a topic suggestion chip at the toddler direct-input 
   expect(saveRequestBody?.missionType).toBe('knowhow')
 })
 
+// 지시서(8세 학습 창 AI 추천 버튼 복구): 학습 플로우 전면 개편(PR #108)
+// 때 toddler(8~9살) 전체 구간에서 "AI 추천 받기" 카드가 사라졌는데,
+// 실제로는 1단계(direct, 직접 입력 카드와 같은 자리)에서는 다시
+// 보여야 한다는 요청 — 선택예시하기(3개) 버튼을 되돌린 것과 같은
+// 범위(showDirectInputCards)다. 버튼 클릭 → 저장까지 missionType이
+// 여전히 subjective로 태깅되어 toddler의 subjective(1개) 미션
+// 진행도가 올라가는지 함께 확인한다.
+test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-input stage, and saving it still tags missionType=subjective', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveRequestBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-toddler-study',
+          characterReply: '오늘은 혼자 공부해봤어요!',
+          remaining: 2,
+          dailyStudyLimit: 3,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveRequestBody = route.request().postDataJSON()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: 1, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'ai_generated', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByText('✨ AI 추천 받기', { exact: true })).toBeVisible()
+  const studyButton = page.getByRole('button', { name: '✨ 예시 만들어주기' })
+  await expect(studyButton).toBeVisible()
+  await studyButton.click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect.poll(() => saveRequestBody).toBeTruthy()
+  expect(saveRequestBody?.missionType).toBe('subjective')
+})
+
+// 위 복구가 toddler의 2단계(객관식)·3단계(전용 주관식 컴포넌트)까지
+// 건드리지 않았는지 — 지시서의 "다른 학습 단계를 건드리지 마세요"
+// 금지 사항을 직접 확인한다.
+test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관식)/3단계(주관식) steps', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onMissions: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
+              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+            },
+            confirmedTotal: 3,
+            requiredTotal: 6,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  // knowhow가 이미 3/3이라 2단계(객관식)로 들어와 있다 — 여기서는
+  // AI 추천 받기 카드가 보이면 안 된다.
+  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+  await expect(page.getByText('✨ AI 추천 받기', { exact: true })).toHaveCount(0)
+})
+
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합) 이후 teen도 고정 순서
 // 흐름을 써서 "AI 추천 받기" 카드가 없으므로, junior_20s(20대)로
 // 올려서 확인한다.
