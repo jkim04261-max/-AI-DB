@@ -98,6 +98,7 @@ async function mockCharacterApi(
               objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
               subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
               knowhow: { type: 'knowhow', confirmed: 0, required: 2, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
             },
             confirmedTotal: 0,
             requiredTotal: 6,
