@@ -18,7 +18,7 @@ import {
   type KnowledgeVerificationResult,
 } from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
-import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
+import { reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
 import {
   peekTickets,
   consumeAiRecommendTicket,
@@ -52,7 +52,10 @@ import {
   AGE_TIER_LABEL,
   MISSION_TYPES,
   type MissionType,
+  type AgeTier,
   ageBlockedMessage,
+  ageNumberForTier,
+  dailyStudyLimitForTier,
 } from './_lib/characterAge'
 import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
@@ -252,7 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
     if (action === 'usage') {
-      await handleGetUsage(res, session.sub)
+      await handleGetUsage(req, res, session.sub)
       return
     }
     if (action === 'missions') {
@@ -379,14 +382,39 @@ async function handleGetMissions(req: VercelRequest, res: VercelResponse, userId
 // 공부하기 횟수를 소비 없이 조회만 한다(peekTeachUsage/peekStudyUsage는
 // 순수 SELECT). 새 테이블/스키마 변경 없음, 기존 reserveTeach/
 // reserveStudy 로직은 전혀 건드리지 않았다.
-async function handleGetUsage(res: VercelResponse, userId: number) {
+//
+// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): studyLimit이 더 이상
+// 모든 연령대에 똑같은 3이 아니라 "지금 보고 있는 캐릭터"의 연령대를
+// 따른다. 이 HUD는 원래 캐릭터와 무관한 계정 전체 조회라(GrowPage.tsx
+// 주석 참고) 어느 캐릭터 기준인지 알 방법이 없었는데, 프런트가 지금
+// 선택된 캐릭터의 companionType을 선택적으로 넘겨주면 그 캐릭터의
+// 연령대를 쓰고, 안 넘기면(예: 로그인 직후, 아직 캐릭터를 안 골랐을
+// 때) 기존과 똑같이 toddler 기준값(3)으로 대체한다 — companionType을
+// 안 보내는 기존 호출부는 동작이 전혀 바뀌지 않는다.
+async function handleGetUsage(req: VercelRequest, res: VercelResponse, userId: number) {
   try {
-    const [teach, study, tickets] = await Promise.all([peekTeachUsage(userId), peekStudyUsage(userId), peekTickets(userId)])
+    const companionType = req.query.companionType
+    let ageTier: AgeTier = 'toddler'
+    let ageNumber: number | undefined
+    if (typeof companionType === 'string' && COMPANION_TYPES.has(companionType)) {
+      await ensureCharacterTables()
+      const character = await findOwnCharacter(userId, companionType)
+      if (character) {
+        ageTier = effectiveAgeTier(character)
+        ageNumber = ageNumberForTier(ageTier, character.level)
+      }
+    }
+
+    const [teach, study, tickets] = await Promise.all([
+      peekTeachUsage(userId),
+      peekStudyUsage(userId, ageTier, ageNumber),
+      peekTickets(userId),
+    ])
     res.status(200).json({
       teachRemaining: teach.remaining,
       teachLimit: DAILY_TEACH_LIMIT,
       studyRemaining: study.remaining,
-      studyLimit: DAILY_STUDY_LIMIT,
+      studyLimit: study.limit,
       aiRecommendTickets: tickets.aiRecommendTickets,
       knowledgeValidationTickets: tickets.knowledgeValidationTickets,
     })
@@ -754,13 +782,24 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       return
     }
 
+    // 지시서(연령대별 AI 추천 생성 개수 점진적 증가): 오늘 몇 번까지
+    // 쓸 수 있는지가 더 이상 모든 연령대에 똑같은 3이 아니라 이
+    // 캐릭터의 지금 연령대를 따른다(characterAge.ts의
+    // dailyStudyLimitForTier) — reserveStudy 호출 전에 미리 계산해야
+    // 한도 검사 자체에 쓸 수 있다. 아래 "같은 연령 게이트"(842줄
+    // 부근)에서 다시 쓰던 effectiveAgeTier(character) 계산을 여기로
+    // 끌어올려 재사용한다(같은 계산 두 번 반복 안 함).
+    const characterAgeTier = effectiveAgeTier(character)
+    const characterAgeNumber = ageNumberForTier(characterAgeTier, character.level)
+    const dailyStudyLimit = dailyStudyLimitForTier(characterAgeTier, characterAgeNumber)
+
     // 지식 검증(하루 10회)과 완전히 별도인 한도 — 이 호출이 Gemini에
     // 닿기 전에 먼저 예약하므로, 한도 초과 요청은 비용이 전혀 들지
     // 않는다.
     // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): handleVerifyKnowledge와
     // 같은 원칙 — 하루 무료 한도를 다 썼으면 구매한 "AI 추천 충전권"이
     // 있는지 확인하고, 있으면 1장 깎아 이번 한 번은 그대로 진행한다.
-    const reserved = await reserveStudy(userId)
+    const reserved = await reserveStudy(userId, characterAgeTier, characterAgeNumber)
     let usedTicket = false
     let ticketsRemaining = 0
     if (!reserved.ok) {
@@ -769,7 +808,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
         res.status(429).json({
           error: NO_AI_RECOMMEND_TICKETS_MESSAGE,
           remaining: 0,
-          dailyStudyLimit: DAILY_STUDY_LIMIT,
+          dailyStudyLimit,
           aiRecommendTickets: 0,
         })
         return
@@ -794,7 +833,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       study = await generateSelfStudy(
         resolveProfessionLabel(character),
         knownTitlesResult.rows.map((r) => r.title),
-        effectiveAgeTier(character),
+        characterAgeTier,
       )
     } catch (err) {
       // 생성 자체가 실패했거나(설정/타임아웃/네트워크/비2xx) 응답을 해석할
@@ -810,7 +849,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
     // PR #52: 스스로 공부하기도 같은 연령 게이트를 적용한다 — 캐릭터가
     // 아직 어린데 스스로 전문 자격증 수준 지식을 만들어 저장하는 건
     // 일관성이 없다고 판단했다(handleVerifyKnowledge와 동일한 로직).
-    const characterAgeTier = effectiveAgeTier(character)
+    // characterAgeTier는 이미 위에서(한도 계산 때) 구해뒀다.
     const ageBlocked = study.status === 'appropriate' && !meetsAgeTier(characterAgeTier, study.requiredAgeTier)
 
     const verificationToken = signKnowledgeVerification({
@@ -865,7 +904,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       characterReply,
       remaining: usedTicket ? 0 : reserved.remaining,
       aiRecommendTickets: usedTicket ? ticketsRemaining : undefined,
-      dailyStudyLimit: DAILY_STUDY_LIMIT,
+      dailyStudyLimit,
       ageBlocked,
       characterAgeTier,
       requiredAgeTier: study.requiredAgeTier,

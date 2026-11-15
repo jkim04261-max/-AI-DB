@@ -8,7 +8,7 @@ import {
   type CharacterMessage,
 } from '../../context/GrowthContext'
 import { PROFESSION_LABEL, type ProfessionId } from '../../data/characterProfessions'
-import { AGE_TIER_LABEL, type AgeTier } from '../../data/characterAge'
+import { AGE_TIER_LABEL, ageNumberForTier, dailyStudyLimitForTier, type AgeTier } from '../../data/characterAge'
 import { AGE_APPROPRIATE_TOPICS } from '../../data/ageAppropriateTopics'
 import { MISSION_TYPES, MISSION_TYPE_LABEL, MISSION_TYPE_ICON, type MissionType, type MissionProgress } from '../../data/characterMissions'
 import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON, type KnowledgeCategory } from '../../data/knowledgeCategories'
@@ -106,6 +106,12 @@ export default function InteractionPanel({
   // 연령대(6미션 게이트로 고정됐을 수 있음)를 그대로 쓴다.
   const characterAgeTier = character.ageTier
   const topicSuggestions = AGE_APPROPRIATE_TOPICS[characterAgeTier]
+  // 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "✨ 예시
+  // 만들어주기"의 하루 무료 횟수 안내 문구("이번 단계에서는 N개의
+  // 예시를 제공해요")에 쓸 값 — 실제 집행(소비/환불/남은 횟수)은 항상
+  // 서버 응답(studyRemaining/studyLimit)이 기준이고, 이 값은 그 숫자가
+  // 왜 그런지 보여주는 안내용이다.
+  const studyLimitForThisCharacter = dailyStudyLimitForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
   // PR #65: profession==='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가
   // 실제로 입력한 직업명을 보여준다 — 기존 49개 직업은 1바이트도 안 바뀜.
   const professionLabel = profession === 'custom' ? character.customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]
@@ -639,7 +645,14 @@ export default function InteractionPanel({
           </div>
           <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
             AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
-            내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
+            내용을 생성해요(하루 최대 {studyLimitForThisCharacter}회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
+          </p>
+          {/* 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "이번
+              단계에서는 N개의 예시를 제공해요" 안내 문구 — 연령대가
+              올라갈수록 하루 무료 횟수가 늘어난다는 사실 자체를, 숫자
+              계산 없이도 바로 알 수 있게 보여준다. */}
+          <p data-testid="ai-recommend-tier-count" className="text-xs font-bold text-purple-300/80 sm:text-sm">
+            {AGE_TIER_LABEL[characterAgeTier]} 단계에서는 하루 {studyLimitForThisCharacter}개의 예시를 제공해요.
           </p>
           {/* 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "남은 횟수:
               무료 N회 / 구매 N회" 한 줄로 하루 무료 횟수와 구매한
