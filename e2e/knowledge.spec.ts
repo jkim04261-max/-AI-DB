@@ -49,6 +49,11 @@ async function mockCharacterApi(
     // 위한 기본값).
     onObjectiveQuiz?: (route: Route) => Promise<void>
     onObjectiveQuizSubmit?: (route: Route) => Promise<void>
+    // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합) ②단계 "직업 카드
+    // 맞추기" 전용 — 지정하지 않으면 항상 적합 판정 + 고정 토큰을
+    // 내려주는 기본값을 쓴다(이 단계 자체를 다루지 않는 테스트를 위한
+    // 기본값, 다른 onXxx들과 같은 패턴).
+    onCompleteCardGame?: (route: Route) => Promise<void>
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
     // 않은 기본값(10/10, 3/3)을 돌려준다.
     onUsage?: (route: Route) => Promise<void>
@@ -170,6 +175,23 @@ async function mockCharacterApi(
     }
     if (method === 'POST' && action === 'study-generate' && options.onStudyGenerate) {
       await options.onStudyGenerate(route)
+      return
+    }
+    if (method === 'POST' && action === 'complete-card-game') {
+      if (options.onCompleteCardGame) {
+        await options.onCompleteCardGame(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '직업 카드 맞추기 완료', content: '직업 카드와 도구 카드를 모두 맞춰서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '모든 카드를 맞췄어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'mock-card-game-token',
+          characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+        }),
+      })
       return
     }
     if (method === 'POST' && action === 'purchase-ai-recommend-ticket') {
@@ -1009,7 +1031,7 @@ test('the mission progress summary shows the current tier\'s 6-slot progress, by
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  await expect(page.getByTestId('mission-progress-summary')).toContainText('8~9살 성장 미션 3/6')
+  await expect(page.getByTestId('mission-progress-summary')).toContainText('8~9살 성장 미션 (3/6)')
   await expect(page.getByTestId('mission-progress-objective')).toContainText('2/2')
   await expect(page.getByTestId('mission-progress-subjective')).toContainText('0/2')
   await expect(page.getByTestId('mission-progress-knowhow')).toContainText('1/2')
@@ -2213,6 +2235,232 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
   // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고
   // 10대로 넘어간다").
   await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
+})
+
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)은 더 이상
+// 균등분배가 아니라 "①직접입력 3 → ②직업 카드 맞추기 1 → ③직접입력 1
+// → ④객관식 3 → ⑤개인 꿀팁/노하우 2"(합계 10)의 고정 순서다. 사이드바에
+// 있던 '직업 카드 맞추기' 게임이 ②단계 안에 그대로 임베드되어, 6쌍을
+// 전부 맞추면 자동으로 complete-card-game → save-knowledge(card_game)로
+// 이어지는지, 10문제를 모두 마치면 junior_20s(20대)로 진화하고 다음
+// 미션 총량이 20으로 갱신되는지까지 끝까지 확인한다.
+test('completing the teen (10대) 10-step curriculum — direct×3 → embedded card-match game → direct×1 → objective quiz×3 → direct×2 — evolves to junior_20s (20대) and refreshes the next mission total to 20', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  const REQUIRED = { objective: 3, subjective: 0, knowhow: 6, card_game: 1 }
+  const confirmed = { objective: 0, subjective: 0, knowhow: 0, card_game: 0 }
+  const missionProgressFor = () => ({
+    ageTier: 'teen',
+    ageTierLabel: '10대',
+    byType: {
+      objective: { type: 'objective', confirmed: confirmed.objective, required: REQUIRED.objective, complete: confirmed.objective >= REQUIRED.objective },
+      subjective: { type: 'subjective', confirmed: confirmed.subjective, required: REQUIRED.subjective, complete: confirmed.subjective >= REQUIRED.subjective },
+      knowhow: { type: 'knowhow', confirmed: confirmed.knowhow, required: REQUIRED.knowhow, complete: confirmed.knowhow >= REQUIRED.knowhow },
+      card_game: { type: 'card_game', confirmed: confirmed.card_game, required: REQUIRED.card_game, complete: confirmed.card_game >= REQUIRED.card_game },
+    },
+    confirmedTotal: confirmed.objective + confirmed.subjective + confirmed.knowhow + confirmed.card_game,
+    requiredTotal: 10,
+    allConfirmed:
+      confirmed.objective >= REQUIRED.objective &&
+      confirmed.subjective >= REQUIRED.subjective &&
+      confirmed.knowhow >= REQUIRED.knowhow &&
+      confirmed.card_game >= REQUIRED.card_game,
+    nextAgeTier: 'junior_20s',
+    nextAgeTierLabel: '20대',
+  })
+  // junior_20s(20대)는 이번 지시서 범위 밖이라 기존 균등분배 그대로다
+  // (characterAge.ts의 splitMissionsRequiredByType(20) = 7+7+6+0).
+  const junior20sMissionProgress = {
+    ageTier: 'junior_20s',
+    ageTierLabel: '20대',
+    byType: {
+      objective: { type: 'objective', confirmed: 0, required: 7, complete: false },
+      subjective: { type: 'subjective', confirmed: 0, required: 7, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 0, required: 6, complete: false },
+      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+    },
+    confirmedTotal: 0,
+    requiredTotal: 20,
+    allConfirmed: false,
+    nextAgeTier: 'career_30s',
+    nextAgeTierLabel: '30대',
+  }
+
+  await mockCharacterApi(page, {
+    characters: [{ ...NURI_ACCOUNTANT, age_tier: 'teen', level: 5 }],
+    onMissions: async (route) => {
+      const progress = missionProgressFor()
+      const body = progress.allConfirmed ? junior20sMissionProgress : progress
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ missionProgress: body }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-teen-evolve',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      const body = route.request().postDataJSON() as { missionType: keyof typeof confirmed }
+      confirmed[body.missionType] = Math.min(confirmed[body.missionType] + 1, REQUIRED[body.missionType])
+      const progress = missionProgressFor()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: progress.allConfirmed ? '청년 단계로 성장했어요!' : '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 5,
+          leveledUp: false,
+          missionProgress: progress,
+          ...(progress.allConfirmed ? { evolved: true, newAgeTier: 'junior_20s', newAgeTierLabel: '20대' } : {}),
+        }),
+      })
+    },
+    onCompleteCardGame: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '직업 카드 맞추기 완료', content: '직업 카드와 도구 카드를 모두 맞춰서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '모든 카드를 맞췄어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'tok-teen-card-game',
+          characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+        }),
+      })
+    },
+    onObjectiveQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: [
+            { id: 'teen-obj-1', text: '객관식 문제 1', choices: ['정답', '오답'] },
+            { id: 'teen-obj-2', text: '객관식 문제 2', choices: ['정답', '오답'] },
+            { id: 'teen-obj-3', text: '객관식 문제 3', choices: ['정답', '오답'] },
+          ],
+          quizToken: 'tok-teen-objective-quiz',
+        }),
+      })
+    },
+    onObjectiveQuizSubmit: async (route) => {
+      saveCount += 3
+      confirmed.objective = Math.min(confirmed.objective + 3, REQUIRED.objective)
+      const progress = missionProgressFor()
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          allCorrect: true,
+          results: [
+            { questionId: 'teen-obj-1', correct: true },
+            { questionId: 'teen-obj-2', correct: true },
+            { questionId: 'teen-obj-3', correct: true },
+          ],
+          message: '정답이에요! 3문제 모두 맞혔어요.',
+          expAwarded: 30,
+          exp: saveCount * 10,
+          level: 5,
+          leveledUp: false,
+          missionProgress: progress,
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  const teachKnowhow = async (n: number) => {
+    await page.getByPlaceholder('지식 제목').fill(`노하우 ${n}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${n}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+  }
+
+  // ①단계: 직접입력 3문제(knowhow) — 3번째 저장 직후 식사 이벤트로
+  // 패널이 자동으로 닫힌다(기존 패턴과 동일).
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('teen-direct-step-label')).toContainText('①단계')
+  await teachKnowhow(1)
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachKnowhow(2)
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await teachKnowhow(3)
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+
+  // ②단계: 직업 카드 맞추기 — 사이드바 게임이 그대로 학습 모달 안에
+  // 임베드되어 있다. 6쌍을 모두 맞추면 onCleared가 자동으로
+  // complete-card-game → save-knowledge(card_game)까지 이어간다.
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('teen-card-game-step')).toBeVisible()
+  for (let i = 0; i < 6; i++) {
+    const backs = page.getByTestId('card-match-back')
+    const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
+    const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
+    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+  }
+
+  // ③단계: 직접입력 1문제(knowhow) — 카드 게임 클리어 직후, 패널을
+  // 다시 열지 않고 같은 패널 안에서 곧바로 다음 단계로 넘어간다.
+  await expect(page.getByTestId('teen-direct-step-label')).toContainText('③단계')
+  await teachKnowhow(4)
+
+  // ④단계: 객관식 3문제(세트 전부 정답 필요) — toddler(2문제)와 달리
+  // teen은 3문제를 받는다.
+  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+  await expect(page.getByTestId('objective-quiz-question-2')).toBeVisible()
+  await page.getByTestId('objective-quiz-choice-0-0').click()
+  await page.getByTestId('objective-quiz-choice-1-0').click()
+  await page.getByTestId('objective-quiz-choice-2-0').click()
+  await page.getByTestId('objective-quiz-submit-button').click()
+
+  // 객관식 3문제 통과가 정확히 "3회 저장" 경계와 겹쳐 알바 이벤트가
+  // 곧바로 발동한다(토들러 진화 테스트와 같은 겹침 패턴).
+  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
+  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
+
+  // ⑤단계: 개인 꿀팁/노하우 2문제(knowhow) — 알바 연출이 끝난 뒤 다시
+  // 열어서 이어간다. 그 첫 번째 저장이 또 한 번 "3회 저장" 경계와
+  // 맞아떨어져 식사 이벤트가 한 번 더 끼어든다.
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('teen-direct-step-label')).toContainText('⑤단계')
+  await teachKnowhow(5)
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('teen-direct-step-label')).toContainText('⑤단계')
+  await teachKnowhow(6)
+
+  // 10문제를 모두 마치면 20대(junior_20s)로 진화한다.
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청년')
+
+  // teen의 10단계가 끝났다고 이전 진행도가 새 단계에 남아있지 않고,
+  // 다음 미션 총량이 junior_20s 기준(20)으로 정확히 갱신된다 — 진화
+  // 자체는 패널을 닫지 않으므로(식사/알바 이벤트와 다름), 일단 닫고
+  // 다시 열어야 missions GET이 새 연령대로 다시 불려 갱신된다.
+  await page.getByRole('button', { name: '닫기' }).click()
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('mission-progress-summary')).toContainText('20대 성장 미션 (0/20)')
 })
 
 // 지시서(학습 플로우 전면 개편) 요청 3번: 2단계 객관식 2문제는 "세트"

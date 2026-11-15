@@ -12,8 +12,13 @@ import type { AgeTier } from './characterAge'
 // MISSIONS_REQUIRED_PER_TYPE_BY_TIER 참고) — 화면은 서버가 그때그때
 // 내려주는 MissionProgress.byType[type].required/requiredTotal을
 // 그대로 표시할 뿐이라, 이 파일 자체는 바꿀 로직이 없다.
-export type MissionType = 'objective' | 'subjective' | 'knowhow'
-export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow']
+//
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 'card_game'(직업 카드
+// 맞추기)을 네 번째 유형으로 추가했다 — api/_lib/characterAge.ts와
+// 반드시 같은 값이어야 한다. 10대에서만 1개 요구되고, 다른 연령대는
+// 전부 0이다(해당 파일의 override 참고).
+export type MissionType = 'objective' | 'subjective' | 'knowhow' | 'card_game'
+export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow', 'card_game']
 
 // PR #62의 3개 입력 카드(① 선택지 고르기 ② AI 추천 받기 ③ 직접
 // 입력하기)가 그대로 이 3개 미션 유형에 대응한다 — 새 입력 방식을
@@ -22,11 +27,13 @@ export const MISSION_TYPE_LABEL: Record<MissionType, string> = {
   objective: '선택지에서 고르기',
   subjective: 'AI 추천 받기',
   knowhow: '직접 입력하기',
+  card_game: '직업 카드 맞추기',
 }
 export const MISSION_TYPE_ICON: Record<MissionType, string> = {
   objective: '🎯',
   subjective: '✨',
   knowhow: '✏️',
+  card_game: '🃏',
 }
 
 export interface MissionTypeProgress {

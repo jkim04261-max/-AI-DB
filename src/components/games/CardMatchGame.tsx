@@ -83,7 +83,15 @@ const CardArt = memo(function CardArt({ src, label }: { src: string; label: stri
   )
 })
 
-export default function CardMatchGame() {
+export default function CardMatchGame({
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 모달 안에 끼워 넣을
+  // 호출부(InteractionPanel)가 "한 세트 클리어"를 알아야 하므로 선택적
+  // 콜백을 추가했다 — /card-match 독립 페이지는 이 prop을 안 넘기므로
+  // 기존 동작(지갑·보상·"다시 하기" 전부)은 전혀 바뀌지 않는다.
+  onCleared,
+}: {
+  onCleared?: () => void
+} = {}) {
   const wallet = useMockWallet()
   const [cards, setCards] = useState<GameCard[]>(() => buildDeck(JOB_CARDS))
   const [flipped, setFlipped] = useState<number[]>([])
@@ -106,6 +114,7 @@ export default function CardMatchGame() {
       reward(wallet, CLEAR_BONUS_WON, 'card_match_reward')
       setLastMessage(`🎉 전체 클리어! 보너스 +${CLEAR_BONUS_WON.toLocaleString('ko-KR')}원`)
       speak('모두 맞혔어요! 축하해요!')
+      onCleared?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchedCount, totalPairs, cleared])

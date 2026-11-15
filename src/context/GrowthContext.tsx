@@ -222,20 +222,30 @@ interface GrowthContextValue {
     answerIndex: number,
   ) => Promise<{ correct: boolean; explanation: string; message: string } & GrowthUpdate & EvolutionUpdate>
   getExam: (companionType: CompanionType) => Promise<{ questions: ExamQuestion[]; alreadyPassed: boolean }>
-  // 지시서(학습 플로우 전면 개편) 2단계 — 2문제를 "세트"로 받아서, 세트
+  // 지시서(학습 플로우 전면 개편) 2단계 — 문제들을 "세트"로 받아서, 세트
   // 전체를 한 번에 제출하고 채점한다(ExamQuestion들의 submitExam처럼
-  // 전체 제출이지만, 시험 전체가 아니라 딱 2문제뿐이라는 점이 다르다).
-  getObjectiveQuiz: (
-    companionType: CompanionType,
-  ) => Promise<{ questions: [ObjectiveQuizQuestion, ObjectiveQuizQuestion]; quizToken: string }>
+  // 전체 제출이지만, 시험 전체가 아니라 작은 세트라는 점이 다르다).
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 세트 크기가 toddler는
+  // 2문제, teen은 3문제로 서버가 연령대에 따라 다르게 내려주므로, 고정
+  // 2-튜플이 아니라 배열로 받는다.
+  getObjectiveQuiz: (companionType: CompanionType) => Promise<{ questions: ObjectiveQuizQuestion[]; quizToken: string }>
   submitObjectiveQuiz: (
     companionType: CompanionType,
     quizToken: string,
-    answers: [number, number],
+    answers: number[],
   ) => Promise<
     { allCorrect: boolean; results: { questionId: string; correct: boolean }[]; message: string; missionProgress: MissionProgress | null } & GrowthUpdate &
       EvolutionUpdate
   >
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): CardMatchGame(직업 카드
+  // 맞추기)을 클리어했을 때 호출한다 — verifyKnowledge/studyGenerate와
+  // 같은 모양(verification + verificationToken)으로 돌아오고, 호출부는
+  // 그 토큰을 그대로 saveKnowledge(missionType='card_game')에 넘긴다.
+  completeCardGame: (companionType: CompanionType) => Promise<{
+    knowledge: { title: string; content: string }
+    verificationToken: string
+    characterReply: string
+  }>
   getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
@@ -491,6 +501,34 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
   }, [updateFocusPercent, applyTicketUpdate])
 
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): CardMatchGame을
+  // 클리어했을 때 호출한다 — Gemini도 하루 한도도 전혀 쓰지 않는
+  // 결정적인 "완료 확인" 액션이라 verifyKnowledge/studyGenerate와 달리
+  // remaining/dailyLimit 같은 필드가 없다. 돌아온 verificationToken을
+  // 그대로 saveKnowledge(missionType='card_game')에 넘겨야 실제로
+  // 저장(=XP·진화 판정)된다.
+  const completeCardGame = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch('/api/character?action=complete-card-game', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companionType }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      knowledge?: { title: string; content: string }
+      verificationToken?: string
+      characterReply?: string
+      error?: string
+    }
+    if (!res.ok || !data.knowledge || !data.verificationToken || !data.characterReply) {
+      throw new Error(data.error || '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.')
+    }
+    return {
+      knowledge: data.knowledge,
+      verificationToken: data.verificationToken,
+      characterReply: data.characterReply,
+    }
+  }, [])
+
   const saveKnowledge = useCallback(
     async (
       companionType: CompanionType,
@@ -668,17 +706,17 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       quizToken?: string
       error?: string
     }
-    if (!res.ok || !data.questions || data.questions.length !== 2 || !data.quizToken) {
+    if (!res.ok || !data.questions || data.questions.length === 0 || !data.quizToken) {
       throw new Error(data.error || '문제를 불러오는 중 오류가 발생했어요.')
     }
     return {
-      questions: [data.questions[0], data.questions[1]] as [ObjectiveQuizQuestion, ObjectiveQuizQuestion],
+      questions: data.questions,
       quizToken: data.quizToken,
     }
   }, [])
 
   const submitObjectiveQuiz = useCallback(
-    async (companionType: CompanionType, quizToken: string, answers: [number, number]) => {
+    async (companionType: CompanionType, quizToken: string, answers: number[]) => {
       const requestId = crypto.randomUUID()
       const res = await fetch('/api/character?action=objective-quiz-submit', {
         method: 'POST',
@@ -855,6 +893,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         setProfession,
         verifyKnowledge,
         studyGenerate,
+        completeCardGame,
         saveKnowledge,
         getMissionProgress,
         listKnowledge,

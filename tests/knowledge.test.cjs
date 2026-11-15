@@ -971,27 +971,54 @@ async function run() {
       teenMissions.body.missionProgress.ageTier === 'teen' &&
         teenMissions.body.missionProgress.confirmedTotal === 0 &&
         teenMissions.body.missionProgress.requiredTotal === 10,
-      '지시서(연령대별 스테이지 볼륨업): teen 단계는 toddler 때 저장을 재사용하지 않고 0/10(유형별 4+3+3)부터 새로 시작한다',
+      '지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen 단계는 toddler 때 저장을 재사용하지 않고 0/10(유형별 객관식3+카드맞추기1+직접입력6)부터 새로 시작한다',
     )
 
-    // 5) 지시서(연령대별 스테이지 볼륨업): teen은 toddler(6개)보다 많은
-    // 10개(객관식4+주관식3+노하우3)를 요구한다. 지금까지 이미 지식
-    // 검증을 10회 썼으므로(하루 10회 제한), 이 구간에서 더 쓰기 전에
-    // 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게 아니라
-    // 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의 1회성
-    // 제한 소비 테스트(요청 2번)와는 무관하다.
+    // 5) 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen은 고정
+    // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
+    // ④객관식=objective3, subjective는 0)으로 10개를 요구한다. 지금까지
+    // 이미 지식 검증을 10회 썼으므로(하루 10회 제한), 이 구간에서 더
+    // 쓰기 전에 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
+    // 아니라 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의
+    // 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
     mock.setFakeDate('2026-03-02')
+    const teachCardGame = async (n) => {
+      const completeRes = mockRes()
+      await characterHandler(
+        kateReq({ method: 'POST', query: { action: 'complete-card-game' }, body: { companionType: 'nuri' } }),
+        completeRes,
+      )
+      const saveRes = mockRes()
+      await characterHandler(
+        kateReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: completeRes.body.knowledge.title,
+            originalContent: completeRes.body.knowledge.content,
+            finalContent: completeRes.body.knowledge.content,
+            verificationToken: completeRes.body.verificationToken,
+            requestId: `req-evolve-card-${n}`,
+            missionType: 'card_game',
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+
     await teachOnce(11, 'objective')
     await teachOnce(12, 'objective')
     await teachOnce(13, 'objective')
-    await teachOnce(14, 'objective')
-    await teachOnce(15, 'subjective')
-    await teachOnce(16, 'subjective')
-    await teachOnce(17, 'subjective')
+    await teachCardGame(14)
+    await teachOnce(15, 'knowhow')
+    await teachOnce(16, 'knowhow')
+    await teachOnce(17, 'knowhow')
     await teachOnce(18, 'knowhow')
     await teachOnce(19, 'knowhow')
     const tenthTeenMission = await teachOnce(20, 'knowhow')
-    t.assert(tenthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 10미션(4+3+3)도 모두 채웠다')
+    t.assert(tenthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 10미션(객관식3+카드맞추기1+직접입력6)도 모두 채웠다')
     t.assert(tenthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'teen', '미션은 끝났지만 레벨이 부족해 teen에 고정된 채다')
 
@@ -1349,6 +1376,85 @@ async function run() {
     t.assert(malformedSubmit.statusCode === 400, '답이 2개가 아니면 400으로 거부된다')
   }
 
+  // --- 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen 전용 ④단계
+  // 객관식 3문제 일반화 + ②단계 카드 맞추기 완료(complete-card-game)
+  // 액션을 단위 테스트로 직접 확인한다(10단계 e2e와는 별개로, API
+  // 계약 자체를 검증).
+  {
+    mock.seedUser(15, { email: 'teen-tester@test.com' })
+    const teenCookie = cookieHeaderFor(auth, 15, 0, 'teen-tester@test.com')
+    const teenReq = (overrides = {}) => ({ headers: { cookie: teenCookie }, query: {}, ...overrides })
+    await characterHandler(teenReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(teenReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const teenNuri = mock.state.characters.find((c) => c.user_id === 15 && c.companion_type === 'nuri')
+    // ageTierForLevel(5) === 'teen'(mission_unlocked_tier는 아직 null) —
+    // applyExpGain이 매 저장마다 exp 기준으로 level을 재계산해 덮어쓰므로
+    // (level만 직접 바꾸면 이어지는 save-knowledge 호출에서 레벨이 다시
+    // 1로 떨어진다), level과 그에 맞는 exp(1000 = Lv.5 누적치)를 함께
+    // 맞춰준다.
+    teenNuri.level = 5
+    teenNuri.exp = 1000
+
+    // 1) teen 캐릭터는 객관식 퀴즈를 3문제 받는다(toddler는 2문제 —
+    // 위 mina 블록에서 이미 확인됨 — 회귀 없음).
+    const teenQuizRes = mockRes()
+    await characterHandler(teenReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), teenQuizRes)
+    t.assert(teenQuizRes.statusCode === 200, 'teen 캐릭터도 객관식 퀴즈를 받을 수 있다')
+    t.assert(Array.isArray(teenQuizRes.body.questions) && teenQuizRes.body.questions.length === 3, 'teen은 2문제가 아니라 3문제를 받는다')
+
+    // 2) 직업을 아직 안 고른 캐릭터는 카드 맞추기 완료도 막힌다(다른
+    // 액션들과 같은 "직업 먼저" 가드).
+    mock.seedUser(16, { email: 'teen-noprofession@test.com' })
+    const npTeenCookie = cookieHeaderFor(auth, 16, 0, 'teen-noprofession@test.com')
+    await characterHandler({ headers: { cookie: npTeenCookie }, query: {}, method: 'POST', body: { companionType: 'nuri' } }, mockRes())
+    const npCardGame = mockRes()
+    await characterHandler(
+      { headers: { cookie: npTeenCookie }, query: { action: 'complete-card-game' }, method: 'POST', body: { companionType: 'nuri' } },
+      npCardGame,
+    )
+    t.assert(npCardGame.statusCode === 400, '직업이 없으면 카드 맞추기 완료도 막힌다(400)')
+
+    // 3) 카드 맞추기를 완료하면(complete-card-game) Gemini 호출 없이도
+    // 바로 적합(appropriate) 판정 + 서명된 토큰을 받는다.
+    const cardGameRes = mockRes()
+    await characterHandler(teenReq({ method: 'POST', query: { action: 'complete-card-game' }, body: { companionType: 'nuri' } }), cardGameRes)
+    t.assert(cardGameRes.statusCode === 200, '카드 맞추기 완료 요청이 성공한다')
+    t.assert(cardGameRes.body.verification?.status === 'appropriate', '카드 맞추기 완료는 항상 적합(appropriate) 판정이다(Gemini 호출 없음)')
+    t.assert(typeof cardGameRes.body.verificationToken === 'string' && cardGameRes.body.verificationToken.length > 0, '서명된 verificationToken을 받는다')
+    t.assert(typeof cardGameRes.body.characterReply === 'string' && cardGameRes.body.characterReply.length > 0, '캐릭터의 축하 반응 문구도 함께 받는다')
+
+    // 4) 그 토큰으로 save-knowledge를 호출하면 mission_type='card_game'
+    // 으로 실제 저장되고, teen의 카드맞추기 미션(1/1)에 집계된다.
+    const cardGameSave = mockRes()
+    await characterHandler(
+      teenReq({
+        method: 'POST',
+        query: { action: 'save-knowledge' },
+        body: {
+          companionType: 'nuri',
+          title: cardGameRes.body.knowledge.title,
+          originalContent: cardGameRes.body.knowledge.content,
+          finalContent: cardGameRes.body.knowledge.content,
+          verificationToken: cardGameRes.body.verificationToken,
+          requestId: 'req-card-game-unit-1',
+          missionType: 'card_game',
+        },
+      }),
+      cardGameSave,
+    )
+    t.assert(cardGameSave.statusCode === 201, '카드 맞추기 완료 토큰으로 지식 저장이 성공한다')
+    t.assert(
+      cardGameSave.body.missionProgress.byType.card_game.confirmed === 1 && cardGameSave.body.missionProgress.byType.card_game.complete === true,
+      'card_game 미션이 1/1로 완료 표시된다',
+    )
+    const teenKnowledge = mockRes()
+    await characterHandler(teenReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), teenKnowledge)
+    t.assert(
+      teenKnowledge.body.entries.some((e) => e.mission_type === 'card_game'),
+      'mission_type=card_game으로 실제 저장된 지식 항목이 있다',
+    )
+  }
+
   // --- 지시서(연령대별 스테이지 볼륨업): 연령대별 필요 지식 개수
   // (8~9살=6, 10대=10, 20대=20, 30대=30, 40대=40, 50~60대=50)가
   // characterAge.ts에 정확히 세팅되어 있는지 직접 확인한다. 단계별로
@@ -1371,12 +1477,27 @@ async function run() {
         `${tier} 단계의 필요 지식 총합은 ${expectedTotal}개다`,
       )
       const perType = characterAge.MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
-      const sum = perType.objective + perType.subjective + perType.knowhow
-      t.assert(sum === expectedTotal, `${tier} 단계의 유형별(객관식/주관식/노하우) 필요 개수 합도 정확히 ${expectedTotal}개다(현재 ${perType.objective}+${perType.subjective}+${perType.knowhow})`)
+      const sum = perType.objective + perType.subjective + perType.knowhow + perType.card_game
       t.assert(
-        perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0,
-        `${tier} 단계는 세 유형 모두 최소 1개 이상을 요구한다(한쪽으로 쏠리지 않음)`,
+        sum === expectedTotal,
+        `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game})`,
       )
+      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen만 고정 순서
+      // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
+      // ④객관식=objective3, subjective는 의도적으로 0)이라 다른 티어와
+      // 다른 모양이 맞다 — 다른 티어는 이 변경의 영향을 받지 않았는지
+      // (card_game은 항상 0) 그대로 확인한다.
+      if (tier === 'teen') {
+        t.assert(
+          perType.knowhow === 6 && perType.objective === 3 && perType.subjective === 0 && perType.card_game === 1,
+          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective는 0)을 요구한다',
+        )
+      } else {
+        t.assert(
+          perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0 && perType.card_game === 0,
+          `${tier} 단계는 세 유형(객관식/주관식/노하우) 모두 최소 1개 이상을 요구하고 card_game은 0이다(teen 전용 커리큘럼의 영향을 받지 않는다)`,
+        )
+      }
     }
   }
 
