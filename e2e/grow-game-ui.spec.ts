@@ -1018,14 +1018,16 @@ test('on a mobile viewport, the action menu still stacks below the stage as a gr
 // "3개 미션 카드 + 미션 창" 레이아웃 계약만 검증한다.
 // 지시서(학습 플로우 전면 개편) 이후 toddler(8~9살)는 "직접입력3→
 // 객관식2→주관식1" 강제 순서 흐름을 쓰므로 3개 카드가 동시에 보이지
-// 않는다(1단계는 직접 입력만) — 이 "3개 카드 동시 노출" 계약은 teen
-// 이상 단계에서 그대로 유지되는지로 확인한다(사용자 승인: "teen 이후
-// 단계는 기존 자유 선택 UI 그대로 유지").
+// 않는다(1단계는 직접 입력만). 지시서(10대 커리큘럼: 직업 카드 맞추기
+// 통합) 이후 teen(10대)도 고정 10단계 커리큘럼으로 바뀌어 더 이상
+// "AI 추천 받기" 카드가 없으므로, 이 "3개 카드 동시 노출" 계약은
+// junior_20s(20대, 이번 지시서 범위 밖이라 기존 자유 선택 UI를 그대로
+// 쓴다) 단계에서 그대로 유지되는지로 확인한다.
 test('the teach/study panel shows three distinct gamified mission cards inside a mission-styled sheet', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
-  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 5 }] })
+  await mockCharacterApi(page, { characters: [{ ...NURI_SINGER, level: 10 }] })
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()

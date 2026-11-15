@@ -625,15 +625,18 @@ test('the learning-record list shows saved entries with their verification statu
 
 // 지시서(학습 플로우 전면 개편) 이후 toddler(8~9살)는 1~3단계 강제
 // 순서 흐름을 쓰고(2단계는 새 객관식 퀴즈, 3단계는 전용 주관식 입력),
-// "AI 추천 받기"(스스로 공부하기) 카드는 더 이상 보이지 않는다 — teen
-// 단계로 올려서 이 기존 기능이 그대로 동작하는지 확인한다.
+// "AI 추천 받기"(스스로 공부하기) 카드는 더 이상 보이지 않는다.
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합) 이후 teen(10대)도 고정
+// 10단계 커리큘럼으로 바뀌어 이 카드가 더 이상 없으므로, junior_20s
+// (20대, 이번 지시서 범위 밖이라 기존 자유 선택 UI를 그대로 쓴다)로
+// 올려서 이 기존 기능이 그대로 동작하는지 확인한다.
 test('clicking 스스로 공부하기 fills in the generated knowledge, shows a character dialogue line, and can be saved', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCalled = false
   await mockCharacterApi(page, {
-    characters: [{ ...NURI_ACCOUNTANT, level: 5 }],
+    characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onStudyGenerate: async (route) => {
       await route.fulfill({
         status: 200,
@@ -701,13 +704,14 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
 
 // 지시서(학습 플로우 전면 개편) 이후 toddler(8~9살)는 강제 순서 흐름을
 // 쓰므로, 같은 패널 안에서 "AI 추천 받기"를 자유롭게 섞어 쓰는 이 기존
-// 동작은 teen 단계로 올려서 확인한다.
+// 동작은(지시서(10대 커리큘럼: 직업 카드 맞추기 통합) 이후 teen도
+// 고정 순서 흐름을 쓰므로) junior_20s(20대) 단계로 올려서 확인한다.
 test('teaching and self-study both happen in the same panel, building one shared dialogue feed (not separate modes)', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   await mockCharacterApi(page, {
-    characters: [{ ...NURI_ACCOUNTANT, level: 5 }],
+    characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onVerify: async (route) => {
       await route.fulfill({
         status: 200,
@@ -799,11 +803,13 @@ test('reopening the panel (e.g. after a refresh) reloads the persisted conversat
 // 확인한다. 셋 다 기존 검증/저장 로직 자체는 전혀 건드리지 않았으므로,
 // 여기서는 missionType 태깅만 검증한다. 지시서(학습 플로우 전면 개편)
 // 이후 toddler(8~9살)는 강제 순서 흐름을 쓰므로(AI 추천 카드가 안
-// 보임), "AI 추천 받기"는 teen 단계로 올려서 확인한다 — knowhow(직접
-// 입력)는 toddler 1단계에서 이미 그대로 검증된다(아래 "typing the
-// title/content directly" 테스트). 선택지 칩은 teen에서는 objective로,
-// toddler 1단계에서는 knowhow로 태깅되므로(아래 두 테스트) 둘 다 확인
-// 한다.
+// 보임), "AI 추천 받기"는 junior_20s(20대, 지시서(10대 커리큘럼: 직업
+// 카드 맞추기 통합) 이후 teen도 고정 순서 흐름을 써서 이 카드가
+// 없어졌으므로) 단계로 올려서 확인한다 — knowhow(직접 입력)는
+// toddler 1단계에서 이미 그대로 검증된다(아래 "typing the
+// title/content directly" 테스트). 선택지 칩은 junior_20s에서는
+// objective로, toddler 1단계에서는 knowhow로 태깅되므로(아래 두
+// 테스트) 둘 다 확인한다.
 
 test('filling the form from a topic suggestion chip and saving tags the save request as missionType=objective', async ({ page }) => {
   await failUnmockedApiCalls(page)
@@ -811,7 +817,7 @@ test('filling the form from a topic suggestion chip and saving tags the save req
   await mockEmptyConversations(page)
   let saveRequestBody: Record<string, unknown> | null = null
   await mockCharacterApi(page, {
-    characters: [{ ...NURI_ACCOUNTANT, level: 5 }],
+    characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onVerify: async (route) => {
       await route.fulfill({
         status: 200,
@@ -903,13 +909,16 @@ test('filling the form from a topic suggestion chip at the toddler direct-input 
   expect(saveRequestBody?.missionType).toBe('knowhow')
 })
 
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합) 이후 teen도 고정 순서
+// 흐름을 써서 "AI 추천 받기" 카드가 없으므로, junior_20s(20대)로
+// 올려서 확인한다.
 test('clicking 스스로 공부하기 and saving tags the save request as missionType=subjective', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveRequestBody: Record<string, unknown> | null = null
   await mockCharacterApi(page, {
-    characters: [{ ...NURI_ACCOUNTANT, level: 5 }],
+    characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onStudyGenerate: async (route) => {
       await route.fulfill({
         status: 200,
@@ -1110,8 +1119,10 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   // 지시서(학습 플로우 전면 개편) 이후 toddler(8~9살)는 강제 순서
-  // 흐름을 쓰므로(AI 추천 받기 카드가 안 보임), 이 테스트는 teen
-  // 단계로 올려서 "AI 추천 받기"가 자유 직업명으로도 그대로 동작하는지
+  // 흐름을 쓰므로(AI 추천 받기 카드가 안 보임), 이 테스트는
+  // junior_20s(20대, 지시서(10대 커리큘럼: 직업 카드 맞추기 통합)
+  // 이후 teen도 고정 순서 흐름을 써서 이 카드가 없어졌으므로)로
+  // 올려서 "AI 추천 받기"가 자유 직업명으로도 그대로 동작하는지
   // 확인한다.
   const NURI_FOREST_GUIDE = {
     id: 1,
@@ -1120,7 +1131,7 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
     stage: 'child',
     profession: 'custom',
     custom_profession_label: '숲해설가',
-    level: 5,
+    level: 10,
     created_at: new Date().toISOString(),
   }
   await mockCharacterApi(page, {
@@ -1722,17 +1733,19 @@ test('buying 직업 전문 서적 in the universal market (만능마켓) works l
 })
 
 // 지시서(한도 소진 시 구매 유도 UI): "예시 만들어주기"(studyRemaining)가
-// 0이 되면 버튼이 비활성화되고 그 옆에 구매 버튼이 뜬다 — teen(10대)
-// 단계로 올려서 확인한다(toddler는 이 카드 자체가 안 보임, 위 다른
-// 테스트들과 같은 이유). 구매 버튼을 누르면 만능마켓이 학습·교육관
-// 탭으로 바로 열리는지도 함께 확인한다(실제 구매는 지갑이 필요해
-// 아래 지식 검증 테스트에서 온보딩과 함께 확인한다).
+// 0이 되면 버튼이 비활성화되고 그 옆에 구매 버튼이 뜬다 —
+// junior_20s(20대) 단계로 올려서 확인한다(toddler는 이 카드 자체가
+// 안 보이고, 지시서(10대 커리큘럼: 직업 카드 맞추기 통합) 이후
+// teen도 고정 순서 흐름을 써서 이 카드가 없어졌으므로 같은 이유로
+// 제외한다). 구매 버튼을 누르면 만능마켓이 학습·교육관 탭으로 바로
+// 열리는지도 함께 확인한다(실제 구매는 지갑이 필요해 아래 지식 검증
+// 테스트에서 온보딩과 함께 확인한다).
 test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기 is disabled and a market buy button appears, routing to the 학습·교육관 tab', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   await mockCharacterApi(page, {
-    characters: [{ ...NURI_ACCOUNTANT, level: 5 }],
+    characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onUsage: async (route) => {
       await route.fulfill({
         status: 200,
