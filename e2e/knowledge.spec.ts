@@ -650,24 +650,32 @@ test('the learning-record list shows saved entries with their verification statu
 // 10단계 커리큘럼으로 바뀌어 이 카드가 더 이상 없으므로, junior_20s
 // (20대, 이번 지시서 범위 밖이라 기존 자유 선택 UI를 그대로 쓴다)로
 // 올려서 이 기존 기능이 그대로 동작하는지 확인한다.
-test('clicking 스스로 공부하기 fills in the generated knowledge, shows a character dialogue line, and can be saved', async ({ page }) => {
+test('clicking 스스로 공부하기 shows N candidate cards; picking one fills the generated knowledge, shows a character dialogue line, and can be saved', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCalled = false
   await mockCharacterApi(page, {
+    // level:10 → junior_20s → selfStudyDraftCountForTier('junior_20s') === 7.
     characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onStudyGenerate: async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 동시에 기록한다.' },
-          verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
-          verificationToken: 'mock-token-study',
-          characterReply: "오늘은 '복식부기'에 대해 혼자 공부해봤어요! 정확해요",
+          drafts: Array.from({ length: 7 }, (_, i) => ({
+            knowledge: { title: i === 0 ? '복식부기' : `후보 ${i}`, content: i === 0 ? '거래를 차변과 대변에 동시에 기록한다.' : `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: '정확해요', relevance: '회계사와 관련 있어요', issues: '', suggestion: '' },
+            verificationToken: i === 0 ? 'mock-token-study' : `mock-token-study-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 7개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
           remaining: 2,
           dailyStudyLimit: 3,
+          exampleCount: 7,
+          characterAgeTier: 'junior_20s',
+          focusPercent: 90,
         }),
       })
     },
@@ -705,12 +713,19 @@ test('clicking 스스로 공부하기 fills in the generated knowledge, shows a 
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
 
+  // 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): 클릭 1번이
+  // 예시 1개가 아니라 이 캐릭터의 연령대(junior_20s)에 맞는 7개 후보
+  // 카드를 한 번에 보여준다 — 그중 하나를 골라야 기존처럼 입력칸이
+  // 채워진다(자동 완료 금지는 여전히 유지).
+  await expect(page.getByText('예시 7개를 만들었어요! 마음에 드는 걸 골라보세요.', { exact: false })).toBeVisible()
+  const cards = page.getByTestId('study-draft-card')
+  await expect(cards).toHaveCount(7)
+  await cards.filter({ hasText: '복식부기' }).click()
+
   // The composer is filled with what the character generated, so the user
   // can review it before saving — self-study never auto-saves either.
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('복식부기')
   await expect(page.getByTestId('knowledge-content-textarea')).toHaveValue('거래를 차변과 대변에 동시에 기록한다.')
-  // The character "explains in its own words" what it studied.
-  await expect(page.getByText(/오늘은 '복식부기'에 대해 혼자 공부해봤어요/)).toBeVisible()
   await expect(page.getByText('남은 횟수: 무료 2회 / 구매 0회')).toBeVisible()
 
   const saveButton = page.getByRole('button', { name: '저장' })
@@ -750,12 +765,19 @@ test('teaching and self-study both happen in the same panel, building one shared
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          knowledge: { title: '발생주의', content: '수익과 비용은 발생한 시점에 인식한다.' },
-          verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
-          verificationToken: 'mock-token-study-2',
-          characterReply: "오늘은 '발생주의'에 대해 혼자 공부해봤어요! 정확해요",
+          drafts: Array.from({ length: 7 }, (_, i) => ({
+            knowledge: { title: i === 0 ? '발생주의' : `후보 ${i}`, content: i === 0 ? '수익과 비용은 발생한 시점에 인식한다.' : `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
+            verificationToken: i === 0 ? 'mock-token-study-2' : `mock-token-study-2-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 7개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
           remaining: 2,
           dailyStudyLimit: 3,
+          exampleCount: 7,
+          characterAgeTier: 'junior_20s',
+          focusPercent: 90,
         }),
       })
     },
@@ -771,9 +793,13 @@ test('teaching and self-study both happen in the same panel, building one shared
   await expect(page.getByText('알려주셔서 고마워요!', { exact: false })).toBeVisible()
 
   // Then self-study, in the exact same panel — no navigation, no mode
-  // switch, no separate screen.
+  // switch, no separate screen. 생성 직후 캐릭터 발화가 먼저 피드에
+  // 추가되고, 7개 후보 중 하나를 고르면 그대로 기존 입력/저장 흐름이
+  // 이어진다.
   await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
-  await expect(page.getByText(/오늘은 '발생주의'에 대해 혼자 공부해봤어요/)).toBeVisible()
+  await expect(page.getByText('예시 7개를 만들었어요! 마음에 드는 걸 골라보세요.', { exact: false })).toBeVisible()
+  await page.getByTestId('study-draft-card').filter({ hasText: '발생주의' }).click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('발생주의')
 
   // Both exchanges remain visible together in the same dialogue feed.
   await expect(page.getByText('복식부기\n거래를 두 번 기록한다')).toBeVisible()
@@ -948,12 +974,19 @@ test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
-          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-          verificationToken: 'tok-toddler-study',
-          characterReply: '오늘은 혼자 공부해봤어요!',
+          drafts: Array.from({ length: 3 }, (_, i) => ({
+            knowledge: { title: i === 0 ? '복식부기' : `후보 ${i}`, content: i === 0 ? '거래를 차변과 대변에 기록한다.' : `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+            verificationToken: i === 0 ? 'tok-toddler-study' : `tok-toddler-study-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 3개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
           remaining: 2,
           dailyStudyLimit: 3,
+          exampleCount: 3,
+          characterAgeTier: 'toddler',
+          focusPercent: 90,
         }),
       })
     },
@@ -981,6 +1014,7 @@ test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-
   const studyButton = page.getByRole('button', { name: '✨ 예시 만들어주기' })
   await expect(studyButton).toBeVisible()
   await studyButton.click()
+  await page.getByTestId('study-draft-card').filter({ hasText: '복식부기' }).click()
   await page.getByRole('button', { name: '저장' }).click()
 
   await expect.poll(() => saveRequestBody).toBeTruthy()
@@ -1045,12 +1079,19 @@ test('clicking 스스로 공부하기 and saving tags the save request as missio
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
-          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-          verificationToken: 'tok-subjective',
-          characterReply: "오늘은 '복식부기'를 공부했어요!",
+          drafts: Array.from({ length: 7 }, (_, i) => ({
+            knowledge: { title: i === 0 ? '복식부기' : `후보 ${i}`, content: i === 0 ? '거래를 차변과 대변에 기록한다.' : `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+            verificationToken: i === 0 ? 'tok-subjective' : `tok-subjective-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 7개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
           remaining: 2,
           dailyStudyLimit: 3,
+          exampleCount: 7,
+          characterAgeTier: 'junior_20s',
+          focusPercent: 90,
         }),
       })
     },
@@ -1074,6 +1115,7 @@ test('clicking 스스로 공부하기 and saving tags the save request as missio
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
   await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await page.getByTestId('study-draft-card').filter({ hasText: '복식부기' }).click()
   await page.getByRole('button', { name: '저장' }).click()
 
   await expect.poll(() => saveRequestBody).toBeTruthy()
@@ -1262,12 +1304,19 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          knowledge: { title: '숲 생태 관찰 팁', content: '아침 시간대에 동물 발자국을 더 쉽게 볼 수 있다.' },
-          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-          verificationToken: 'tok-forest-study',
-          characterReply: '스스로 공부했어요!',
+          drafts: Array.from({ length: 7 }, (_, i) => ({
+            knowledge: { title: i === 0 ? '숲 생태 관찰 팁' : `후보 ${i}`, content: i === 0 ? '아침 시간대에 동물 발자국을 더 쉽게 볼 수 있다.' : `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+            verificationToken: i === 0 ? 'tok-forest-study' : `tok-forest-study-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 7개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
           remaining: 2,
           dailyStudyLimit: 3,
+          exampleCount: 7,
+          characterAgeTier: 'junior_20s',
+          focusPercent: 90,
         }),
       })
     },
@@ -1280,6 +1329,7 @@ test('a custom free-text profession ("숲해설가") shows its own label in the 
   await expect(page.getByText('누리 · 숲해설가와 상호작용하기')).toBeVisible()
 
   await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await page.getByTestId('study-draft-card').filter({ hasText: '숲 생태 관찰 팁' }).click()
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('숲 생태 관찰 팁')
 })
 
@@ -1892,13 +1942,14 @@ test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기
   await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
 })
 
-// 지시서(연령대별 AI 추천 생성 개수 점진적 증가): "✨ AI 추천 받기"
-// 카드의 안내 문구("OO 단계에서는 하루 N개의 예시를 제공해요")가
-// 연령대마다 다른 숫자를 보여주고, 그 숫자가 연령대가 올라갈수록
-// 정확히 2개씩 늘어나는지 확인한다 — 이 문구는 순수 프런트 계산값
-// (character.ageTier/level, data/characterAge.ts의
-// dailyStudyLimitForTier)이라 usage API 응답과는 무관하다.
-test('the AI 추천 받기 card shows a dynamic "하루 N개" count that increases by 2 per age tier (20대=7, 30대=9)', async ({ page }) => {
+// 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ AI 추천
+// 받기" 카드의 안내 문구("OO 단계에서는 한 번에 예시 N개를
+// 만들어줘요")가 연령대마다 다른 숫자를 보여주고, 그 숫자가 연령대가
+// 올라갈수록 정확히 2개씩 늘어나는지 확인한다 — 이 문구는 순수
+// 프런트 계산값(character.ageTier/level, data/characterAge.ts의
+// selfStudyDraftCountForTier)이라 아직 버튼을 누르기 전에도 몇 개가
+// 나올지 미리 보여준다.
+test('the AI 추천 받기 card shows a dynamic "한 번에 N개" count that increases by 2 per age tier (20대=7, 30대=9)', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1906,13 +1957,13 @@ test('the AI 추천 받기 card shows a dynamic "하루 N개" count that increas
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
-  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('20대 단계에서는 하루 7개의 예시를 제공해요.')
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('20대 단계에서는 한 번에 예시 7개를 만들어줘요.')
   await page.getByRole('button', { name: '닫기' }).click()
 
   await mockCharacterApi(page, { characters: [{ ...NURI_ACCOUNTANT, level: 20 }] })
   await page.reload()
   await page.getByRole('button', { name: '가르치기' }).click()
-  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('30대 단계에서는 하루 9개의 예시를 제공해요.')
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('30대 단계에서는 한 번에 예시 9개를 만들어줘요.')
 })
 
 // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI검증하기"

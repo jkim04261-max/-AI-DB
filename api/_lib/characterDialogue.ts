@@ -18,13 +18,6 @@ export function buildTeachReply(v: KnowledgeVerificationResult): string {
   return `${v.explanation || '이 내용은 아직 잘 모르겠어요.'} 다른 이야기도 들려주실래요?`
 }
 
-export function buildStudyReply(title: string, v: KnowledgeVerificationResult): string {
-  if (v.status === 'appropriate') {
-    return `오늘은 '${title}'에 대해 혼자 공부해봤어요! ${v.explanation || ''}`.trim()
-  }
-  return `'${title}'를 스스로 공부해봤는데, 아직 확신이 안 서요. ${v.explanation || ''}`.trim()
-}
-
 // PR #45 checkpoint 4: appended to a reply whenever an action just pushed
 // the character up a level — a lightweight, zero-Gemini-cost "reaction" to
 // growth (조건 5), always phrased as a *game* milestone (Lv.N), never as

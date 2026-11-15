@@ -22,6 +22,18 @@ export interface KnowledgeVerification {
   suggestion: string
 }
 
+// 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ 예시
+// 만들어주기" 한 번 클릭이 돌려주는 후보 하나 — 사용자가 이 중 하나를
+// 골라야 기존 verifyKnowledge/handleSave 흐름(title/content/verification/
+// verificationToken)으로 그대로 이어진다.
+export interface StudyDraft {
+  knowledge: { title: string; content: string }
+  verification: KnowledgeVerification
+  verificationToken: string
+  ageBlocked: boolean
+  requiredAgeTier: AgeTier
+}
+
 export interface KnowledgeEntry {
   id: number
   companionType: CompanionType
@@ -184,15 +196,12 @@ interface GrowthContextValue {
     focusPercent: number
   }>
   studyGenerate: (companionType: CompanionType) => Promise<{
-    knowledge: { title: string; content: string }
-    verification: KnowledgeVerification
-    verificationToken: string
+    drafts: StudyDraft[]
     characterReply: string
     remaining: number
     dailyStudyLimit: number
-    ageBlocked: boolean
+    exampleCount: number
     characterAgeTier: AgeTier
-    requiredAgeTier: AgeTier
     focusPercent: number
   }>
   saveKnowledge: (
@@ -246,9 +255,7 @@ interface GrowthContextValue {
     verificationToken: string
     characterReply: string
   }>
-  getUsage: (
-    companionType?: CompanionType,
-  ) => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
+  getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
     answers: { questionId: string; answerIndex: number }[],
@@ -460,10 +467,13 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
   }, [updateFocusPercent, applyTicketUpdate])
 
-  // "스스로 공부하기" — Gemini 호출 1회로 캐릭터가 새 지식을 생성하고
-  // 스스로 평가한다. verifyKnowledge와 마찬가지로 이 호출 자체는 아무것도
-  // 저장하지 않는다 — 돌아온 verificationToken을 그대로 saveKnowledge에
-  // 넘겨야 실제로 저장된다(사용자가 결과를 보고 확인한 뒤).
+  // "스스로 공부하기" — Gemini 호출 1회로 캐릭터가 지금 연령대에 맞는
+  // 개수(exampleCount)만큼의 서로 다른 후보를 한 번에 생성하고 각각을
+  // 스스로 평가한다(지시서(AI 추천(예시 만들기) 개수에 대한 명확한
+  // 지시): 1개씩 여러 번 부르지 않고 한 호출로 N개를 받는다). 이
+  // 호출 자체는 아무것도 저장하지 않는다 — 사용자가 drafts 중 하나를
+  // 고르고 그 verificationToken을 saveKnowledge에 넘겨야 실제로
+  // 저장된다.
   const studyGenerate = useCallback(async (companionType: CompanionType) => {
     const res = await fetch('/api/character?action=study-generate', {
       method: 'POST',
@@ -471,34 +481,28 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ companionType }),
     })
     const data = (await res.json().catch(() => ({}))) as {
-      knowledge?: { title: string; content: string }
-      verification?: KnowledgeVerification
-      verificationToken?: string
+      drafts?: StudyDraft[]
       characterReply?: string
       remaining?: number
       dailyStudyLimit?: number
-      ageBlocked?: boolean
+      exampleCount?: number
       characterAgeTier?: AgeTier
-      requiredAgeTier?: AgeTier
       focusPercent?: number
       aiRecommendTickets?: number
       error?: string
     }
-    if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken || !data.characterReply) {
+    if (!res.ok || !data.drafts || data.drafts.length === 0 || !data.characterReply) {
       throw new Error(data.error || '스스로 공부하는 중 오류가 발생했어요.')
     }
     if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
     if (data.aiRecommendTickets !== undefined) applyTicketUpdate({ aiRecommendTickets: data.aiRecommendTickets })
     return {
-      knowledge: data.knowledge,
-      verification: data.verification,
-      verificationToken: data.verificationToken,
+      drafts: data.drafts,
       characterReply: data.characterReply,
       remaining: data.remaining ?? 0,
       dailyStudyLimit: data.dailyStudyLimit ?? 0,
-      ageBlocked: data.ageBlocked ?? false,
+      exampleCount: data.exampleCount ?? data.drafts.length,
       characterAgeTier: data.characterAgeTier ?? 'toddler',
-      requiredAgeTier: data.requiredAgeTier ?? 'toddler',
       focusPercent: data.focusPercent ?? 90,
     }
   }, [updateFocusPercent, applyTicketUpdate])
@@ -809,15 +813,11 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // PR #49: 메인 화면 상단 "행동력" HUD용 — 오늘 남은 가르치기/스스로
   // 공부하기 횟수를 소비 없이 조회만 한다(서버의 peekTeachUsage/
   // peekStudyUsage, 순수 SELECT). 캐릭터별이 아니라 계정 전체 하루
-  // 한도지만, 지시서(연령대별 AI 추천 생성 개수 점진적 증가)에 따라
-  // studyLimit 자체는 "지금 보고 있는 캐릭터"의 연령대를 따른다 —
-  // companionType을 선택적으로 넘기면 서버가 그 캐릭터의 연령대로
-  // studyLimit을 계산해 돌려주고, 안 넘기면(로그인 직후처럼 아직
-  // 캐릭터를 모를 때) 기존과 같은 toddler 기준값(3)을 받는다.
-  const getUsage = useCallback(async (companionType?: CompanionType) => {
-    const params = new URLSearchParams({ action: 'usage' })
-    if (companionType) params.set('companionType', companionType)
-    const res = await fetch(`/api/character?${params}`)
+  // 한도라 companionType 파라미터가 없다 — 지시서(AI 추천(예시
+  // 만들기) 개수에 대한 명확한 지시)에 따라 studyLimit도 다시 모든
+  // 연령대에 똑같은 플랫한 3이다.
+  const getUsage = useCallback(async () => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'usage' })}`)
     const data = (await res.json().catch(() => ({}))) as {
       teachRemaining?: number
       teachLimit?: number
