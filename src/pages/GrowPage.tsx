@@ -25,6 +25,7 @@ import UniversalMarket from '../components/grow/UniversalMarket'
 import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
 import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
+import JobEventModal from '../components/grow/JobEventModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -129,6 +130,24 @@ const PART_TIME_JOB_EARNING_WON = 20_000
 // 등으로 연동"이라고 범위를 토들러로 한정했다.
 const ERRAND_EARNING_WON = 10_000
 
+// 지시서(10대 전용 알바 시스템): 위 toddler 전용 심부름과 같은 자리
+// ("알바" 슬롯)를 teen에서만 한 번 더 분기한다 — 동네 전경을 걸어가
+// 상점(설거지·서빙·편의점 중 무작위)에 도착해 관련 3문제를 풀고,
+// 3문제 모두 맞히면 30,000원, 하나라도 틀리면 0원을 받는다(지시서
+// "1문제라도 틀리면 0원"). 10대 커리큘럼(총 10단계) 안에서 정확히
+// 2번 뜨도록, 기존 "3회 저장마다 식사/알바 번갈이" 로테이션이 이미
+// 차지한 지점(③단계 끝 save#3=식사, ④단계 객관식 세트가 끝나는
+// save#6=알바, ⑤단계 중간 save#9=식사 — 모두 그대로 둔다)과 절대
+// 겹치지 않는 지점만 골랐다: ①직업 카드 맞추기 완료 직후(save#4,
+// InteractionPanel의 새 onTeenJobEventDue 콜백으로 직접 호출 —
+// 기존 로테이션과 무관한 완전히 새 트리거)와, ②기존 "알바" 슬롯
+// 자체(save#6, toddler의 심부름과 똑같은 방식으로 teen일 때만 분기).
+// 지시서의 "예: 3문제/7문제"는 예시일 뿐이라, 기존에 이미 식사/알바가
+// 자동으로 끼어드는 지점(3·6·9)과 부딪히지 않는 가장 가까운 자연스러운
+// 경계(②단계 끝, ④단계 끝)로 옮겼다 — 두 이벤트가 한 번에 겹쳐 뜨는
+// 버그를 피하기 위함이다.
+const JOB_EVENT_EARNING_WON = 30_000
+
 // 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힐 때마다 쌓는
 // 누적 횟수로 두 가지 독립된 이벤트를 띄운다 — 3의 배수번째 정답마다
 // 보상(반복), 정확히 5번째 정답에서 간식 이벤트(1회성). 둘 다 체험판
@@ -216,6 +235,10 @@ export default function GrowPage() {
   // 클릭이 errandEventOpen을 닫고 그 즉시 homeworkQuizOpen을 연다).
   const [errandEventOpen, setErrandEventOpen] = useState(false)
   const [homeworkQuizOpen, setHomeworkQuizOpen] = useState(false)
+  // 지시서(10대 전용 알바 시스템): jobEventOpen=알바(걷기→도착→퀴즈→결과)
+  // 모달 표시 중 — teen 커리큘럼 안에서 두 번 별도로 열린다(카드 맞추기
+  // 직후 1회, 기존 알바 슬롯에서 1회).
+  const [jobEventOpen, setJobEventOpen] = useState(false)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -370,6 +393,7 @@ export default function GrowPage() {
     setFeedError(null)
     setErrandEventOpen(false)
     setHomeworkQuizOpen(false)
+    setJobEventOpen(false)
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -722,6 +746,32 @@ export default function GrowPage() {
     showBubble('휴, 숙제를 다 했어요!')
   }
 
+  // 지시서(10대 전용 알바 시스템): 패널을 닫고 알바(걷기→도착→퀴즈→결과)
+  // 모달을 연다 — ①카드 맞추기 완료 직후(InteractionPanel의
+  // onTeenJobEventDue)와 ②기존 "알바" 로테이션 슬롯(teen 분기), 두
+  // 자리에서 똑같이 이 함수 하나를 호출한다.
+  const triggerJobEvent = () => {
+    setOpenSheet(null)
+    setJobEventOpen(true)
+  }
+
+  // JobEventModal이 "학습으로 돌아가기"를 누르면 호출된다 — 3문제를
+  // 모두 맞혔을 때만 보상을 준다(지시서 "1문제라도 틀리면 0원").
+  // 지갑이 아직 없는 캐릭터(Stage 1 온보딩 전)는 심부름/알바와 같은
+  // 이유로 금액 변화를 건너뛴다.
+  const handleJobEventComplete = (success: boolean) => {
+    setJobEventOpen(false)
+    if (success) {
+      if (wallet.balanceWon !== null) reward(wallet, JOB_EVENT_EARNING_WON, 'job_event')
+      setMoneyPopup(JOB_EVENT_EARNING_WON)
+      const t = setTimeout(() => setMoneyPopup(null), 1800)
+      outingTimeoutsRef.current.push(t)
+      showBubble(`알바 성공! 용돈 ${JOB_EVENT_EARNING_WON.toLocaleString('ko-KR')}원을 받았어요!`)
+    } else {
+      showBubble('알바 실패... 다음엔 더 잘할 수 있어요!')
+    }
+  }
+
   // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 지정된
   // 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다 식사 → 알바 이벤트를
   // 번갈아 띄운 뒤 다시 0부터 센다. 지시서(연령대별 스테이지
@@ -746,6 +796,8 @@ export default function GrowPage() {
         outingCycleRef.current = 0
         if (ageTier === 'toddler') {
           triggerErrandEvent()
+        } else if (ageTier === 'teen') {
+          triggerJobEvent()
         } else {
           triggerPartTimeJob()
         }
@@ -1101,6 +1153,14 @@ export default function GrowPage() {
                     />
                   )}
                   {homeworkQuizOpen && <HomeworkQuizModal onComplete={handleHomeworkComplete} />}
+                  {jobEventOpen && (
+                    <JobEventModal
+                      companionType={character.companionType}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      onComplete={handleJobEventComplete}
+                    />
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2 bg-gradient-to-b from-amber-900 to-amber-950 p-3">
@@ -1267,6 +1327,7 @@ export default function GrowPage() {
               profession={character.profession}
               onPoseChange={handlePoseChange}
               onKnowledgeSaved={handleKnowledgeSaved}
+              onTeenJobEventDue={triggerJobEvent}
               usage={usage}
               accountTier={accountTier}
               onBuyMoreUses={handleBuyMoreUses}

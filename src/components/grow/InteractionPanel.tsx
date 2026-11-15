@@ -68,6 +68,7 @@ export default function InteractionPanel({
   profession,
   onPoseChange,
   onKnowledgeSaved,
+  onTeenJobEventDue,
   usage,
   accountTier,
   onBuyMoreUses,
@@ -80,6 +81,11 @@ export default function InteractionPanel({
   // 이벤트를 띄울지는 전부 GrowPage가 결정하고, 이 패널은 "저장
   // 성공"이라는 사실만 알려준다.
   onKnowledgeSaved?: () => void
+  // 지시서(10대 전용 알바 시스템): teen의 ②카드 맞추기 단계가 끝나는
+  // 순간(handleCardGameCleared) 한 번 호출된다 — 기존 "3회 저장마다
+  // 식사/알바" 로테이션과 전혀 무관한, 완전히 별도의 트리거다(그
+  // 로테이션이 이미 차지한 지점과 겹치지 않도록 일부러 여기서만 쏜다).
+  onTeenJobEventDue?: () => void
   // 지시서(한도 소진 시 구매 유도 UI): 계정 전체 하루 한도(GrowPage가
   // 로그인 시점·패널 닫을 때마다 getUsage()로 불러와 두는 값)를 패널이
   // 열릴 때 그대로 물려받는다 — teachRemaining/studyRemaining state의
@@ -427,6 +433,7 @@ export default function InteractionPanel({
       if (saveResult.missionProgress) setMissionProgress(saveResult.missionProgress)
       onKnowledgeSaved?.()
       flashPose('happy', 2500)
+      onTeenJobEventDue?.()
     } catch (err) {
       setCardGameError(err instanceof Error ? err.message : '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.')
     } finally {
