@@ -18,6 +18,16 @@ export function ensureUsersTable() {
       // check in getSessionUser — the only way to invalidate an already-
       // issued stateless session without a server-side session store.
       await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0`
+      // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI 추천 충전권"/
+      // "지식 검증 충전권"을 구매했을 때 실제로 쌓이는 계정 단위 이용권
+      // 수량 — daily_teach_usage/daily_study_usage와 마찬가지로 user_id
+      // 기준이다(캐릭터별이 아니다). 그 두 하루 한도가 companionType과
+      // 무관하게 계정 전체에 공유되는 것과 똑같이, 이 이용권도 누리/두리
+      // 어느 쪽에서 구매하든 같은 풀을 쓰고, 어느 쪽에서든 바로 쓸 수
+      // 있어야 자연스럽다(캐릭터 테이블에 뒀다면 한쪽에서 산 이용권을
+      // 다른 캐릭터에서 못 쓰는 불일치가 생긴다).
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_recommend_tickets INTEGER NOT NULL DEFAULT 0`
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS knowledge_validation_tickets INTEGER NOT NULL DEFAULT 0`
     })().catch((err) => {
       usersTableReady = null
       throw err

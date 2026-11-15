@@ -19,6 +19,15 @@ import {
 } from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
 import { DAILY_STUDY_LIMIT, reserveStudy, refundStudy, peekStudyUsage } from './_lib/studyLimit'
+import {
+  peekTickets,
+  consumeAiRecommendTicket,
+  refundAiRecommendTicket,
+  consumeKnowledgeValidationTicket,
+  refundKnowledgeValidationTicket,
+  addAiRecommendTickets,
+  addKnowledgeValidationTickets,
+} from './_lib/ticketLimit'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import {
   buildTeachReply,
@@ -162,8 +171,13 @@ const MAX_LIST_LIMIT = 50
 const DEFAULT_MESSAGES_LIMIT = 50
 const MAX_MESSAGES_LIMIT = 200
 
-const DAILY_TEACH_LIMIT_REACHED_MESSAGE = `오늘의 지식 검증 요청 ${DAILY_TEACH_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
-const DAILY_STUDY_LIMIT_REACHED_MESSAGE = `오늘의 스스로 공부하기 요청 ${DAILY_STUDY_LIMIT}회를 모두 사용했습니다. 내일 다시 이용할 수 있습니다.`
+// 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 하루 무료 한도도 다
+// 쓰고, 구매한 이용권도 없을 때만 보여준다 — 둘 중 하나라도 남아있으면
+// 이 메시지 대신 그걸로 계속 진행된다.
+const NO_AI_RECOMMEND_TICKETS_MESSAGE =
+  '오늘의 무료 횟수를 모두 사용했고, 구매한 이용권도 없습니다. 만능마켓에서 구매 후 이용해 주세요.'
+const NO_KNOWLEDGE_VALIDATION_TICKETS_MESSAGE =
+  '오늘의 무료 검증 횟수를 모두 사용했고, 구매한 이용권도 없습니다. 만능마켓에서 구매 후 이용해 주세요.'
 // study-generate가 중복 생성을 피하려고 Gemini에 보내는 "이미 아는 제목"
 // 목록의 최대 길이 — 프롬프트 크기(=비용)를 제한하면서도 최근에 배운
 // 것 위주로 충분히 참고할 수 있는 수.
@@ -274,6 +288,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleSubmitExam(req, res, session.sub)
       return
     }
+    if (action === 'purchase-ai-recommend-ticket') {
+      await handlePurchaseAiRecommendTicket(res, session.sub)
+      return
+    }
+    if (action === 'purchase-knowledge-validation-ticket') {
+      await handlePurchaseKnowledgeValidationTicket(res, session.sub)
+      return
+    }
     await handlePost(req, res, session.sub)
     return
   }
@@ -355,16 +377,50 @@ async function handleGetMissions(req: VercelRequest, res: VercelResponse, userId
 // reserveStudy 로직은 전혀 건드리지 않았다.
 async function handleGetUsage(res: VercelResponse, userId: number) {
   try {
-    const [teach, study] = await Promise.all([peekTeachUsage(userId), peekStudyUsage(userId)])
+    const [teach, study, tickets] = await Promise.all([peekTeachUsage(userId), peekStudyUsage(userId), peekTickets(userId)])
     res.status(200).json({
       teachRemaining: teach.remaining,
       teachLimit: DAILY_TEACH_LIMIT,
       studyRemaining: study.remaining,
       studyLimit: DAILY_STUDY_LIMIT,
+      aiRecommendTickets: tickets.aiRecommendTickets,
+      knowledgeValidationTickets: tickets.knowledgeValidationTickets,
     })
   } catch (err) {
     console.error('[api/character] unexpected error on GET usage', err)
     res.status(500).json({ error: '오늘의 행동력 정보를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 만능마켓에서 "AI 추천
+// 충전권"/"지식 검증 충전권"을 구매했을 때 호출한다 — 클라이언트가
+// 보낸 수량은 신뢰하지 않고 항상 1을 더한다(exampleDraftsLimit.ts의
+// purchase 액션과 같은 방어 원칙). 응답에 양쪽 이용권 수량을 함께
+// 돌려줘서, 호출부가 새로고침이나 별도 재조회 없이 바로 최신 값으로
+// 상태를 맞출 수 있게 한다.
+async function handlePurchaseAiRecommendTicket(res: VercelResponse, userId: number) {
+  try {
+    const tickets = await addAiRecommendTickets(userId, 1)
+    res.status(200).json({
+      aiRecommendTickets: tickets.aiRecommendTickets,
+      knowledgeValidationTickets: tickets.knowledgeValidationTickets,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on purchase-ai-recommend-ticket', err)
+    res.status(500).json({ error: 'AI 추천 충전권을 지급하는 중 오류가 발생했어요.' })
+  }
+}
+
+async function handlePurchaseKnowledgeValidationTicket(res: VercelResponse, userId: number) {
+  try {
+    const tickets = await addKnowledgeValidationTickets(userId, 1)
+    res.status(200).json({
+      aiRecommendTickets: tickets.aiRecommendTickets,
+      knowledgeValidationTickets: tickets.knowledgeValidationTickets,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on purchase-knowledge-validation-ticket', err)
+    res.status(500).json({ error: '지식 검증 충전권을 지급하는 중 오류가 발생했어요.' })
   }
 }
 
@@ -543,15 +599,30 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
     // Reserved *before* calling Gemini — a request already over today's cap
     // never reaches Gemini at all, so going over the limit can never cost
     // anything. Same ordering as api/conversations/[id].ts's chat quota.
+    // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 하루 무료 한도를 다
+    // 썼으면(reserved.ok===false) 곧바로 막지 않고, 구매한 "지식 검증
+    // 충전권"이 있는지부터 확인한다 — 있으면 1장 깎아서 이번 한 번은
+    // 그대로 진행시킨다. 둘 다 없을 때만 진짜로 차단한다. 어느 쪽을
+    // 썼는지(usedTicket)를 기억해둬서, 아래에서 실패 시 정확히 그
+    // 카운터만 되돌린다.
     const reserved = await reserveTeach(userId)
+    let usedTicket = false
+    let ticketsRemaining = 0
     if (!reserved.ok) {
-      res.status(429).json({
-        error: DAILY_TEACH_LIMIT_REACHED_MESSAGE,
-        remaining: 0,
-        dailyTeachLimit: DAILY_TEACH_LIMIT,
-      })
-      return
+      const ticket = await consumeKnowledgeValidationTicket(userId)
+      if (!ticket.ok) {
+        res.status(429).json({
+          error: NO_KNOWLEDGE_VALIDATION_TICKETS_MESSAGE,
+          remaining: 0,
+          dailyTeachLimit: DAILY_TEACH_LIMIT,
+          knowledgeValidationTickets: 0,
+        })
+        return
+      }
+      usedTicket = true
+      ticketsRemaining = ticket.remaining
     }
+    const refundReservation = () => (usedTicket ? refundKnowledgeValidationTicket(userId) : refundTeach(userId))
 
     let verification: KnowledgeVerificationResult
     try {
@@ -562,7 +633,7 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       // cap. A successful-but-malformed response (handled inside
       // verifyKnowledge itself, returned as a normal 'unverifiable' result
       // rather than thrown) is NOT refunded — see knowledgeLimit.ts.
-      await refundTeach(userId)
+      await refundReservation()
       const { status, message } = resolveGeminiFailureMessage(err)
       res.status(status).json({ error: message })
       return
@@ -634,7 +705,7 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       // returning a result the client would show but that won't survive a
       // refresh.
       console.error('[api/character] failed to persist character_messages for verify-knowledge', err)
-      await refundTeach(userId)
+      await refundReservation()
       res.status(500).json({ error: '대화를 저장하는 중 오류가 발생했어요.' })
       return
     }
@@ -643,7 +714,8 @@ async function handleVerifyKnowledge(req: VercelRequest, res: VercelResponse, us
       verification,
       verificationToken,
       characterReply,
-      remaining: reserved.remaining,
+      remaining: usedTicket ? 0 : reserved.remaining,
+      knowledgeValidationTickets: usedTicket ? ticketsRemaining : undefined,
       dailyTeachLimit: DAILY_TEACH_LIMIT,
       ageBlocked,
       characterAgeTier,
@@ -681,15 +753,27 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
     // 지식 검증(하루 10회)과 완전히 별도인 한도 — 이 호출이 Gemini에
     // 닿기 전에 먼저 예약하므로, 한도 초과 요청은 비용이 전혀 들지
     // 않는다.
+    // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): handleVerifyKnowledge와
+    // 같은 원칙 — 하루 무료 한도를 다 썼으면 구매한 "AI 추천 충전권"이
+    // 있는지 확인하고, 있으면 1장 깎아 이번 한 번은 그대로 진행한다.
     const reserved = await reserveStudy(userId)
+    let usedTicket = false
+    let ticketsRemaining = 0
     if (!reserved.ok) {
-      res.status(429).json({
-        error: DAILY_STUDY_LIMIT_REACHED_MESSAGE,
-        remaining: 0,
-        dailyStudyLimit: DAILY_STUDY_LIMIT,
-      })
-      return
+      const ticket = await consumeAiRecommendTicket(userId)
+      if (!ticket.ok) {
+        res.status(429).json({
+          error: NO_AI_RECOMMEND_TICKETS_MESSAGE,
+          remaining: 0,
+          dailyStudyLimit: DAILY_STUDY_LIMIT,
+          aiRecommendTickets: 0,
+        })
+        return
+      }
+      usedTicket = true
+      ticketsRemaining = ticket.remaining
     }
+    const refundReservation = () => (usedTicket ? refundAiRecommendTicket(userId) : refundStudy(userId))
 
     const knownTitlesResult = await sql<{ title: string }>`
       SELECT title FROM character_knowledge_entries
@@ -713,7 +797,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       // 수 없었던 경우(SelfStudyParseError) — 둘 다 쓸 수 있는 결과가
       // 없으므로 오늘 한도에서 제외한다. handleVerifyKnowledge와 같은
       // 회계 원칙.
-      await refundStudy(userId)
+      await refundReservation()
       const { status, message } = resolveGeminiFailureMessage(err)
       res.status(status).json({ error: message })
       return
@@ -759,7 +843,7 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       `
     } catch (err) {
       console.error('[api/character] failed to persist character_messages for study-generate', err)
-      await refundStudy(userId)
+      await refundReservation()
       res.status(500).json({ error: '대화를 저장하는 중 오류가 발생했어요.' })
       return
     }
@@ -775,7 +859,8 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
       },
       verificationToken,
       characterReply,
-      remaining: reserved.remaining,
+      remaining: usedTicket ? 0 : reserved.remaining,
+      aiRecommendTickets: usedTicket ? ticketsRemaining : undefined,
       dailyStudyLimit: DAILY_STUDY_LIMIT,
       ageBlocked,
       characterAgeTier,

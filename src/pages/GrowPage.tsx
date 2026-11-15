@@ -137,7 +137,18 @@ const QUIZ_SNACK_COST_WON = 20_000
 export default function GrowPage() {
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { characters, loading, createCharacter, setProfession, listMessages, getExam, listKnowledge, getUsage } = useGrowth()
+  const {
+    characters,
+    loading,
+    createCharacter,
+    setProfession,
+    listMessages,
+    getExam,
+    listKnowledge,
+    getUsage,
+    purchaseAiRecommendTicket,
+    purchaseKnowledgeValidationTicket,
+  } = useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
   const [error, setError] = useState<string | null>(null)
@@ -202,8 +213,9 @@ export default function GrowPage() {
   // 했다.
   const wallet = useMockWallet()
   // 지시서(한도 소진 시 구매 유도 UI + 향후 구독 확장 설계): userTier/
-  // isUnlimited...·구매 충전권 보너스를 담는 상태 — 자세한 설계 의도는
-  // useAccountTier.ts 참고.
+  // isUnlimited...(구독 등급 placeholder)만 담는 상태 — 자세한 설계
+  // 의도는 useAccountTier.ts 참고. 충전권 보너스는 더 이상 여기 없다
+  // (아래 handleMarketEffect, GrowthContext.tsx의 실제 tickets 참고).
   const accountTier = useAccountTier()
   // 가르치기 패널의 "만능마켓에서 구매하기" 버튼이 이 값을 채우고
   // openSheet를 'universalMarket'으로 바꾼다 — 기존 GameMenu의
@@ -214,12 +226,18 @@ export default function GrowPage() {
     setMarketInitialCategory('education')
     setOpenSheet('universalMarket')
   }, [])
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI 추천 충전권"/
+  // "지식 검증 충전권" 구매가 실제 DB 이용권(GrowthContext.tsx의
+  // tickets)으로 바로 반영되도록 서버 구매 액션을 호출한다 — 더 이상
+  // 체험판 표시용 카운터만 올리지 않는다. 실패하면 그대로 던져서
+  // UniversalMarket이 가상 용돈 차감을 되돌리고 오류를 보여줄 수 있게
+  // 한다.
   const handleMarketEffect = useCallback(
-    (effect: MarketItemEffect) => {
-      if (effect.type === 'ai_recommend_bonus') accountTier.addRecommendBonus(effect.amount)
-      if (effect.type === 'knowledge_validation_bonus') accountTier.addValidationBonus(effect.amount)
+    async (effect: MarketItemEffect) => {
+      if (effect.type === 'ai_recommend_bonus') await purchaseAiRecommendTicket()
+      if (effect.type === 'knowledge_validation_bonus') await purchaseKnowledgeValidationTicket()
     },
-    [accountTier],
+    [purchaseAiRecommendTicket, purchaseKnowledgeValidationTicket],
   )
 
   const character = characters.find((c) => c.companionType === selected) ?? null

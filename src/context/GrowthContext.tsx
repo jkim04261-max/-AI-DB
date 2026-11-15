@@ -145,9 +145,24 @@ interface CharacterMessageApiRow {
   created_at: string
 }
 
+// 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 만능마켓에서 산 "AI
+// 추천 충전권"/"지식 검증 충전권"이 쌓이는 계정 단위(캐릭터와 무관) 수량.
+// 하루 무료 한도(daily_teach_usage/daily_study_usage)와 달리 자정에
+// 리셋되지 않는다.
+export interface TicketBalances {
+  aiRecommendTickets: number
+  knowledgeValidationTickets: number
+}
+
 interface GrowthContextValue {
   characters: Character[]
   loading: boolean
+  // PR 지시서(만능마켓 구매 즉시 이용권 실시간 연동): getUsage를 부른
+  // 적이 없으면 구매 전 기본값(0,0)이다 — InteractionPanel이 마운트
+  // 시점에 getUsage를 불러 최신 값으로 덮어쓴다.
+  tickets: TicketBalances
+  purchaseAiRecommendTicket: () => Promise<TicketBalances>
+  purchaseKnowledgeValidationTicket: () => Promise<TicketBalances>
   createCharacter: (companionType: CompanionType) => Promise<void>
   setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<void>
   verifyKnowledge: (
@@ -295,6 +310,11 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [characters, setCharacters] = useState<Character[]>([])
   const [loading, setLoading] = useState(true)
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 계정 단위(캐릭터와
+  // 무관) 이용권 잔액 — getUsage를 부르기 전까지는 기본값(0,0)이고,
+  // getUsage/verifyKnowledge/studyGenerate/구매 액션 중 아무거나 한 번
+  // 다녀오면 서버가 보낸 최신 값으로 갱신된다.
+  const [tickets, setTickets] = useState<TicketBalances>({ aiRecommendTickets: 0, knowledgeValidationTickets: 0 })
 
   // Characters are per-user, so the list is cleared and re-fetched whenever
   // the signed-in user changes (including logout) — same reasoning as
@@ -347,6 +367,17 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, focusPercent } : c)))
   }, [])
 
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): verifyKnowledge/
+  // studyGenerate/getUsage/구매 액션 모두 이 한 곳으로만 tickets를
+  // 갱신한다 — 서버 응답에 그 필드가 없으면(예: 무료 횟수로 처리돼
+  // 이용권 잔액이 안 바뀐 경우) 해당 값은 그대로 둔다.
+  const applyTicketUpdate = useCallback((partial: { aiRecommendTickets?: number; knowledgeValidationTickets?: number }) => {
+    setTickets((prev) => ({
+      aiRecommendTickets: partial.aiRecommendTickets ?? prev.aiRecommendTickets,
+      knowledgeValidationTickets: partial.knowledgeValidationTickets ?? prev.knowledgeValidationTickets,
+    }))
+  }, [])
+
   const createCharacter = useCallback(async (companionType: CompanionType) => {
     const res = await fetch('/api/character', {
       method: 'POST',
@@ -396,12 +427,14 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterAgeTier?: AgeTier
       requiredAgeTier?: AgeTier
       focusPercent?: number
+      knowledgeValidationTickets?: number
       error?: string
     }
     if (!res.ok || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '지식을 검증하는 중 오류가 발생했어요.')
     }
     if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
+    if (data.knowledgeValidationTickets !== undefined) applyTicketUpdate({ knowledgeValidationTickets: data.knowledgeValidationTickets })
     return {
       verification: data.verification,
       verificationToken: data.verificationToken,
@@ -413,7 +446,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       requiredAgeTier: data.requiredAgeTier ?? 'toddler',
       focusPercent: data.focusPercent ?? 90,
     }
-  }, [updateFocusPercent])
+  }, [updateFocusPercent, applyTicketUpdate])
 
   // "스스로 공부하기" — Gemini 호출 1회로 캐릭터가 새 지식을 생성하고
   // 스스로 평가한다. verifyKnowledge와 마찬가지로 이 호출 자체는 아무것도
@@ -436,12 +469,14 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterAgeTier?: AgeTier
       requiredAgeTier?: AgeTier
       focusPercent?: number
+      aiRecommendTickets?: number
       error?: string
     }
     if (!res.ok || !data.knowledge || !data.verification || !data.verificationToken || !data.characterReply) {
       throw new Error(data.error || '스스로 공부하는 중 오류가 발생했어요.')
     }
     if (data.focusPercent !== undefined) updateFocusPercent(companionType, data.focusPercent)
+    if (data.aiRecommendTickets !== undefined) applyTicketUpdate({ aiRecommendTickets: data.aiRecommendTickets })
     return {
       knowledge: data.knowledge,
       verification: data.verification,
@@ -454,7 +489,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       requiredAgeTier: data.requiredAgeTier ?? 'toddler',
       focusPercent: data.focusPercent ?? 90,
     }
-  }, [updateFocusPercent])
+  }, [updateFocusPercent, applyTicketUpdate])
 
   const saveKnowledge = useCallback(
     async (
@@ -742,18 +777,59 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       teachLimit?: number
       studyRemaining?: number
       studyLimit?: number
+      aiRecommendTickets?: number
+      knowledgeValidationTickets?: number
       error?: string
     }
     if (!res.ok || data.teachRemaining === undefined || data.studyRemaining === undefined) {
       throw new Error(data.error || '오늘의 행동력 정보를 불러오는 중 오류가 발생했어요.')
     }
+    // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 가르치기 패널이
+    // 열릴 때마다 getUsage를 부르므로, 여기서도 최신 이용권 잔액을
+    // 동기화해둔다(새로고침 없이도 패널을 다시 열면 항상 최신값).
+    applyTicketUpdate({ aiRecommendTickets: data.aiRecommendTickets, knowledgeValidationTickets: data.knowledgeValidationTickets })
     return {
       teachRemaining: data.teachRemaining,
       teachLimit: data.teachLimit ?? 0,
       studyRemaining: data.studyRemaining,
       studyLimit: data.studyLimit ?? 0,
     }
-  }, [])
+  }, [applyTicketUpdate])
+
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 만능마켓에서 "AI 추천
+  // 충전권"/"지식 검증 충전권"을 구매했을 때 UniversalMarket→GrowPage가
+  // 호출한다 — 응답으로 받은 최신 잔액을 즉시 context 상태에 반영해서,
+  // 호출부가 결과를 await한 다음 바로 학습 모달로 돌아가도 "남은
+  // 횟수(무료/구매)" 표시와 버튼 동작이 새로고침 없이 맞게 보인다.
+  const purchaseAiRecommendTicket = useCallback(async (): Promise<TicketBalances> => {
+    const res = await fetch('/api/character?action=purchase-ai-recommend-ticket', { method: 'POST' })
+    const data = (await res.json().catch(() => ({}))) as {
+      aiRecommendTickets?: number
+      knowledgeValidationTickets?: number
+      error?: string
+    }
+    if (!res.ok || data.aiRecommendTickets === undefined || data.knowledgeValidationTickets === undefined) {
+      throw new Error(data.error || 'AI 추천 충전권을 지급하는 중 오류가 발생했어요.')
+    }
+    const updated = { aiRecommendTickets: data.aiRecommendTickets, knowledgeValidationTickets: data.knowledgeValidationTickets }
+    applyTicketUpdate(updated)
+    return updated
+  }, [applyTicketUpdate])
+
+  const purchaseKnowledgeValidationTicket = useCallback(async (): Promise<TicketBalances> => {
+    const res = await fetch('/api/character?action=purchase-knowledge-validation-ticket', { method: 'POST' })
+    const data = (await res.json().catch(() => ({}))) as {
+      aiRecommendTickets?: number
+      knowledgeValidationTickets?: number
+      error?: string
+    }
+    if (!res.ok || data.aiRecommendTickets === undefined || data.knowledgeValidationTickets === undefined) {
+      throw new Error(data.error || '지식 검증 충전권을 지급하는 중 오류가 발생했어요.')
+    }
+    const updated = { aiRecommendTickets: data.aiRecommendTickets, knowledgeValidationTickets: data.knowledgeValidationTickets }
+    applyTicketUpdate(updated)
+    return updated
+  }, [applyTicketUpdate])
 
   // PR #63: "가르치기·스스로 공부하기" 패널이 열릴 때(그리고 저장
   // 직후) 지금 연령대의 6개 미션 카드 진행 상태를 보여주기 위한 조회 —
@@ -772,6 +848,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       value={{
         characters,
         loading,
+        tickets,
+        purchaseAiRecommendTicket,
+        purchaseKnowledgeValidationTicket,
         createCharacter,
         setProfession,
         verifyKnowledge,

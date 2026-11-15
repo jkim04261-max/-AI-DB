@@ -90,7 +90,7 @@ export default function InteractionPanel({
   // "만능마켓에서 구매하기" 버튼 클릭 — 호출부가 만능마켓 시트를 열어준다.
   onBuyMoreUses?: () => void
 }) {
-  const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages } = useGrowth()
+  const { verifyKnowledge, studyGenerate, saveKnowledge, getMissionProgress, listKnowledge, listMessages, tickets } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
   // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
   // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
@@ -398,8 +398,14 @@ export default function InteractionPanel({
   // 보면 되도록 미리 이렇게 짜 둔다.
   const hasUnlimitedRecommend = accountTier.isUnlimitedRecommend || accountTier.userTier === 'premium'
   const hasUnlimitedValidation = accountTier.isUnlimitedValidation || accountTier.userTier === 'premium'
-  const recommendExhausted = !hasUnlimitedRecommend && studyRemaining !== null && studyRemaining.remaining <= 0
-  const validationExhausted = !hasUnlimitedValidation && teachRemaining !== null && teachRemaining.remaining <= 0
+  // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 하루 무료 횟수가
+  // 바닥났어도 구매한 이용권(tickets)이 남아있으면 아직 "진짜" 소진이
+  // 아니다 — 버튼은 둘 다 0일 때만 막는다(서버 handleGenerateStudy/
+  // handleVerifyKnowledge도 정확히 같은 순서로 판단한다).
+  const recommendExhausted =
+    !hasUnlimitedRecommend && studyRemaining !== null && studyRemaining.remaining <= 0 && tickets.aiRecommendTickets <= 0
+  const validationExhausted =
+    !hasUnlimitedValidation && teachRemaining !== null && teachRemaining.remaining <= 0 && tickets.knowledgeValidationTickets <= 0
 
   // PR #62 요청 1~2번: 화면 전체를 "게임 속 미션 창" 톤(다크 글래스 +
   // 청록 홀로그램)으로 바꾸고, 입력 방식을 3개의 또렷이 구분된 미션
@@ -532,8 +538,9 @@ export default function InteractionPanel({
             >
               {busyAction === 'study' ? '예시 만드는 중...' : '✨ 예시 만들어주기'}
             </button>
-            {/* 지시서(한도 소진 시 구매 유도 UI): aiRecommendCount(studyRemaining)
-                가 0이 되면 버튼을 비활성화하고 그 옆에 구매 버튼을 노출한다. */}
+            {/* 지시서(한도 소진 시 구매 유도 UI): 무료 횟수(studyRemaining)와
+                구매한 이용권(tickets.aiRecommendTickets)이 둘 다 0이 되면
+                버튼을 비활성화하고 그 옆에 구매 버튼을 노출한다. */}
             {recommendExhausted && (
               <button
                 type="button"
@@ -549,18 +556,14 @@ export default function InteractionPanel({
             AI가 예시를 만들어줘요 — 내용을 확인하고 아래 "저장"을 눌러야 미션이 완료돼요. 기존 학습 기록을 참고해 새로운 학습
             내용을 생성해요(하루 최대 3회). 실제 Gemini 모델을 재학습시키는 기능은 아니에요.
           </p>
+          {/* 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "남은 횟수:
+              무료 N회 / 구매 N회" 한 줄로 하루 무료 횟수와 구매한
+              이용권을 함께 보여준다 — 구매한 이용권은 더 이상 표시용
+              placeholder가 아니라, 무료 횟수가 0이 될 때 버튼이 실제로
+              그 수량을 깎아 쓴다. */}
           {studyRemaining && (
-            <p className="text-sm font-semibold text-purple-200/70 sm:text-base">
-              오늘 남은 스스로 공부하기 횟수: {studyRemaining.remaining}/{studyRemaining.limit}
-            </p>
-          )}
-          {/* 지시서(향후 구독 확장을 위한 상태 설계): 구매한 충전권은
-              체험판 표시값이다 — 실제 서버 하루 한도는 아직 늘어나지
-              않으므로, 혼동 없게 그 사실을 바로 옆에 적어둔다(다음
-              PR에서 서버 한도 검사 로직을 함께 바꿔 실제로 연결한다). */}
-          {accountTier.aiRecommendBonus > 0 && (
-            <p data-testid="ai-recommend-bonus" className="text-sm font-semibold text-amber-300/90">
-              🎫 구매한 AI 추천 충전권: {accountTier.aiRecommendBonus}개 (실제 사용 횟수 연동은 다음 업데이트에서 제공돼요)
+            <p data-testid="ai-recommend-remaining" className="text-sm font-semibold text-purple-200/70 sm:text-base">
+              남은 횟수: 무료 {studyRemaining.remaining}회 / 구매 {tickets.aiRecommendTickets}회
             </p>
           )}
         </div>
@@ -663,8 +666,16 @@ export default function InteractionPanel({
           <p className="text-sm font-semibold text-slate-400 sm:text-base">
             입력한 지식을 AI가 검토해요. 검증 성공 후 저장해야 경험치가 지급됩니다.
           </p>
-          {/* 지시서(한도 소진 시 구매 유도 UI): dailyValidationCount
-              (teachRemaining)가 0이 되면 검증 영역 하단에 구매 버튼을
+          {/* 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "남은 횟수:
+              무료 N회 / 구매 N회" 한 줄로 하루 무료 검증 횟수와 구매한
+              이용권을 함께 보여준다. */}
+          {teachRemaining && (
+            <p data-testid="validation-remaining" className="text-sm font-semibold text-slate-400 sm:text-base">
+              남은 횟수: 무료 {teachRemaining.remaining}회 / 구매 {tickets.knowledgeValidationTickets}회
+            </p>
+          )}
+          {/* 지시서(한도 소진 시 구매 유도 UI): 무료 횟수와 구매한
+              이용권이 둘 다 0이 되면 검증 영역 하단에 구매 버튼을
               노출한다. */}
           {validationExhausted && (
             <button
@@ -675,11 +686,6 @@ export default function InteractionPanel({
             >
               🛍️ 만능마켓에서 지식 검증 횟수 구매하기
             </button>
-          )}
-          {accountTier.dailyValidationBonus > 0 && (
-            <p data-testid="validation-bonus" className="text-sm font-semibold text-amber-300/90">
-              🔖 구매한 지식 검증 충전권: {accountTier.dailyValidationBonus}개 (실제 사용 횟수 연동은 다음 업데이트에서 제공돼요)
-            </p>
           )}
         </div>
       </div>
