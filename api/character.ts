@@ -276,6 +276,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGenerateStudy(req, res, session.sub)
       return
     }
+    if (action === 'complete-card-game') {
+      await handleCompleteCardGame(req, res, session.sub)
+      return
+    }
     if (action === 'quiz-submit') {
       await handleSubmitQuiz(req, res, session.sub)
       return
@@ -873,6 +877,69 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
   }
 }
 
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): CardMatchGame(직업 카드
+// 맞추기 미니게임, src/components/games/CardMatchGame.tsx)을 1세트
+// 클리어했을 때 호출한다 — 검증할 사용자 콘텐츠가 전혀 없는(고정 문구)
+// 결정적인 "완료 확인" 액션이라 Gemini를 부르지 않고, 하루 검증/공부
+// 한도도 전혀 소비하지 않는다. verify-knowledge/study-generate와 똑같은
+// 모양(verification + 서명된 verificationToken)으로 응답해서, 프런트가
+// 그 토큰을 기존 save-knowledge(missionType='card_game')에 그대로
+// 넘기기만 하면 되도록 한다 — XP 지급·집중력 반영·진화 판정·대화 로그
+// 저장을 전부 그 기존 경로가 처리한다(새 저장 경로를 만들지 않는다).
+const CARD_GAME_COMPLETION_TITLE = '직업 카드 맞추기 완료'
+const CARD_GAME_COMPLETION_CONTENT = '직업 카드와 도구 카드를 모두 맞춰서 한 세트를 클리어했습니다.'
+
+async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType } = (req.body ?? {}) as { companionType?: unknown }
+
+  try {
+    await ensureCharacterTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const verification: KnowledgeVerificationResult = {
+      status: 'appropriate',
+      explanation: '모든 카드를 맞췄어요!',
+      relevance: '',
+      issues: '',
+      suggestion: '',
+      requiredAgeTier: 'toddler',
+    }
+    const verificationToken = signKnowledgeVerification({
+      userId,
+      characterId: character.id,
+      companionType: companionType as string,
+      title: CARD_GAME_COMPLETION_TITLE,
+      content: CARD_GAME_COMPLETION_CONTENT,
+      status: verification.status,
+      explanation: verification.explanation,
+      relevance: verification.relevance,
+      issues: verification.issues,
+      suggestion: verification.suggestion,
+      source: 'user_taught',
+      requiredAgeTier: verification.requiredAgeTier,
+    })
+
+    res.status(200).json({
+      knowledge: { title: CARD_GAME_COMPLETION_TITLE, content: CARD_GAME_COMPLETION_CONTENT },
+      verification,
+      verificationToken,
+      characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on complete-card-game', err)
+    res.status(500).json({ error: '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.' })
+  }
+}
+
 // Persists a knowledge entry the user has reviewed and confirmed. Only
 // ever inserts a row when a *signed* verification token (minted by
 // handleVerifyKnowledge above, over the exact user/character/title/content
@@ -1323,12 +1390,17 @@ async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, u
       return
     }
 
-    const questions = pickRandomObjectiveQuizQuestions(2)
+    // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): toddler(8~9살)의 2단계는
+    // 그대로 2문제, teen(10대) ④번 단계만 3문제 — 클라이언트가 보낸 값은
+    // 신뢰하지 않고 서버가 "지금" 연령대로 직접 정한다(연령 게이트와 같은
+    // 신뢰 모델).
+    const objectiveQuizCount = effectiveAgeTier(character) === 'teen' ? 3 : 2
+    const questions = pickRandomObjectiveQuizQuestions(objectiveQuizCount)
     const quizToken = signObjectiveQuizToken({
       userId,
       characterId: character.id,
       companionType: String(companionType),
-      questionIds: [questions[0].id, questions[1].id],
+      questionIds: questions.map((q) => q.id),
     })
 
     res.status(200).json({
@@ -1341,14 +1413,16 @@ async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, u
   }
 }
 
-// 지시서(학습 플로우 전면 개편) 2단계 채점 — "2문제 세트를 전부 맞혀야만"
-// 통과한다(요청 2번: 둘 중 하나라도 틀리면 통과 못함). 통과하면 두
-// 문제 각각을 character_knowledge_entries에 mission_type='objective'로
-// 저장해(일반 가르치기 저장과 똑같은 XP·집중력·진화 판정 경로를 그대로
-// 탄다) 2단계가 끝났다는 사실이 서버 쪽 진짜 상태(미션 집계)에 반영되게
-// 한다 — 틀리면 아무것도 저장하지 않고 "앗, 틀렸어요! 다시 도전해
-// 볼까요?"만 돌려줘, 클라이언트가 새 GET 호출로 다른 2문제를 다시
-// 받아 처음부터 반복하게 한다(요청 3번: 세트 단위 무한 반복).
+// 지시서(학습 플로우 전면 개편) 2단계 채점 — "세트를 전부 맞혀야만"
+// 통과한다(요청 2번: 하나라도 틀리면 통과 못함). 통과하면 문제마다
+// character_knowledge_entries에 mission_type='objective'로 저장해(일반
+// 가르치기 저장과 똑같은 XP·집중력·진화 판정 경로를 그대로 탄다) 이
+// 단계가 끝났다는 사실이 서버 쪽 진짜 상태(미션 집계)에 반영되게 한다
+// — 틀리면 아무것도 저장하지 않고 "앗, 틀렸어요! 다시 도전해 볼까요?"
+// 만 돌려줘, 클라이언트가 새 GET 호출로 새 문제 세트를 다시 받아
+// 처음부터 반복하게 한다(요청 3번: 세트 단위 무한 반복). 지시서(10대
+// 커리큘럼: 직업 카드 맞추기 통합): 세트 크기가 toddler는 2문제,
+// teen은 3문제로 서버가 연령대에 따라 정한다(handleGetObjectiveQuiz).
 async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
   const { companionType, quizToken, answers, requestId } = (req.body ?? {}) as {
     companionType?: unknown
@@ -1357,14 +1431,21 @@ async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse
     requestId?: unknown
   }
 
-  if (!Array.isArray(answers) || answers.length !== 2 || answers.some((a) => typeof a !== 'number' || !Number.isInteger(a) || a < 0)) {
-    res.status(400).json({ error: '두 문제 모두 답을 선택해주세요.' })
+  if (!Array.isArray(answers) || answers.length === 0 || answers.some((a) => typeof a !== 'number' || !Number.isInteger(a) || a < 0)) {
+    res.status(400).json({ error: '모든 문제의 답을 선택해주세요.' })
     return
   }
 
   const tokenPayload = verifyObjectiveQuizToken(quizToken)
   if (!tokenPayload) {
     res.status(400).json({ error: '문제가 만료되었거나 올바르지 않아요. 다시 받아주세요.' })
+    return
+  }
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 문제 수가 더 이상
+  // 항상 2로 고정되지 않으므로, 토큰이 실제로 출제한 문제 수와 제출한
+  // 답의 개수가 정확히 같은지부터 확인한다.
+  if (answers.length !== tokenPayload.questionIds.length) {
+    res.status(400).json({ error: '모든 문제의 답을 선택해주세요.' })
     return
   }
 
@@ -1454,29 +1535,36 @@ async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse
       `
     }
 
-    const expResult1 = await applyExpGain(userId, character.id, character.level, KNOWLEDGE_SAVE_EXP)
-    const expResult2 = await applyExpGain(userId, character.id, expResult1.newLevel, KNOWLEDGE_SAVE_EXP)
-    const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult2.newLevel, character.mission_unlocked_tier)
-    await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
-    const focusPercent = await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
+    // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 예전엔 항상 정확히
+    // 2문제라 applyExpGain/adjustFocusPercent를 두 번 직접 썼지만, 세트
+    // 크기가 가변이 되었으므로 저장한 문제 수만큼 반복한다 — 문제 하나당
+    // 정확히 한 번씩 XP·집중력이 오르는 건 기존과 동일하다.
+    let runningLevel = character.level
+    let runningExp = character.exp
+    let anyLeveledUp = false
+    for (let i = 0; i < resolvedQuestions.length; i++) {
+      const gain = await applyExpGain(userId, character.id, runningLevel, KNOWLEDGE_SAVE_EXP)
+      runningLevel = gain.newLevel
+      runningExp = gain.exp
+      anyLeveledUp = anyLeveledUp || gain.leveledUp
+    }
+    const evolveResult = await maybeEvolveAgeTier(userId, character.id, runningLevel, character.mission_unlocked_tier)
+    let focusPercent = character.focus_percent
+    for (let i = 0; i < resolvedQuestions.length; i++) {
+      focusPercent = await adjustFocusPercent(userId, character.id, FOCUS_UP_ON_SAVE)
+    }
 
-    const expAwarded = KNOWLEDGE_SAVE_EXP * 2
-    const message = buildObjectiveQuizResultMessage(
-      true,
-      expAwarded,
-      expResult1.leveledUp || expResult2.leveledUp,
-      expResult2.newLevel,
-      evolveResult.newAgeTierStageLabel,
-    )
+    const expAwarded = KNOWLEDGE_SAVE_EXP * resolvedQuestions.length
+    const message = buildObjectiveQuizResultMessage(true, expAwarded, anyLeveledUp, runningLevel, evolveResult.newAgeTierStageLabel)
 
     res.status(201).json({
       allCorrect: true,
       results,
       message,
       expAwarded,
-      exp: expResult2.exp,
-      level: expResult2.newLevel,
-      leveledUp: expResult1.leveledUp || expResult2.leveledUp,
+      exp: runningExp,
+      level: runningLevel,
+      leveledUp: anyLeveledUp,
       missionProgress: evolveResult.missionProgress,
       evolved: evolveResult.evolved,
       newAgeTier: evolveResult.newAgeTier,

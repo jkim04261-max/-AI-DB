@@ -13,7 +13,12 @@ export interface ObjectiveQuizTokenPayload {
   userId: number
   characterId: number
   companionType: string
-  questionIds: [string, string]
+  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 예전엔 항상 정확히
+  // 2문제([string, string])였지만, teen 단계 ④번 "객관식 3문제" 단계도
+  // 같은 메커니즘을 재사용하도록 가변 길이 배열로 넓혔다 — 길이 자체는
+  // 신뢰하지 않고 제출 시 answers.length와 다시 비교한다(handleSubmit
+  // ObjectiveQuiz 참고).
+  questionIds: string[]
 }
 
 function getAuthSecret(): string {
@@ -63,9 +68,8 @@ export function verifyObjectiveQuizToken(token: unknown): ObjectiveQuizTokenPayl
       typeof parsed.characterId !== 'number' ||
       typeof parsed.companionType !== 'string' ||
       !Array.isArray(parsed.questionIds) ||
-      parsed.questionIds.length !== 2 ||
-      typeof parsed.questionIds[0] !== 'string' ||
-      typeof parsed.questionIds[1] !== 'string' ||
+      parsed.questionIds.length === 0 ||
+      !parsed.questionIds.every((id) => typeof id === 'string') ||
       typeof parsed.exp !== 'number'
     ) {
       return null
@@ -76,7 +80,7 @@ export function verifyObjectiveQuizToken(token: unknown): ObjectiveQuizTokenPayl
       userId: parsed.userId,
       characterId: parsed.characterId,
       companionType: parsed.companionType,
-      questionIds: [parsed.questionIds[0], parsed.questionIds[1]] as [string, string],
+      questionIds: parsed.questionIds as string[],
     }
   } catch {
     return null

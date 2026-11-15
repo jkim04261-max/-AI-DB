@@ -422,6 +422,16 @@ export function ensureKnowledgeTable() {
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS mission_type TEXT
           CHECK (mission_type IN ('objective', 'subjective', 'knowhow'))
       `
+      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 이미 배포된 DB는 바로
+      // 위 ADD COLUMN IF NOT EXISTS가 아무 일도 하지 않아서 예전의 3종
+      // CHECK가 그대로 남는다 — characters_profession_check와 같은 방식
+      // (이름 없는 CHECK의 기본 이름에 의존)으로 그 제약을 지우고
+      // 'card_game'을 포함한 4종으로 다시 건다.
+      await sql`ALTER TABLE character_knowledge_entries DROP CONSTRAINT IF EXISTS character_knowledge_entries_mission_type_check`
+      await sql`
+        ALTER TABLE character_knowledge_entries ADD CONSTRAINT character_knowledge_entries_mission_type_check
+          CHECK (mission_type IN ('objective', 'subjective', 'knowhow', 'card_game'))
+      `
       await sql`
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS age_tier_at_save TEXT
           CHECK (age_tier_at_save IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
