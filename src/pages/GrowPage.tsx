@@ -23,6 +23,8 @@ import CustomizationRoom from '../components/grow/CustomizationRoom'
 import ItemMarket from '../components/grow/ItemMarket'
 import UniversalMarket from '../components/grow/UniversalMarket'
 import HungryEventModal from '../components/grow/HungryEventModal'
+import ErrandEventModal from '../components/grow/ErrandEventModal'
+import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -117,6 +119,16 @@ const HUNGRY_QUIZ_PENALTY_COUNT = 5
 // 수입 이벤트.
 const PART_TIME_JOB_EARNING_WON = 20_000
 
+// 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): toddler
+// (8~9살)에서는 기존 "식사 ↔ 알바" 2단계 번갈이 중 알바 자리를
+// 대신해서 선택형 심부름 이벤트를 띄운다(지시서 4번: "10대 스테이지
+// 부터는 '심부름'이 아닌 [편의점 알바하기] 등으로... 자동 변경" —
+// 즉 심부름은 toddler 전용으로 "알바" 슬롯이 입는 옷일 뿐이다).
+// 10대 이상은 기존 triggerPartTimeJob(자동 연출, 20,000원)을 그대로
+// 쓴다 — 지시서 자신이 "10대용 알바는 추후 업데이트에서 문제 풀이
+// 등으로 연동"이라고 범위를 토들러로 한정했다.
+const ERRAND_EARNING_WON = 10_000
+
 // 지시서(문제 풀기 용돈 이벤트): "문제 풀기"에서 정답을 맞힐 때마다 쌓는
 // 누적 횟수로 두 가지 독립된 이벤트를 띄운다 — 3의 배수번째 정답마다
 // 보상(반복), 정확히 5번째 정답에서 간식 이벤트(1회성). 둘 다 체험판
@@ -198,6 +210,12 @@ export default function GrowPage() {
   const [isHungry, setIsHungry] = useState(false)
   const [hungryQuizRemaining, setHungryQuizRemaining] = useState<number | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
+  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트):
+  // errandEventOpen=심부름 선택 모달 표시 중, homeworkQuizOpen=거절
+  // 후 숙제 퀴즈 모달 표시 중 — 둘이 동시에 열리지는 않는다(거절
+  // 클릭이 errandEventOpen을 닫고 그 즉시 homeworkQuizOpen을 연다).
+  const [errandEventOpen, setErrandEventOpen] = useState(false)
+  const [homeworkQuizOpen, setHomeworkQuizOpen] = useState(false)
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -350,6 +368,8 @@ export default function GrowPage() {
     setIsHungry(false)
     setHungryQuizRemaining(null)
     setFeedError(null)
+    setErrandEventOpen(false)
+    setHomeworkQuizOpen(false)
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
     // 에서는 getExam이 항상 400을 받게 되므로, 애초에 호출하지 않는다.
@@ -666,6 +686,42 @@ export default function GrowPage() {
     outingTimeoutsRef.current.push(t1)
   }
 
+  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 패널을
+  // 닫고 선택형 모달을 띄운다 — triggerHungryEvent/triggerPartTimeJob과
+  // 같은 "패널 닫고 모달 열기" 패턴이다. 자동으로 돈을 주거나 빼앗지
+  // 않고, 사용자가 "심부름 하러 가기"/"거절하기" 중 하나를 고를 때까지
+  // 기다린다.
+  const triggerErrandEvent = () => {
+    setOpenSheet(null)
+    setErrandEventOpen(true)
+  }
+
+  // "심부름 하러 가기" 클릭(ErrandEventModal 내부 연출이 끝난 뒤 호출됨)
+  // — 체험판 용돈에 수입을 더한다. 지갑이 아직 없는 캐릭터(Stage 1
+  // 온보딩 전)는 알바/식사 이벤트와 같은 이유로 금액 변화를 건너뛴다.
+  const handleErrandAccept = () => {
+    setErrandEventOpen(false)
+    if (wallet.balanceWon !== null) reward(wallet, ERRAND_EARNING_WON, 'errand')
+    setMoneyPopup(ERRAND_EARNING_WON)
+    const t = setTimeout(() => setMoneyPopup(null), 1800)
+    outingTimeoutsRef.current.push(t)
+    showBubble(`심부름 성공! 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받았어요.`)
+  }
+
+  // "거절하기" 클릭 — 심부름 모달을 닫고 곧바로 숙제 퀴즈 모달을 연다.
+  const handleErrandDecline = () => {
+    setErrandEventOpen(false)
+    setHomeworkQuizOpen(true)
+  }
+
+  // 숙제 퀴즈 정답 — 모달을 닫고 기존 학습 화면으로 돌아간다. 보상은
+  // 없다(심부름을 거절한 데 대한 페널티일 뿐, 숙제 자체가 돈을 벌어다
+  // 주지는 않는다).
+  const handleHomeworkComplete = () => {
+    setHomeworkQuizOpen(false)
+    showBubble('휴, 숙제를 다 했어요!')
+  }
+
   // InteractionPanel이 지식 저장에 성공할 때마다 호출된다 — 지정된
   // 횟수(MEAL_TRIGGER_SAVE_COUNT)를 채울 때마다 식사 → 알바 이벤트를
   // 번갈아 띄운 뒤 다시 0부터 센다. 지시서(연령대별 스테이지
@@ -675,7 +731,9 @@ export default function GrowPage() {
   // 개수가 늘어날수록(6→10→...→50) 이 3회 단위 휴식 이벤트도 자연히
   // 더 자주 끼어든다. 지시서(서점 팝업 흐름 수정): 여기 있던 서점
   // 외출 자동 트리거는 레벨업 직후에 뜨는 것이 기획과 맞지 않아
-  // 제거했다(식사/알바 2단계로 축소).
+  // 제거했다(식사/알바 2단계로 축소). 지시서(8세 전용 경제 활동
+  // 기획): toddler는 그 "알바" 자리에서 자동 연출(triggerPartTimeJob)
+  // 대신 선택형 심부름 이벤트를 띄운다 — 10대 이상은 기존 동작 그대로.
   const handleKnowledgeSaved = () => {
     if (!character) return
     knowledgeSaveCountRef.current += 1
@@ -686,7 +744,11 @@ export default function GrowPage() {
         triggerHungryEvent()
       } else {
         outingCycleRef.current = 0
-        triggerPartTimeJob()
+        if (ageTier === 'toddler') {
+          triggerErrandEvent()
+        } else {
+          triggerPartTimeJob()
+        }
       }
     }
   }
@@ -1029,6 +1091,16 @@ export default function GrowPage() {
                       onLater={handleFeedLater}
                     />
                   )}
+                  {errandEventOpen && (
+                    <ErrandEventModal
+                      companionType={character.companionType}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      onAccept={handleErrandAccept}
+                      onDecline={handleErrandDecline}
+                    />
+                  )}
+                  {homeworkQuizOpen && <HomeworkQuizModal onComplete={handleHomeworkComplete} />}
                 </div>
 
                 <div className="flex flex-col gap-2 bg-gradient-to-b from-amber-900 to-amber-950 p-3">

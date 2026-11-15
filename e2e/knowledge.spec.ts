@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
 import { ageTierForLevel } from '../src/data/characterAge'
+import { HOUSEWORK_QUIZ_QUESTIONS } from '../src/data/householdQuizzes'
 
 // 지식 가르치기 + Gemini 검증 (PR #44) — all mocked, no real DB/Gemini call.
 // See e2e/README.md. ChatProvider also mounts at the app root and fetches
@@ -2182,11 +2183,135 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
-  await teachThreeTimes('round1') // 알바: +20,000원
-  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
-  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
-  await expect(page.getByTestId('speech-bubble')).toContainText('아르바이트해서')
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('110,000원')
+  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
+  // toddler(8~9살)는 "알바" 자리에서 자동 연출 대신 선택형 심부름
+  // 이벤트가 뜬다 — "심부름 하러 가기"를 고르면 +10,000원.
+  await teachThreeTimes('round1') // 심부름: +10,000원
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('money-popup')).toContainText('10,000원')
+  await expect(page.getByTestId('speech-bubble')).toContainText('심부름 성공')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+})
+
+// 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) "거절하기"
+// 경로 — 심부름 모달을 닫고 집에서 숙제하기(퀴즈) 모달이 뜬다. 오답은
+// 새 문제로 재도전시키고(페널티 취지상 건너뛰기 버튼이 없다), 정답을
+// 맞히면 모달이 닫혀 학습 화면으로 돌아간다. 숙제 자체는 보상도
+// 차감도 없으므로 가상 용돈은 심부름을 거절하기 전과 그대로다.
+test('declining the errand event opens a homework quiz; a wrong answer re-rolls a new question, and a correct one closes it and returns to the game with the allowance unchanged', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() },
+        }),
+      })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: body.companionType,
+            stage: 'child',
+            profession: body.profession,
+            custom_profession_label: body.customProfessionLabel ?? null,
+            level: 1,
+            exp: 0,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-decline',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'AI검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  await teachThreeTimes('round0') // 배고픔 이벤트
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+
+  await teachThreeTimes('round1') // 심부름 이벤트 — 이번엔 거절한다.
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-decline-button').click()
+
+  await expect(page.getByTestId('homework-quiz-modal')).toBeVisible()
+  // 문제은행의 어떤 문제가 나오든 항상 틀리도록, 이 문제은행에서 한
+  // 번도 정답(correctIndex)이 아닌 3번째 선택지(index 2)를 고른다.
+  await page.getByTestId('homework-quiz-choice').nth(2).click()
+  await expect(page.getByTestId('homework-quiz-feedback-wrong')).toBeVisible()
+  await page.getByTestId('homework-quiz-retry-button').click()
+
+  // 새 문제가 나왔다 — 이번엔 실제 정답을 찾아서 고른다.
+  const questionText = await page.getByTestId('homework-quiz-question').textContent()
+  const matched = HOUSEWORK_QUIZ_QUESTIONS.find((q) => q.question === questionText?.trim())
+  expect(matched).toBeTruthy()
+  await page.getByTestId('homework-quiz-choice').nth(matched!.correctIndex).click()
+  await expect(page.getByTestId('homework-quiz-feedback-correct')).toBeVisible()
+
+  await page.getByTestId('homework-quiz-complete-button').click()
+  await expect(page.getByTestId('homework-quiz-modal')).not.toBeVisible()
+  await expect(page.getByTestId('speech-bubble')).toContainText('숙제를 다 했어요')
+  // 숙제는 보상도 차감도 없다 — 식사(-10,000원) 뒤 그대로 90,000원.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
 // 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(학습
@@ -2344,9 +2469,14 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
   await expect(page.getByTestId('evolution-banner')).toBeVisible()
   await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
 
-  // 알바 흐름을 끝까지 따라간다(기존 "part-time job" 테스트와 동일).
-  await expect(page.getByTestId('turn-transition')).toContainText('아르바이트하는 중')
-  await expect(page.getByTestId('money-popup')).toContainText('20,000원')
+  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
+  // toddler는 "알바" 자리에서 선택형 심부름 이벤트가 뜬다 — 이 저장
+  // 자체가 teen으로 "방금" 진화시킨 저장이지만, 그 판정에 쓰인
+  // ageTier 클로저는 이 저장이 일어난 "그 순간"(아직 toddler) 기준
+  // 이라 심부름이 맞다.
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('money-popup')).toContainText('10,000원')
 
   // 모든 연출이 끝난 뒤 — 실제 화면의 캐릭터 그림이 teen(10대) 일러스트로
   // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고
