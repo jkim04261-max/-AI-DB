@@ -962,15 +962,21 @@ export default function GrowPage() {
         <div className="flex items-center gap-2">
           {/* 지시서("누리AI 키우기 간단 설명서"): 게임 규칙·직업 변경·
               미션 진행 방법을 바로 확인할 수 있는 도움말 버튼 —
-              캐릭터 유무와 무관하게 항상 보인다. */}
+              캐릭터 유무와 무관하게 항상 보인다. 지시서(책 아이콘 옆
+              '게임설명' 텍스트 추가): 아이콘만으로는 뭘 하는 버튼인지
+              헷갈린다는 피드백에 따라, 바로 옆 "누리/두리" 선택 pill과
+              같은 높이(h-8)·글자 크기(text-xs font-semibold)로 맞춘
+              아이콘+텍스트 pill로 바꿨다 — data-testid/aria-label은
+              그대로라 기존 e2e 테스트에 영향 없다. */}
           <button
             type="button"
             onClick={() => setShowGuide(true)}
             data-testid="grow-guide-button"
             aria-label="누리AI 키우기 간단 설명서"
-            className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-300 bg-gradient-to-b from-amber-100 to-amber-200 text-amber-700 shadow-[0_2px_0_rgba(146,64,14,0.3)] transition hover:scale-[1.06] hover:border-amber-400 active:scale-95"
+            className="flex h-8 items-center gap-1 rounded-full border-2 border-amber-300 bg-gradient-to-b from-amber-100 to-amber-200 px-3 text-xs font-semibold text-amber-700 shadow-[0_2px_0_rgba(146,64,14,0.3)] transition hover:scale-[1.06] hover:border-amber-400 active:scale-95"
           >
             <BookOpen size={16} />
+            게임설명
           </button>
           {characters.length > 0 && (
             <div className="flex gap-1 rounded-full bg-amber-100 p-1">
