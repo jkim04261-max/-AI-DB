@@ -656,7 +656,12 @@ test('clicking 스스로 공부하기 shows N candidate cards; picking one fills
   await mockEmptyConversations(page)
   let saveCalled = false
   await mockCharacterApi(page, {
-    // level:10 → junior_20s → selfStudyDraftCountForTier('junior_20s') === 7.
+    // level:10 → junior_20s(이번 지시서 범위 밖, 기존 자유 선택 UI를
+    // 그대로 씀). 여기 쓰는 7은 이 모킹된 응답 자체가 정하는 임의의
+    // 예시 개수일 뿐 — 실제 selfStudyDraftCountForTier('junior_20s')
+    // 값과 무관하게 이 테스트는 "여러 후보 중 하나를 고르는 UI"가
+    // 정상 동작하는지만 확인한다(정확한 연령대별 개수 자체는
+    // "AI 추천 받기 카드가 동적 N개를 보여준다" 테스트가 검증한다).
     characters: [{ ...NURI_ACCOUNTANT, level: 10 }],
     onStudyGenerate: async (route) => {
       await route.fulfill({
@@ -1942,14 +1947,14 @@ test('when the daily AI 추천(study) limit is exhausted, 예시 만들어주기
   await expect(market.getByRole('button', { name: 'AI 추천 충전권' })).toBeVisible()
 })
 
-// 지시서(AI 추천(예시 만들기) 개수에 대한 명확한 지시): "✨ AI 추천
-// 받기" 카드의 안내 문구("OO 단계에서는 한 번에 예시 N개를
+// 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가 로직으로 수정):
+// "✨ AI 추천 받기" 카드의 안내 문구("OO 단계에서는 한 번에 예시 N개를
 // 만들어줘요")가 연령대마다 다른 숫자를 보여주고, 그 숫자가 연령대가
-// 올라갈수록 정확히 2개씩 늘어나는지 확인한다 — 이 문구는 순수
+// 올라갈수록 정확히 1개씩 늘어나는지 확인한다 — 이 문구는 순수
 // 프런트 계산값(character.ageTier/level, data/characterAge.ts의
 // selfStudyDraftCountForTier)이라 아직 버튼을 누르기 전에도 몇 개가
 // 나올지 미리 보여준다.
-test('the AI 추천 받기 card shows a dynamic "한 번에 N개" count that increases by 2 per age tier (20대=7, 30대=9)', async ({ page }) => {
+test('the AI 추천 받기 card shows a dynamic "한 번에 N개" count that increases by 1 per age tier (20대=4, 30대=5)', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1957,13 +1962,111 @@ test('the AI 추천 받기 card shows a dynamic "한 번에 N개" count that inc
 
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
-  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('20대 단계에서는 한 번에 예시 7개를 만들어줘요.')
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('20대 단계에서는 한 번에 예시 4개를 만들어줘요.')
   await page.getByRole('button', { name: '닫기' }).click()
 
   await mockCharacterApi(page, { characters: [{ ...NURI_ACCOUNTANT, level: 20 }] })
   await page.reload()
   await page.getByRole('button', { name: '가르치기' }).click()
-  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('30대 단계에서는 한 번에 예시 9개를 만들어줘요.')
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('30대 단계에서는 한 번에 예시 5개를 만들어줘요.')
+})
+
+// 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가 로직으로 수정)
+// 완료조건: 8세 계정에서 예시가 1개만 나오는지, 그리고 "선택지를
+// 고르세요"가 아니라 "이 예시를 사용해 볼까요?"처럼 더 쉬운 문구로
+// 자동 입력을 유도하는지 직접 확인한다. 카드 자체는 여전히 눌러서
+// 고르는 방식 그대로다(완전 자동 채움은 아님 — 기존처럼 사용자가
+// 검증 결과를 보고 "저장"을 눌러야 미션이 완료된다).
+test('a toddler (8~9살) account gets exactly 1 example, shown with "이 예시를 사용해 볼까요?" instead of a multi-pick prompt', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          drafts: [
+            {
+              knowledge: { title: '복식부기', content: '거래를 차변과 대변에 동시에 기록한다.' },
+              verification: { status: 'appropriate', explanation: '정확해요', relevance: '관련 있어요', issues: '', suggestion: '' },
+              verificationToken: 'tok-toddler-single',
+              ageBlocked: false,
+              requiredAgeTier: 'toddler',
+            },
+          ],
+          characterReply: '예시 1개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
+          remaining: 2,
+          dailyStudyLimit: 3,
+          exampleCount: 1,
+          characterAgeTier: 'toddler',
+          focusPercent: 90,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('8~9살 단계에서는 한 번에 예시 1개를 만들어줘요.')
+
+  await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await expect(page.getByTestId('study-draft-picker').getByText('이 예시를 사용해 볼까요?')).toBeVisible()
+  await expect(page.getByTestId('study-draft-picker').getByText('예시 1개 중 하나를 골라보세요')).toHaveCount(0)
+  const cards = page.getByTestId('study-draft-card')
+  await expect(cards).toHaveCount(1)
+
+  await cards.click()
+  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('복식부기')
+})
+
+// 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가 로직으로 수정)
+// 완료조건 "4. 60대(8개)일 때는 2열 그리드로 배치": 예시 카드가 7개
+// 이상이면 2열 그리드로 바뀌는지 확인한다(junior_20s 이하의 적은
+// 개수에서는 그대로 1열이어야 한다는 것도 함께 — 위 toddler(1개)
+// 테스트가 이미 그 끝을 확인했다).
+test('60대(8 examples) renders the study-draft cards in a 2-column grid to avoid a long scroll', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    // master_50s + level:65 → ageNumberForTier('master_50s', 65) === 65
+    // (>=60) → selfStudyDraftCountForTier('master_50s', 65) === 8.
+    characters: [{ ...NURI_ACCOUNTANT, level: 65 }],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          drafts: Array.from({ length: 8 }, (_, i) => ({
+            knowledge: { title: `후보 ${i}`, content: `내용 ${i}` },
+            verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+            verificationToken: `tok-60s-${i}`,
+            ageBlocked: false,
+            requiredAgeTier: 'toddler',
+          })),
+          characterReply: '예시 8개를 만들었어요! 마음에 드는 걸 골라보세요. ✨',
+          remaining: 2,
+          dailyStudyLimit: 3,
+          exampleCount: 8,
+          characterAgeTier: 'master_50s',
+          focusPercent: 90,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('ai-recommend-tier-count')).toHaveText('50~60대 단계에서는 한 번에 예시 8개를 만들어줘요.')
+
+  await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await expect(page.locator('[data-testid="study-draft-cards"] button')).toHaveCount(8)
+  await expect(page.getByTestId('study-draft-cards')).toHaveClass(/sm:grid-cols-2/)
 })
 
 // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "AI검증하기"
