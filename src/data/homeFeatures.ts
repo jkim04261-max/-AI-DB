@@ -1,4 +1,4 @@
-import { FileSearch, Gamepad2, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
+import { FileSearch, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
 
 // 지시서(메인 대시보드 전면 개편): 예전엔 이 4개(원래 6개 — "비서·직원
 // 만들기" 제거, "동영상 만들기"+"음악 만들기"를 "미디어 만들기" 하나로
@@ -62,18 +62,11 @@ export const homeFeatures: HomeFeature[] = [
     description: '동영상과 음악을 AI로 만들어 보세요',
     action: { kind: 'comingSoon' },
   },
-  // 지시서(직업 카드 맞추기 게임 연동): 이미 구현·배포돼 있던 /card-match
-  // 라우트(CardMatchPage)에는 그동안 어디에서도 들어갈 입구가 없었다 —
-  // 이 항목을 추가하면 sidebarFeatureItems(nav.ts, 'chat'만 제외하고
-  // homeFeatures를 그대로 재사용)에 자동으로 뜬다. HomePage.tsx는
-  // id==='chat'||'grow'만 따로 골라 쓰므로, 지시서로 확정된 "메인
-  // 대시보드엔 [대화]/[AI 키우기] 2개만" 레이아웃에는 영향이 없다 —
-  // 입구는 사이드바에만 추가된다.
-  {
-    id: 'cardMatch',
-    icon: Gamepad2,
-    title: '직업 카드 맞추기',
-    description: '직업과 도구 카드를 맞추고 용돈을 모아보세요',
-    action: { kind: 'link', to: '/card-match' },
-  },
+  // 지시서(사이드바 '직업 카드 맞추기' 메뉴 삭제): 여기 있던 독립
+  // 'cardMatch' 항목(→ /card-match)을 제거했다 — 같은 미니게임
+  // (CardMatchGame)은 이제 '가르치기 · 스스로 공부하기' 모달의 teen(10대)
+  // 커리큘럼 ②단계 안에서만 뜬다(InteractionPanel.tsx). 사이드바 입구를
+  // 없앴을 뿐, CardMatchGame 컴포넌트와 /card-match 라우트의 페이지 파일
+  // 자체는 "기존 파일 삭제 금지" 규칙에 따라 그대로 둔다 — App.tsx에서
+  // 라우트 등록만 빼서 더 이상 그 경로로 들어갈 수 없게 막았다.
 ]
