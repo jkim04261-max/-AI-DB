@@ -45,6 +45,16 @@ export default function GrowGuideSheet({ onClose }: { onClose: () => void }) {
             작성한 내용은 Gemini 검증을 통과해야 저장되고, 저장해야 경험치와 미션 진행도가 올라가요.
           </p>
         </section>
+
+        {/* 지시서(책 아이콘 옆 '게임설명' 텍스트 추가): 기존 안내에
+            빠져 있던 용돈(퀴즈·알바)·마켓 꾸미기를 간단히 보완했다. */}
+        <section className="flex flex-col gap-1.5">
+          <h2 className="text-sm font-bold text-amber-800">💰 용돈 모으기 & 꾸미기</h2>
+          <ul className="flex flex-col gap-1 rounded-xl bg-amber-100/60 p-3">
+            <li>🧩 숙제 퀴즈·알바 이벤트에서 문제를 풀면 정답 개수만큼 용돈을 받아요.</li>
+            <li>🛍️ 모은 용돈은 만능마켓에서 옷·아이템을 사서 캐릭터를 꾸미는 데 쓸 수 있어요.</li>
+          </ul>
+        </section>
       </div>
     </BottomSheet>
   )
