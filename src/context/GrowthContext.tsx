@@ -104,8 +104,10 @@ export interface ExamQuestion {
 }
 
 // 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" 전용 — QuizQuestion과
-// 모양은 같지만, 이 질문들은 직업과 무관한 공통 생활 상식 문제은행
-// (api/_lib/objectiveQuizQuestions.ts)에서 나온다는 점이 다르다.
+// 모양은 같다. 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형
+// 확장) 이후로는 직업별 역사·도구·목적·핵심역량을 Gemini가 매번 새로
+// 생성하고(api/_lib/gemini.ts의 generateObjectiveQuizBatch), choices
+// 길이도 캐릭터의 지금 연령대에 따라 달라진다 — 타입 자체는 그대로다.
 export interface ObjectiveQuizQuestion {
   id: string
   text: string

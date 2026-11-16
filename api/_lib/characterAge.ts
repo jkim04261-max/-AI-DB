@@ -113,6 +113,30 @@ export function selfStudyDraftCountForTier(tier: AgeTier, ageNumber?: number): n
   return SELF_STUDY_DRAFT_COUNT_BY_TIER[tier]
 }
 
+// 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): "객관식"
+// 미션 단계(toddler 2문제/teen 3문제, api/character.ts의
+// handleGetObjectiveQuiz 참고)에서 문제 1개당 보여줄 보기 개수 — 위
+// SELF_STUDY_DRAFT_COUNT_BY_TIER와 똑같은 연령대별 숫자(8~9살=3, 10대=5,
+// 20대=7, 30대=9, 40대=11, 50대=13, 60대 이상=15)지만 전혀 다른 용도라
+// (한쪽은 "클릭당 예시 개수", 이쪽은 "문제 1개의 선택지 개수") 별도
+// 테이블로 둔다.
+export const OBJECTIVE_QUIZ_CHOICE_COUNT_BY_TIER: Record<AgeTier, number> = {
+  toddler: 3,
+  teen: 5,
+  junior_20s: 7,
+  career_30s: 9,
+  veteran_40s: 11,
+  master_50s: 13,
+}
+const MASTER_TIER_60S_OBJECTIVE_QUIZ_CHOICE_COUNT = 15
+
+export function objectiveQuizChoiceCountForTier(tier: AgeTier, ageNumber?: number): number {
+  if (tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60) {
+    return MASTER_TIER_60S_OBJECTIVE_QUIZ_CHOICE_COUNT
+  }
+  return OBJECTIVE_QUIZ_CHOICE_COUNT_BY_TIER[tier]
+}
+
 // 다음 연령대 — 마지막 단계(master_50s)면 null.
 export function nextAgeTier(tier: AgeTier): AgeTier | null {
   const idx = ageTierIndex(tier)
