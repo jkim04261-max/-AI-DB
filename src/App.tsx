@@ -6,7 +6,6 @@ import HomePage from './pages/HomePage'
 import ChatListPage from './pages/ChatListPage'
 import ChatPage from './pages/ChatPage'
 import GrowPage from './pages/GrowPage'
-import CardMatchPage from './pages/CardMatchPage'
 import JobQuizPage from './pages/JobQuizPage'
 import CategoryPage from './pages/CategoryPage'
 import TemplatesPage from './pages/TemplatesPage'
@@ -34,11 +33,11 @@ export default function App() {
             <Route path="/chat" element={<ChatListPage />} />
             <Route path="/chat/:id" element={<ChatPage />} />
             <Route path="/grow" element={<GrowPage />} />
-            {/* 지시서(직업 카드 맞추기 미니게임): 신규 라우트. 새 라우트가
-                실제로 접근 가능하려면 이 테이블에 등록하는 것 말고는
-                방법이 없어, "기존 파일 수정 금지" 중 이 한 줄만
-                예외로 두었다(사용자 확인). */}
-            <Route path="/card-match" element={<CardMatchPage />} />
+            {/* 지시서(사이드바 '직업 카드 맞추기' 메뉴 삭제): /card-match
+                라우트 등록을 제거해 더 이상 접근할 수 없게 막았다 — 같은
+                미니게임은 이제 /grow의 '가르치기' 모달(teen 커리큘럼 ②단계)
+                안에서만 뜬다. 페이지 파일(CardMatchPage.tsx) 자체는 "기존
+                파일 삭제 금지" 규칙에 따라 지우지 않고 그대로 남겨둔다. */}
             {/* 지시서(직업 그림 퀴즈): 이 기능도 새 라우트로 접근 가능해야
                 해서 등록한다. */}
             <Route path="/job-quiz" element={<JobQuizPage />} />

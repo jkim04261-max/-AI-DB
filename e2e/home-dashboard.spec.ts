@@ -108,14 +108,18 @@ test('sidebar 문서·사진 분석 still routes to the existing /category/docum
   await expect(page).toHaveURL(/\/category\/document$/)
 })
 
-// 지시서(직업 카드 맞추기 게임 연동): 이미 있던 /card-match 라우트로
-// 들어갈 입구가 사이드바에 새로 생겼는지 확인 — 메인 대시보드([대화]/
-// [AI 키우기] 2개 카드 레이아웃)는 전혀 건드리지 않았으므로 여기서는
-// 안 늘어났는지도 함께 확인한다.
-test('sidebar 직업 카드 맞추기 routes to /card-match, and the home screen 2-card layout is unaffected', async ({ page }) => {
+// 지시서(사이드바 '직업 카드 맞추기' 메뉴 삭제): 예전엔 여기서 사이드바의
+// '직업 카드 맞추기' 항목이 /card-match로 라우팅되는지 확인했지만, 그
+// 독립 입구 자체를 없앴다 — 같은 미니게임은 이제 '가르치기' 모달
+// (teen 커리큘럼 ②단계) 안에서만 뜬다(e2e/knowledge.spec.ts 참고).
+// 사이드바에 더 이상 뜨지 않고, 라우트도 등록돼 있지 않아 더 이상 그
+// 경로로 들어갈 수 없는지 둘 다 확인한다.
+test('sidebar no longer shows 직업 카드 맞추기, and /card-match is no longer a routable page', async ({ page }) => {
   await setup(page)
-  await page.locator('aside').getByText('직업 카드 맞추기').click()
-  await expect(page).toHaveURL(/\/card-match$/)
+  await expect(page.locator('aside').getByText('직업 카드 맞추기')).toHaveCount(0)
+
+  await page.goto('/card-match')
+  await expect(page.getByRole('heading', { name: '직업 카드 맞추기' })).toHaveCount(0)
 
   await page.goto('/')
   const main = page.getByRole('main')
