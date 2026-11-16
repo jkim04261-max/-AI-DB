@@ -179,6 +179,7 @@ export default function GrowPage() {
     getUsage,
     purchaseAiRecommendTicket,
     purchaseKnowledgeValidationTicket,
+    purchaseFinalExamPass,
   } = useGrowth()
 
   const [selected, setSelected] = useState<CompanionType>('nuri')
@@ -277,8 +278,14 @@ export default function GrowPage() {
     async (effect: MarketItemEffect) => {
       if (effect.type === 'ai_recommend_bonus') await purchaseAiRecommendTicket()
       if (effect.type === 'knowledge_validation_bonus') await purchaseKnowledgeValidationTicket()
+      // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+      // 지금 보고 있는 캐릭터(selected) 기준으로 패스권을 적용한다 —
+      // purchaseFinalExamPass가 characters.mission_unlocked_tier를 직접
+      // 'teen'으로 올리고, 이미 있는 ageTier 변화 감지 효과(아래
+      // prevAgeTierRef)가 그 즉시 진화 축하 연출을 띄워준다.
+      if (effect.type === 'final_exam_pass') await purchaseFinalExamPass(selected)
     },
-    [purchaseAiRecommendTicket, purchaseKnowledgeValidationTicket],
+    [purchaseAiRecommendTicket, purchaseKnowledgeValidationTicket, purchaseFinalExamPass, selected],
   )
 
   const character = characters.find((c) => c.companionType === selected) ?? null

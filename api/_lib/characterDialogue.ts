@@ -97,5 +97,20 @@ export function buildObjectiveQuizResultMessage(
   return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
 }
 
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "종합
+// 최종 시험" 결과 문구 — 합격이면 그 즉시 teen으로 진화하므로 항상
+// evolvedStageLabel이 함께 온다. 불합격은 1차(재시험 안내)와 2차(재시험도
+// 실패 — 다시 키우기/패스권 안내)에 따라 문구가 다르다.
+export function buildFinalExamResultMessage(passed: boolean, score: number, attemptNumber: number, evolvedStageLabel: string | null): string {
+  if (passed) {
+    const evolvedText = evolvedStageLabel ? ` 🎉 ${evolvedStageLabel} 단계로 성장했어요!` : ''
+    return `종합 최종 시험 합격이에요! ${score}점을 받았어요. 정말 대단해요!${evolvedText}`
+  }
+  if (attemptNumber >= 2) {
+    return `아쉽지만 이번에도 ${score}점으로 불합격이에요(80점 이상 필요). 처음부터 다시 키우거나, 마켓에서 패스권을 구매하면 다음 단계로 넘어갈 수 있어요.`
+  }
+  return `아쉽지만 ${score}점으로 불합격이에요(80점 이상 필요). 틀린 문제를 다시 복습하고 재시험을 봐요!`
+}
+
 export const KNOWLEDGE_VS_MODEL_DISCLAIMER =
   '레벨·XP는 게임 속 성장 지표예요. 실제 Gemini AI 모델의 성능이 바뀌는 것은 아니에요.'

@@ -16,7 +16,7 @@ import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON
 import type { AccountTierState } from '../../hooks/useAccountTier'
 import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
-import FinalSubjectiveStep from './FinalSubjectiveStep'
+import FinalExamModal from './FinalExamModal'
 import CardMatchGame from '../games/CardMatchGame'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -180,21 +180,27 @@ export default function InteractionPanel({
     }
   }, [character.companionType, getMissionProgress])
 
-  // 지시서(학습 플로우 전면 개편): 8~9살(toddler) 단계에서만 "1단계
-  // 직접입력 3문제 → 2단계 객관식 2문제(세트 전부 정답 필요) → 3단계
-  // 주관식 1문제" 순서를 강제한다 — 사용자 승인에 따라 teen 이후
-  // 단계는 이 범위 밖이라 기존 자유 선택 3카드 UI를 전혀 건드리지
-  // 않는다. 단계는 서버가 내려준 missionProgress(byType별 confirmed/
-  // required)에서 그때그때 다시 계산한다 — 클라이언트에 별도로 저장하지
-  // 않으므로 새로고침·패널 재오픈 후에도 항상 정확한 단계로 복원된다.
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 8~9살
+  // (toddler) 단계는 "1단계 직접입력 3문제 → 2단계 객관식 2문제(세트
+  // 전부 정답 필요) → 3단계 직업 카드 맞추기 1개" 순서(총 6문제)로
+  // 바뀌었다 — 예전엔 3단계가 AI 추천 예시 기반 주관식(subjective)
+  // 1문제였지만, 이제 teen의 card_game 단계와 같은 카드 맞추기로
+  // 대체됐다(characterAge.ts의 toddler override: subjective:0,
+  // card_game:1). 6문제를 모두 끝내면(complete) 더 이상 곧바로 진화하지
+  // 않고, 그 6문제 내용을 복습하는 "종합 최종 시험"을 봐야 teen으로
+  // 진화한다(백엔드의 toddler→teen 게이트에 finalExamPassed 조건 추가 —
+  // api/_lib/characterMissions.ts 참고). 단계는 서버가 내려준
+  // missionProgress(byType별 confirmed/required)에서 그때그때 다시
+  // 계산한다 — 클라이언트에 별도로 저장하지 않으므로 새로고침·패널
+  // 재오픈 후에도 항상 정확한 단계로 복원된다.
   const isToddlerStagedFlow = characterAgeTier === 'toddler'
-  type ToddlerStep = 'direct' | 'multiple' | 'final' | 'complete'
+  type ToddlerStep = 'direct' | 'multiple' | 'card_game' | 'complete'
   const toddlerStep: ToddlerStep = (() => {
     if (!missionProgress) return 'direct'
-    const { knowhow, objective, subjective } = missionProgress.byType
+    const { knowhow, objective, card_game } = missionProgress.byType
     if (knowhow.confirmed < knowhow.required) return 'direct'
     if (objective.confirmed < objective.required) return 'multiple'
-    if (subjective.confirmed < subjective.required) return 'final'
+    if (card_game.confirmed < card_game.required) return 'card_game'
     return 'complete'
   })()
 
@@ -244,6 +250,9 @@ export default function InteractionPanel({
   // (completeCardGame → saveKnowledge) 진행 중 중복 호출을 막는다.
   const [cardGameBusy, setCardGameBusy] = useState(false)
   const [cardGameError, setCardGameError] = useState<string | null>(null)
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
+  // 모두 마친 toddler가 "종합 최종 시험 보기"를 누르면 연다.
+  const [finalExamOpen, setFinalExamOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [verification, setVerification] = useState<KnowledgeVerification | null>(null)
   // The exact title/content that `verification` above was computed from —
@@ -443,7 +452,11 @@ export default function InteractionPanel({
   // 클리어되면 onCleared로 이 핸들러가 불린다 — complete-card-game으로
   // 서명된 토큰을 받아 곧바로 기존 saveKnowledge(missionType='card_game')
   // 에 넘긴다(검증할 사용자 입력이 없으니 "AI검증하기" 단계 없이 한
-  // 번에 저장까지 끝낸다).
+  // 번에 저장까지 끝낸다). 지시서(8~9세 문제 유형 변경): toddler(8~9살)
+  // 도 이제 같은 카드 맞추기 미션을 쓰지만, 10대 알바 이벤트
+  // (onTeenJobEventDue, PR #122)는 teen 전용이다 — isTeenStagedFlow로
+  // 가드하지 않으면 8~9살 캐릭터가 카드를 맞췄을 뿐인데 알바 이벤트가
+  // 잘못 뜬다.
   const handleCardGameCleared = async () => {
     if (cardGameBusy) return
     setCardGameBusy(true)
@@ -462,7 +475,7 @@ export default function InteractionPanel({
       if (saveResult.missionProgress) setMissionProgress(saveResult.missionProgress)
       onKnowledgeSaved?.()
       flashPose('happy', 2500)
-      onTeenJobEventDue?.()
+      if (isTeenStagedFlow) onTeenJobEventDue?.()
     } catch (err) {
       setCardGameError(err instanceof Error ? err.message : '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.')
     } finally {
@@ -743,9 +756,11 @@ export default function InteractionPanel({
         </div>
       )}
 
-      {/* 지시서(학습 플로우 전면 개편) 2단계/3단계 — toddler 단계에서
-          유형별 필요 개수(knowhow 3/objective 2/subjective 1)를 다
-          채울 때까지 이 순서를 강제한다. 다른 연령대는 여기 들어오지
+      {/* 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+          toddler 단계는 "① 직접입력 3 → ② 객관식 2 → ③ 직업 카드
+          맞추기 1"(총 6문제) 순서다 — ③은 예전 AI 추천 예시 기반
+          주관식(FinalSubjectiveStep) 대신, teen의 card_game 단계와
+          똑같은 CardMatchGame을 재사용한다. 다른 연령대는 여기 들어오지
           않고 아래 기존 "직접 입력하기" 카드(③)를 그대로 쓴다. */}
       {isToddlerStagedFlow && toddlerStep === 'multiple' && (
         <ObjectiveQuizStep
@@ -759,21 +774,53 @@ export default function InteractionPanel({
           }}
         />
       )}
-      {isToddlerStagedFlow && toddlerStep === 'final' && (
-        <FinalSubjectiveStep
-          companionType={character.companionType}
-          onSaved={(progress) => {
-            setMissionProgress(progress)
-            onKnowledgeSaved?.()
-            pushLine('character', '소중한 이야기를 들려줘서 고마워요! 오늘 학습을 모두 마쳤어요. 🎉')
-            flashPose('happy', 2500)
-          }}
-        />
+      {isToddlerStagedFlow && toddlerStep === 'card_game' && (
+        <div
+          data-testid="toddler-card-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 ③단계 · 직업 카드 맞추기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            직업 카드와 도구 카드를 전부 맞추면 오늘 학습이 모두 끝나요.
+          </p>
+          <CardMatchGame onCleared={() => void handleCardGameCleared()} />
+          {cardGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {cardGameError && <p className="text-base font-bold text-rose-300">{cardGameError}</p>}
+        </div>
       )}
       {isToddlerStagedFlow && toddlerStep === 'complete' && (
-        <p data-testid="toddler-staged-flow-complete" className="text-base font-bold text-emerald-300">
-          오늘 학습을 모두 마쳤어요! 🎉
-        </p>
+        <div data-testid="toddler-staged-flow-complete" className="flex flex-col gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-4">
+          <p className="text-base font-bold text-emerald-300">오늘 학습을 모두 마쳤어요! 🎉</p>
+          <p className="text-sm font-semibold text-emerald-200/70">
+            지금까지 배운 내용으로 종합 최종 시험을 보면 10대로 올라갈 수 있어요.
+          </p>
+          <button
+            type="button"
+            data-testid="open-final-exam-button"
+            onClick={() => setFinalExamOpen(true)}
+            className="self-start rounded-xl border-2 border-emerald-300/60 bg-gradient-to-b from-emerald-400/40 to-emerald-600/30 px-5 py-3 text-base font-extrabold text-emerald-100 shadow-[0_3px_0_rgba(16,185,129,0.4)]"
+          >
+            📝 종합 최종 시험 보기
+          </button>
+        </div>
+      )}
+      {finalExamOpen && (
+        <FinalExamModal
+          companionType={character.companionType}
+          onClose={() => setFinalExamOpen(false)}
+          onPassed={(progress) => {
+            // 최종 시험 자체는 지식 저장이 아니라(onKnowledgeSaved를
+            // 부르지 않는다) 식사/알바 3회 로테이션 카운터를 건드리지
+            // 않는다 — 진화만 반영한다.
+            setMissionProgress(progress)
+            pushLine('character', '종합 최종 시험 합격! 10대로 성장했어요. 🎉')
+            flashPose('happy', 2500)
+          }}
+          onOpenPassMarket={() => {
+            setFinalExamOpen(false)
+            onBuyMoreUses?.()
+          }}
+        />
       )}
 
       {/* 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)의 고정

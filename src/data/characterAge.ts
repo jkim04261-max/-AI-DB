@@ -172,3 +172,9 @@ export function openingGreeting(name: string): string {
 export function ageBlockedMessage(requiredLabel: string): string {
   return `아직은 너무 어려워서 이해하기 힘들어요! ${requiredLabel}가 되면 다시 가르쳐 주세요~`
 }
+
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "100점
+// 만점에 80점 이상" 합격 기준 — 실제 채점은 서버(api/_lib/characterAge.ts
+// 의 scoreFinalExam)가 하고, 여기서는 화면에 합격 기준 숫자를 보여줄
+// 때만 쓴다. 두 사본은 반드시 같은 값이어야 한다.
+export const FINAL_EXAM_PASS_SCORE = 80

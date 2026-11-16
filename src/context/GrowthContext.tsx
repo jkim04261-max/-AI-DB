@@ -114,6 +114,25 @@ export interface ObjectiveQuizQuestion {
   choices: string[]
 }
 
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 8~9세
+// 6문제(직접입력 3+객관식 2+카드 맞추기 1)를 모두 마친 뒤 보는 "종합
+// 최종 시험" — ObjectiveQuizQuestion과 모양은 같지만 완전히 별도
+// 토큰(finalExamToken.ts)으로 서명되어 objective-quiz와 서로 바꿔 쓸 수
+// 없다.
+export interface FinalExamQuestion {
+  id: string
+  text: string
+  choices: string[]
+}
+
+export interface FinalExamResult {
+  questionId: string
+  text: string
+  correct: boolean
+  correctAnswer: string
+  explanation: string
+}
+
 export interface GrowthUpdate {
   expAwarded: number
   exp: number
@@ -257,6 +276,48 @@ interface GrowthContextValue {
     verificationToken: string
     characterReply: string
   }>
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
+  // 모두 마친 toddler만 호출할 수 있다(서버가 재확인) — 매번 그 캐릭터가
+  // 실제로 저장한 학습 기록을 복습하는 새 문제 세트를 받는다(재시험도
+  // 이 함수를 다시 불러 새 세트를 받는다).
+  getFinalExam: (companionType: CompanionType) => Promise<{
+    questions: FinalExamQuestion[]
+    examToken: string
+    attemptNumber: number
+    passScore: number
+  }>
+  submitFinalExam: (
+    companionType: CompanionType,
+    examToken: string,
+    answers: number[],
+  ) => Promise<
+    {
+      passed: boolean
+      score: number
+      results: FinalExamResult[]
+      message: string
+      attemptNumber: number
+      // 두 번째(마지막) 불합격이면 true — 더 이상 재시험을 볼 수 없고
+      // '처음부터 다시 키우기'/'패스권 구매' 중 하나를 골라야 한다.
+      blocked: boolean
+      missionProgress: MissionProgress | null
+      wrongQuestions: { text: string; correctAnswer: string; explanation: string }[]
+    } & EvolutionUpdate
+  >
+  // 만능마켓의 [8~9세 음서재 패스권] 구매 — 6미션·최종 시험을 전부
+  // 건너뛰고 즉시 teen으로 올라간다.
+  purchaseFinalExamPass: (companionType: CompanionType) => Promise<{
+    evolved: boolean
+    newAgeTier: AgeTier | null
+    newAgeTierLabel: string | null
+    newAgeTierStageLabel: string | null
+    missionProgress: MissionProgress | null
+    message: string
+  }>
+  // 최종 시험 2회 불합격 뒤 '처음부터 다시 키우기'를 선택했을 때 호출 —
+  // 사용자 확인: 레벨/경험치/진행도만 리셋한다(직업 선택·기존 학습
+  // 기록은 유지).
+  resetCharacterProgress: (companionType: CompanionType) => Promise<{ character: Character | null; message: string }>
   getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
@@ -386,6 +447,13 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // 로컬 상태만 갱신한다(전체 캐릭터 목록을 다시 불러오지 않는다).
   const updateFocusPercent = useCallback((companionType: CompanionType, focusPercent: number) => {
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, focusPercent } : c)))
+  }, [])
+
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 최종
+  // 시험 합격/패스권 구매는 updateCharacterGrowth와 달리 level/exp가
+  // 전혀 바뀌지 않는 순수한 ageTier 전진이라 전용 업데이터를 쓴다.
+  const updateCharacterAgeTier = useCallback((companionType: CompanionType, newAgeTier: AgeTier) => {
+    setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? { ...c, ageTier: newAgeTier } : c)))
   }, [])
 
   // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): verifyKnowledge/
@@ -768,6 +836,120 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     [updateCharacterGrowth, updateFocusPercent],
   )
 
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
+  // 모두 마친 toddler가 보는 종합 최종 시험 — 매번 새 문제 세트를
+  // 받는다(재시험도 이 함수를 다시 호출).
+  const getFinalExam = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'final-exam', companionType })}`)
+    const data = (await res.json().catch(() => ({}))) as {
+      questions?: FinalExamQuestion[]
+      examToken?: string
+      attemptNumber?: number
+      passScore?: number
+      error?: string
+    }
+    if (!res.ok || !data.questions || data.questions.length === 0 || !data.examToken) {
+      throw new Error(data.error || '종합 최종 시험 문제를 불러오는 중 오류가 발생했어요.')
+    }
+    return {
+      questions: data.questions,
+      examToken: data.examToken,
+      attemptNumber: data.attemptNumber ?? 1,
+      passScore: data.passScore ?? 80,
+    }
+  }, [])
+
+  const submitFinalExam = useCallback(
+    async (companionType: CompanionType, examToken: string, answers: number[]) => {
+      const res = await fetch('/api/character?action=final-exam-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType, examToken, answers }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        passed?: boolean
+        score?: number
+        results?: FinalExamResult[]
+        message?: string
+        attemptNumber?: number
+        blocked?: boolean
+        missionProgress?: MissionProgress | null
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
+        wrongQuestions?: { text: string; correctAnswer: string; explanation: string }[]
+        error?: string
+      }
+      if (!res.ok || data.passed === undefined || data.score === undefined) {
+        throw new Error(data.error || '채점 중 오류가 발생했어요.')
+      }
+      if (data.newAgeTier) updateCharacterAgeTier(companionType, data.newAgeTier)
+      return {
+        passed: data.passed,
+        score: data.score,
+        results: data.results ?? [],
+        message: data.message ?? '',
+        attemptNumber: data.attemptNumber ?? 1,
+        blocked: data.blocked ?? false,
+        missionProgress: data.missionProgress ?? null,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
+        wrongQuestions: data.wrongQuestions ?? [],
+      }
+    },
+    [updateCharacterAgeTier],
+  )
+
+  const purchaseFinalExamPass = useCallback(
+    async (companionType: CompanionType) => {
+      const res = await fetch('/api/character?action=purchase-final-exam-pass', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
+        newAgeTierStageLabel?: string | null
+        missionProgress?: MissionProgress | null
+        message?: string
+        error?: string
+      }
+      if (!res.ok || !data.evolved) {
+        throw new Error(data.error || '패스권 구매를 처리하는 중 오류가 발생했어요.')
+      }
+      if (data.newAgeTier) updateCharacterAgeTier(companionType, data.newAgeTier)
+      return {
+        evolved: data.evolved,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
+        newAgeTierStageLabel: data.newAgeTierStageLabel ?? null,
+        missionProgress: data.missionProgress ?? null,
+        message: data.message ?? '',
+      }
+    },
+    [updateCharacterAgeTier],
+  )
+
+  const resetCharacterProgress = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch('/api/character?action=reset-character-progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companionType }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; message?: string; error?: string }
+    if (!res.ok) {
+      throw new Error(data.error || '초기화하는 중 오류가 발생했어요.')
+    }
+    const updated = data.character ? fromApiRow(data.character) : null
+    if (updated) {
+      setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? updated : c)))
+    }
+    return { character: updated, message: data.message ?? '' }
+  }, [])
+
   const submitExam = useCallback(
     async (companionType: CompanionType, answers: { questionId: string; answerIndex: number }[]) => {
       const res = await fetch('/api/character?action=exam-submit', {
@@ -912,6 +1094,10 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         submitQuiz,
         getObjectiveQuiz,
         submitObjectiveQuiz,
+        getFinalExam,
+        submitFinalExam,
+        purchaseFinalExamPass,
+        resetCharacterProgress,
         getExam,
         submitExam,
         getUsage,

@@ -196,11 +196,16 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
   return result
 }
 
-// 지시서(학습 플로우 전면 개편): toddler(8~9살)만 더 이상 균등분배(2/2/2)가
-// 아니라 "1단계 직접입력 3문제 → 2단계 객관식 2문제(전부 정답 필요) →
-// 3단계 주관식 1문제"라는 고정 순서 흐름과 숫자를 맞춘다(knowhow 3 +
-// objective 2 + subjective 1 = 6, MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와
-// 동일).
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): toddler
+// (8~9살)의 3단계가 더 이상 "주관식(AI 추천 받기 중 하나 고르기)"이
+// 아니라 "직업 카드 맞추기"다 — "1단계 직접입력 3문제 → 2단계 객관식
+// 2문제(전부 정답 필요) → 3단계 직업 카드 맞추기 1개"(knowhow 3 +
+// objective 2 + card_game 1 = 6, MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와
+// 동일, teen의 card_game 단계와 똑같은 컴포넌트를 재사용한다). "AI 추천
+// 받기" 카드 자체는 1단계(direct)에서 여전히 보이지만(showDirectInputCards),
+// 더 이상 "3단계 전용" 필수 미션은 아니다. 6/6을 채워도 더 이상 그
+// 즉시 진화하지 않는다 — maybeEvolveAgeTier가 toddler→teen 전환에서
+// final_exam_passed도 함께 확인한다(아래 종합 최종 시험 참고).
 //
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)도 더 이상
 // 균등분배가 아니라 고정 순서 흐름이다 — "①직접입력 3 → ②직업 카드
@@ -214,7 +219,7 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // 이번 지시서의 범위 밖이라(사용자 승인: "일단은 10대 커리큘럼부터
 // 완벽히 구현") 기존 균등분배 공식을 그대로 둔다.
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
-  toddler: { knowhow: 3, objective: 2, subjective: 1, card_game: 0 },
+  toddler: { knowhow: 3, objective: 2, subjective: 0, card_game: 1 },
   teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1 },
 }
 
@@ -234,3 +239,40 @@ export function meetsAgeTier(current: AgeTier, required: AgeTier): boolean {
 
 export const ageBlockedMessage = (requiredLabel: string): string =>
   `아직은 너무 어려워서 이해하기 힘들어요! ${requiredLabel}가 되면 다시 가르쳐 주세요~`
+
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "종합
+// 최종 시험"에 불합격(재시험도 불합격)하면 마켓에서 살 수 있는 "음서재
+// 패스권" 가격표 — 연령대가 올라갈수록 비싸진다. 사용자 확인("8~9세만
+// 실제 구현")에 따라 지금은 toddler만 실제로 구매 가능하고(api/
+// character.ts의 handlePurchaseFinalExamPass), 나머지는 그 연령대의
+// 종합 최종 시험 자체가 아직 없어 향후 확장용으로만 값을 준비해 둔다.
+export const FINAL_EXAM_PASS_PRICE_BY_TIER: Record<AgeTier, number> = {
+  toddler: 30_000,
+  teen: 50_000,
+  junior_20s: 70_000,
+  career_30s: 100_000,
+  veteran_40s: 150_000,
+  master_50s: 200_000,
+}
+
+// 지시서: "60대 최종 시험은 패스권 적용 불가(구매 차단) 로직을 미리
+// 설계해 두세요" — master_50s 티어 안에서도 ageNumber(selfStudyDraftCount
+// ForTier 등이 쓰는 것과 같은 50/60대 분기 기준)가 60 이상이면 패스권을
+// 막는다. toddler~veteran_40s는 ageNumber 조건 없이 항상 구매 가능하다.
+export function isFinalExamPassBlockedForTier(tier: AgeTier, ageNumber?: number): boolean {
+  return tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60
+}
+
+// "종합 최종 시험"이 한 번에 몇 문제를 낼지 — 지시서("3~5문제 랜덤
+// 출제")에 따라 서버가 매번 3·4·5 중 하나를 무작위로 고른다.
+export function pickFinalExamQuestionCount(): number {
+  return 3 + Math.floor(Math.random() * 3)
+}
+
+// 지시서("100점 만점에 80점 이상"): 문제 개수에 관계없이 정답률로
+// 100점 만점 점수를 환산하고, 80점 이상이면 합격이다.
+export const FINAL_EXAM_PASS_SCORE = 80
+export function scoreFinalExam(correctCount: number, totalCount: number): number {
+  if (totalCount <= 0) return 0
+  return Math.round((correctCount / totalCount) * 100)
+}

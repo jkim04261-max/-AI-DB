@@ -43,9 +43,16 @@ export const MARKET_CATEGORY_LABEL: Record<MarketCategoryId, string> = {
 // api/_lib/knowledgeLimit.ts·studyLimit.ts) 자체는 그대로 두고, 그 한도가
 // 바닥났을 때만 이 이용권을 1장씩 깎아 대신 통과시킨다
 // (api/_lib/ticketLimit.ts).
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "8~9세
+// 음서재 패스권" 구매 전용 효과 — 구매하면 GrowPage가 GrowthContext.tsx의
+// purchaseFinalExamPass(실제 DB의 characters.mission_unlocked_tier를
+// 'teen'으로 올리는 서버 호출)를 부른다. ageTier는 지금 실제로 구현된
+// 8~9세(toddler)뿐이지만, (향후 확장용) 10대~50대 패스권을 추가할 때도
+// 같은 effect 모양을 그대로 쓸 수 있도록 AgeTier 문자열을 받아둔다.
 export type MarketItemEffect =
   | { type: 'ai_recommend_bonus'; amount: number }
   | { type: 'knowledge_validation_bonus'; amount: number }
+  | { type: 'final_exam_pass'; ageTier: 'toddler' | 'teen' | 'junior_20s' | 'career_30s' | 'veteran_40s' | 'master_50s' }
 
 export interface MarketItem {
   id: string
@@ -84,6 +91,17 @@ export const UNIVERSAL_MARKET_CATALOG: MarketItem[] = [
     price: 10000,
     icon: '🔖',
     effect: { type: 'knowledge_validation_bonus', amount: 1 },
+  },
+  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 종합
+  // 최종 시험에 두 번 불합격한 뒤(또는 언제든) 구매하면 8~9세 학습을
+  // 건너뛰고 즉시 10대로 올라간다.
+  {
+    id: 'education-toddler-final-exam-pass',
+    category: 'education',
+    name: '8~9세 음서재 패스권',
+    price: 30000,
+    icon: '🎟️',
+    effect: { type: 'final_exam_pass', ageTier: 'toddler' },
   },
   { id: 'agriculture-seed-set', category: 'agriculture', name: '텃밭 씨앗 세트', price: 10000, icon: '🌱' },
   { id: 'agriculture-pot', category: 'agriculture', name: '화분 · 가드닝 도구', price: 18000, icon: '🪴' },
