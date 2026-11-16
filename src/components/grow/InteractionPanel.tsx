@@ -696,30 +696,48 @@ export default function InteractionPanel({
               data-testid="study-draft-picker"
               className="flex flex-col gap-2 rounded-xl border border-purple-400/30 bg-slate-900/40 p-3"
             >
-              <p className="text-sm font-bold text-purple-200">예시 {studyDrafts.length}개 중 하나를 골라보세요</p>
-              {studyDrafts.map((draft, index) => (
-                <button
-                  key={`${draft.knowledge.title}-${index}`}
-                  type="button"
-                  data-testid="study-draft-card"
-                  onClick={() => handlePickStudyDraft(draft)}
-                  disabled={draft.ageBlocked}
-                  className="flex flex-col items-start gap-1 rounded-lg border border-purple-400/20 bg-purple-400/5 px-3 py-2 text-left transition-colors hover:border-purple-300/50 hover:bg-purple-400/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span data-testid="study-draft-title" className="text-sm font-bold text-slate-100">
-                    {draft.knowledge.title}
-                  </span>
-                  <span data-testid="study-draft-status" className="text-xs font-semibold text-purple-300/80">
-                    {draft.ageBlocked
-                      ? '아직은 너무 어려워요'
-                      : draft.verification.status === 'appropriate'
-                        ? '✅ 적합'
-                        : draft.verification.status === 'needs_revision'
-                          ? '✏️ 수정 필요'
-                          : '❓ 확인 불가'}
-                  </span>
-                </button>
-              ))}
+              {/* 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가):
+                  toddler는 이제 예시가 1~2개뿐이라 "N개 중 하나를
+                  골라보세요"라는 "여러 개 중 고르기" 문구가 어색하다 —
+                  더 쉬운 "이 예시를 사용해 볼까요?"로 바꾼다. 카드 자체는
+                  (몇 개든) 똑같이 클릭해서 고르는 방식 그대로라 아래
+                  handlePickStudyDraft 로직은 바뀌지 않는다. */}
+              <p className="text-sm font-bold text-purple-200">
+                {studyDrafts.length <= 2 ? '이 예시를 사용해 볼까요?' : `예시 ${studyDrafts.length}개 중 하나를 골라보세요`}
+              </p>
+              {/* 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가): 50대
+                  (7개)·60대(8개)처럼 카드가 많아지면 세로로만 쌓을 때
+                  스크롤이 길어진다 — 7개 이상일 때만 2열 그리드로 바꾼다
+                  (ObjectiveQuizStep.tsx의 10개 기준 2열 전환과 같은
+                  원리, 이 카드는 한 줄이 더 높아서 기준을 더 낮게 잡았다). */}
+              <div
+                data-testid="study-draft-cards"
+                className={`grid gap-2 ${studyDrafts.length >= 7 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}
+              >
+                {studyDrafts.map((draft, index) => (
+                  <button
+                    key={`${draft.knowledge.title}-${index}`}
+                    type="button"
+                    data-testid="study-draft-card"
+                    onClick={() => handlePickStudyDraft(draft)}
+                    disabled={draft.ageBlocked}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-purple-400/20 bg-purple-400/5 px-3 py-2 text-left transition-colors hover:border-purple-300/50 hover:bg-purple-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span data-testid="study-draft-title" className="text-sm font-bold text-slate-100">
+                      {draft.knowledge.title}
+                    </span>
+                    <span data-testid="study-draft-status" className="text-xs font-semibold text-purple-300/80">
+                      {draft.ageBlocked
+                        ? '아직은 너무 어려워요'
+                        : draft.verification.status === 'appropriate'
+                          ? '✅ 적합'
+                          : draft.verification.status === 'needs_revision'
+                            ? '✏️ 수정 필요'
+                            : '❓ 확인 불가'}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

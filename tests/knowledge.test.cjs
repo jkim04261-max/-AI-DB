@@ -509,20 +509,20 @@ async function run() {
     t.assert(res.statusCode === 400, '직업이 없는 캐릭터는 스스로 공부하기를 거부한다 (400)')
   }
 
-  // --- 정상 흐름: 스스로 공부하기 → 한 번의 Gemini 호출로 3개(toddler
-  // 기본값) 후보 생성+자체검증 → 그중 하나를 골라 저장 ---
+  // --- 정상 흐름: 스스로 공부하기 → 한 번의 Gemini 호출로 1개(toddler
+  // 기본값 — 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가
+  // 로직으로 수정): "아이가 부담을 느끼지 않도록 최소화") 후보
+  // 생성+자체검증 → 그 1개를 골라 저장 ---
   geminiBehavior = {
     kind: 'json',
     result: [
       { title: '발성 호흡법', content: '복식호흡으로 소리를 낸다.', status: 'appropriate', explanation: '정확해요', relevance: '가수와 관련 있어요', issues: '', suggestion: '' },
-      { title: '음역대 훈련', content: '매일 조금씩 음역을 넓힌다.', status: 'appropriate', explanation: '정확해요', relevance: '가수와 관련 있어요', issues: '', suggestion: '' },
-      { title: '무대 매너', content: '관객과 눈을 맞추며 노래한다.', status: 'appropriate', explanation: '정확해요', relevance: '가수와 관련 있어요', issues: '', suggestion: '' },
     ],
   }
   const studyRes = mockRes()
   await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), studyRes)
   t.assert(studyRes.statusCode === 200, '스스로 공부하기 요청이 성공한다 (200)')
-  t.assert(Array.isArray(studyRes.body.drafts) && studyRes.body.drafts.length === 3, 'toddler 캐릭터는 한 번에 3개의 후보를 받는다')
+  t.assert(Array.isArray(studyRes.body.drafts) && studyRes.body.drafts.length === 1, 'toddler 캐릭터는 한 번에 1개의 후보를 받는다(부담 최소화)')
   t.assert(studyRes.body.drafts[0].knowledge.title === '발성 호흡법', '첫 번째 후보의 제목이 응답에 포함된다')
   t.assert(studyRes.body.drafts[0].verification.status === 'appropriate', '스스로 생성한 지식을 스스로 적합으로 평가한다')
   t.assert(
@@ -603,31 +603,23 @@ async function run() {
   }
 
   // --- Gemini가 해석 불가능한 응답을 주면(배열 안 항목에 제목/내용
-  // 누락) 실패로 처리되고 한도가 환불된다 — toddler는 3개를 요청하므로
-  // 개수는 맞지만 그중 한 항목이 깨져 있는 경우를 확인한다. ---
+  // 누락) 실패로 처리되고 한도가 환불된다 — toddler는 1개를 요청하므로
+  // 그 1개짜리 항목 자체가 깨져 있는 경우를 확인한다. ---
   {
     geminiBehavior = {
       kind: 'json',
-      result: [
-        { title: '제목1', content: '내용1', status: 'appropriate', explanation: '', relevance: '', issues: '', suggestion: '' },
-        { status: 'appropriate', explanation: '설명만 있고 title/content가 없음' },
-        { title: '제목3', content: '내용3', status: 'appropriate', explanation: '', relevance: '', issues: '', suggestion: '' },
-      ],
+      result: [{ status: 'appropriate', explanation: '설명만 있고 title/content가 없음' }],
     }
     const res = mockRes()
     await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), res)
-    t.assert(res.statusCode >= 500, '배열 중 한 항목이라도 title/content가 없으면 배치 전체가 해석 실패로 처리된다')
+    t.assert(res.statusCode >= 500, '유일한 항목이라도 title/content가 없으면 배치 전체가 해석 실패로 처리된다')
   }
 
   // --- 일일 한도 3회(클릭 횟수), 지식 검증(10회) 한도와 완전히 분리 ---
   {
     geminiBehavior = {
       kind: 'json',
-      result: [
-        { title: '제목A', content: '내용', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-        { title: '제목B', content: '내용', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-        { title: '제목C', content: '내용', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-      ],
+      result: [{ title: '제목A', content: '내용', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' }],
     }
     // 위에서 이미 1회(req-study-1) + 1회(실패, 환불됨) 소비했으므로, 성공
     // 기준으로는 지금까지 1회만 소비된 상태 — 2회 더 성공해야 한도(3)에 도달한다.
@@ -726,11 +718,7 @@ async function run() {
     // 생성에 성공해야 한다 — 그리고 그 1장이 소비돼 0으로 돌아와야 한다.
     geminiBehavior = {
       kind: 'json',
-      result: [
-        { title: '무대 매너', content: '관객과 눈을 맞추며 노래한다.', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-        { title: '마이크 테크닉', content: '거리에 따라 소리 크기를 조절한다.', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-        { title: '호흡 배분', content: '긴 소절은 미리 숨을 아껴 쓴다.', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
-      ],
+      result: [{ title: '무대 매너', content: '관객과 눈을 맞추며 노래한다.', status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' }],
     }
     const usedTicket = mockRes()
     await characterHandler(erinReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'duri' } }), usedTicket)
@@ -856,7 +844,7 @@ async function run() {
 
     geminiBehavior = {
       kind: 'json',
-      result: Array.from({ length: 3 }, (_, i) => ({
+      result: Array.from({ length: 1 }, (_, i) => ({
         title: `숫자 세기 ${i}`,
         content: '하나, 둘, 셋',
         status: 'appropriate',
@@ -884,7 +872,7 @@ async function run() {
 
     geminiBehavior = {
       kind: 'json',
-      result: Array.from({ length: 7 }, (_, i) => ({
+      result: Array.from({ length: 4 }, (_, i) => ({
         title: `복식부기 실무 ${i}`,
         content: '...',
         status: 'appropriate',
@@ -1142,7 +1130,7 @@ async function run() {
     // 그대로 사용한다(50개 고정 라벨이 아니라 실제 입력 텍스트).
     geminiBehavior = {
       kind: 'json',
-      result: Array.from({ length: 3 }, (_, i) => ({
+      result: Array.from({ length: 1 }, (_, i) => ({
         title: `숲 생태 관찰 팁 ${i}`,
         content: '아침 시간대에 동물 발자국을 더 쉽게 볼 수 있다.',
         status: 'appropriate',
@@ -1558,13 +1546,17 @@ async function run() {
   // 이미 검증함 — 여기서는 "개수"만 다룬다). ---
   {
     const characterAge = bundle('api/_lib/characterAge.ts')
+    // 지시서(연령대별 AI 추천(예시) 개수 1개씩 점진적 증가 로직으로
+    // 수정): PR #124의 "2개씩 증가"(3~15) 표를 "1개씩 증가"(1~8) 표로
+    // 교체한다 — 8~9살은 "아이가 부담을 느끼지 않도록 최소화"해 1개로
+    // 정했다(지시서가 준 "1개 또는 2개" 중 최소값).
     const EXPECTED_DRAFT_COUNT_BY_TIER = {
-      toddler: 3,
-      teen: 5,
-      junior_20s: 7,
-      career_30s: 9,
-      veteran_40s: 11,
-      master_50s: 13,
+      toddler: 1,
+      teen: 3,
+      junior_20s: 4,
+      career_30s: 5,
+      veteran_40s: 6,
+      master_50s: 7,
     }
     for (const [tier, expectedCount] of Object.entries(EXPECTED_DRAFT_COUNT_BY_TIER)) {
       t.assert(
@@ -1572,15 +1564,15 @@ async function run() {
         `${tier} 단계는 한 번에 예시 ${expectedCount}개를 받는다`,
       )
     }
-    // master_50s 안에서도 60대 이상(ageNumber>=60)은 15개로 한 번 더
+    // master_50s 안에서도 60대 이상(ageNumber>=60)은 8개로 한 번 더
     // 늘어난다 — 기존 포트레이트 이미지의 50/60대 분기와 같은 기준.
-    t.assert(characterAge.selfStudyDraftCountForTier('master_50s', 59) === 13, '50대(59세)는 13개 그대로다')
-    t.assert(characterAge.selfStudyDraftCountForTier('master_50s', 60) === 15, '60세부터는 15개로 늘어난다')
+    t.assert(characterAge.selfStudyDraftCountForTier('master_50s', 59) === 7, '50대(59세)는 7개 그대로다')
+    t.assert(characterAge.selfStudyDraftCountForTier('master_50s', 60) === 8, '60세부터는 8개로 늘어난다')
   }
 
   // --- teen(10대, level 5) 캐릭터로 실제 study-generate를 호출해,
-  // 한 번의 (모의) Gemini 호출로 정확히 5개의 서로 다른 후보가
-  // 돌아오는지 확인한다 — 1개씩 5번 부르지 않는다(geminiCallCount로
+  // 한 번의 (모의) Gemini 호출로 정확히 3개의 서로 다른 후보가
+  // 돌아오는지 확인한다 — 1개씩 3번 부르지 않는다(geminiCallCount로
   // 직접 센다). ---
   {
     mock.seedUser(21, { email: 'teen-study-count@test.com' })
@@ -1589,11 +1581,11 @@ async function run() {
     await characterHandler(studyTeenReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
     await characterHandler(studyTeenReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
     const studyTeenNuri = mock.state.characters.find((c) => c.user_id === 21 && c.companion_type === 'nuri')
-    studyTeenNuri.level = 5 // ageTierForLevel(5) === 'teen' → 한 번에 5개
+    studyTeenNuri.level = 5 // ageTierForLevel(5) === 'teen' → 한 번에 3개
 
     geminiBehavior = {
       kind: 'json',
-      result: Array.from({ length: 5 }, (_, i) => ({
+      result: Array.from({ length: 3 }, (_, i) => ({
         title: `복식부기 ${i}`,
         content: '거래를 차변과 대변에 나눠 기록한다.',
         status: 'appropriate',
@@ -1607,10 +1599,10 @@ async function run() {
     const res = mockRes()
     await characterHandler(studyTeenReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), res)
     t.assert(res.statusCode === 200, 'teen 캐릭터의 스스로 공부하기가 성공한다')
-    t.assert(Array.isArray(res.body.drafts) && res.body.drafts.length === 5, 'teen 캐릭터는 한 번에 5개의 후보를 받는다')
-    t.assert(res.body.exampleCount === 5, '응답의 exampleCount도 5다')
-    t.assert(geminiCallCount === callsBefore + 1, '5개를 1개씩 5번이 아니라 Gemini를 단 1번만 호출해서 받는다')
-    t.assert(new Set(res.body.drafts.map((d) => d.knowledge.title)).size === 5, '5개의 제목이 서로 다르다')
+    t.assert(Array.isArray(res.body.drafts) && res.body.drafts.length === 3, 'teen 캐릭터는 한 번에 3개의 후보를 받는다')
+    t.assert(res.body.exampleCount === 3, '응답의 exampleCount도 3이다')
+    t.assert(geminiCallCount === callsBefore + 1, '3개를 1개씩 3번이 아니라 Gemini를 단 1번만 호출해서 받는다')
+    t.assert(new Set(res.body.drafts.map((d) => d.knowledge.title)).size === 3, '3개의 제목이 서로 다르다')
     t.assert(
       res.body.drafts.every((d) => typeof d.verificationToken === 'string' && d.verificationToken.length > 0),
       '후보마다 각자의 서명된 verificationToken을 받는다',
@@ -1628,7 +1620,7 @@ async function run() {
     const mismatchReq = (overrides = {}) => ({ headers: { cookie: mismatchCookie }, query: {}, ...overrides })
     await characterHandler(mismatchReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
     await characterHandler(mismatchReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
-    // toddler(level 1 기본값) → 3개를 요청하는데 2개만 돌아온다.
+    // toddler(level 1 기본값) → 1개를 요청하는데 2개가 돌아온다.
     geminiBehavior = {
       kind: 'json',
       result: [
@@ -1638,7 +1630,7 @@ async function run() {
     }
     const res = mockRes()
     await characterHandler(mismatchReq({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), res)
-    t.assert(res.statusCode === 502, '요청한 개수(3)와 실제 응답 개수(2)가 다르면 502로 실패 처리된다')
+    t.assert(res.statusCode === 502, '요청한 개수(1)와 실제 응답 개수(2)가 다르면 502로 실패 처리된다')
 
     const usageAfterFail = mockRes()
     await characterHandler(mismatchReq({ method: 'GET', query: { action: 'usage' } }), usageAfterFail)
@@ -1648,13 +1640,18 @@ async function run() {
   // --- 후보 중 하나라도 적합(appropriate)하면 집중력이 떨어지지 않고,
   // 전부 다 적합하지 않을 때만(이번 클릭이 통째로 쓸모없었을 때)
   // 떨어지는지 확인한다(기존 handleVerifyKnowledge의 단일 판정을
-  // "배치 중 하나라도"로 일반화한 규칙). ---
+  // "배치 중 하나라도"로 일반화한 규칙). 지시서(연령대별 AI 추천(예시)
+  // 개수 1개씩 점진적 증가 로직으로 수정) 이후 toddler는 1개뿐이라
+  // "여러 후보 중 일부만 적합"을 의미 있게 테스트할 수 없으므로, 3개를
+  // 받는 teen(level 5)으로 올려서 확인한다. ---
   {
     mock.seedUser(23, { email: 'study-batch-focus@test.com' })
     const focusCookie = cookieHeaderFor(auth, 23, 0, 'study-batch-focus@test.com')
     const focusReq = (overrides = {}) => ({ headers: { cookie: focusCookie }, query: {}, ...overrides })
     await characterHandler(focusReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
     await characterHandler(focusReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const focusNuri = mock.state.characters.find((c) => c.user_id === 23 && c.companion_type === 'nuri')
+    focusNuri.level = 5 // ageTierForLevel(5) === 'teen' → 한 번에 3개
 
     geminiBehavior = {
       kind: 'json',
@@ -1677,6 +1674,8 @@ async function run() {
     const focusReq2 = (overrides = {}) => ({ headers: { cookie: focusCookie2 }, query: {}, ...overrides })
     await characterHandler(focusReq2({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
     await characterHandler(focusReq2({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const focusNuri2 = mock.state.characters.find((c) => c.user_id === 24 && c.companion_type === 'nuri')
+    focusNuri2.level = 5 // ageTierForLevel(5) === 'teen' → 한 번에 3개
 
     geminiBehavior = {
       kind: 'json',
