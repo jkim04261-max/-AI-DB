@@ -1305,13 +1305,32 @@ async function run() {
   }
 
   // --- 지시서(학습 플로우 전면 개편) 2단계: 객관식 2문제(세트 전부
-  // 정답 필요) 생성/채점 API — 직업 무관 공통 문제은행(사용자 승인:
-  // "직업 무관 생활상식 동일 문제은행")이라 EXAM_SUPPORTED_PROFESSIONS
-  // 가드 없이 모든 직업(의사 포함)에서 동작해야 한다.
-  {
-    const objectiveQuizQuestions = bundle('api/_lib/objectiveQuizQuestions.ts')
-    const correctIndexFor = (id) => objectiveQuizQuestions.getObjectiveQuizQuestionById(id).correctIndex
+  // 정답 필요) 생성/채점 API.
+  //
+  // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장) 이후:
+  // 문제가 더 이상 직업 무관 고정 문제은행이 아니라 Gemini가 매번
+  // 직업별(역사·도구·목적·핵심역량) 문제를 생성하고, 선택지 개수도
+  // 연령대별로 달라진다(toddler=3). 사용자 확인("전문직 포함 전체
+  // 적용")에 따라 EXAM_SUPPORTED_PROFESSIONS 가드 없이 의사 등 모든
+  // 직업에서 여전히 동작해야 한다.
+  const OBJECTIVE_QUIZ_TEMPLATE_PHRASES = [
+    '이 직업이 가진 주요 도구는 무엇인가요?',
+    '이 직업의 역사적 기원은 무엇인가요?',
+    '이 직업의 주된 목적은 무엇인가요?',
+    '이 직업에 필요한 핵심 역량은 무엇인가요?',
+  ]
+  // toddler 기준 선택지 3개짜리 문제 2개를 만든다 — correctIndex를
+  // 테스트가 직접 지정해 정답/오답 제출에 그대로 쓴다(더 이상
+  // objectiveQuizQuestions.ts 같은 정적 은행에서 id로 되찾아오지 않는다).
+  const makeObjectiveQuizMock = (count, choiceCount, correctIndexes) =>
+    Array.from({ length: count }, (_, i) => ({
+      text: `문제 ${i + 1} (${choiceCount}지선다)`,
+      choices: Array.from({ length: choiceCount }, (_, c) => `보기 ${i}-${c}`),
+      correctIndex: correctIndexes[i],
+      explanation: `문제 ${i + 1}의 해설`,
+    }))
 
+  {
     mock.seedUser(13, { email: 'mina@test.com' })
     const minaCookie = cookieHeaderFor(auth, 13, 0, 'mina@test.com')
     const minaReq = (overrides = {}) => ({ headers: { cookie: minaCookie }, query: {}, ...overrides })
@@ -1321,17 +1340,24 @@ async function run() {
     await characterHandler(minaReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'doctor' } }), mockRes())
 
     // 1) 문제 2개 + quizToken을 받고, 정답(correctIndex)은 전혀
-    // 포함되지 않는다.
+    // 포함되지 않으며, toddler 단계는 보기 3개씩 출제된다. Gemini는
+    // 정확히 1번만 호출된다(비용 절감 — N개를 1번에 배치 생성).
+    const mockedSet1 = makeObjectiveQuizMock(2, 3, [1, 0])
+    geminiBehavior = { kind: 'json', result: mockedSet1 }
+    const callCountBefore1 = geminiCallCount
     const quizRes1 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes1)
-    t.assert(quizRes1.statusCode === 200, '의사 직업이어도 객관식 퀴즈를 바로 받을 수 있다(직업 무관 공통 문제은행)')
+    t.assert(quizRes1.statusCode === 200, '의사 직업이어도 객관식 퀴즈를 바로 받을 수 있다(전문직 포함 전체 적용)')
+    t.assert(geminiCallCount === callCountBefore1 + 1, 'Gemini는 문제 2개를 1번의 배치 호출로 생성한다(비용 절감)')
     t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 2, '문제 2개를 받는다')
     t.assert(typeof quizRes1.body.quizToken === 'string' && quizRes1.body.quizToken.length > 0, '서명된 quizToken을 받는다')
     t.assert(quizRes1.body.questions.every((q) => q.correctIndex === undefined), '정답(correctIndex)은 클라이언트로 내려가지 않는다')
+    t.assert(quizRes1.body.questions.every((q) => q.choices.length === 3), 'toddler(8~9살) 단계는 보기 3개가 출제된다(연령대별 선택지 개수)')
+    const matchedTemplates1 = OBJECTIVE_QUIZ_TEMPLATE_PHRASES.filter((p) => lastSystemInstruction.includes(p))
+    t.assert(matchedTemplates1.length === 2, '프롬프트에 서로 다른 문제 유형(역사/목적/도구/핵심역량) 2종이 지정된다(문제 유형 다양화)')
 
     // 2) 하나라도 틀리면 통과하지 못하고, 아무것도 저장되지 않는다.
-    const [q1a, q2a] = quizRes1.body.questions
-    const wrongAnswers = [q1a, q2a].map((q) => (correctIndexFor(q.id) + 1) % q.choices.length)
+    const wrongAnswers = mockedSet1.map((q) => (q.correctIndex + 1) % q.choices.length)
     const wrongSubmit = mockRes()
     await characterHandler(
       minaReq({
@@ -1351,10 +1377,11 @@ async function run() {
 
     // 3) 새 세트를 받아 둘 다 맞히면 통과하고, 2건이 저장되며 XP가
     // 20(지식 저장 10XP × 2) 지급된다.
+    const mockedSet2 = makeObjectiveQuizMock(2, 3, [2, 1])
+    geminiBehavior = { kind: 'json', result: mockedSet2 }
     const quizRes2 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes2)
-    const [q1b, q2b] = quizRes2.body.questions
-    const correctAnswers = [q1b, q2b].map((q) => correctIndexFor(q.id))
+    const correctAnswers = mockedSet2.map((q) => q.correctIndex)
     const correctSubmit = mockRes()
     await characterHandler(
       minaReq({
@@ -1392,6 +1419,7 @@ async function run() {
 
     // 5) 다른 캐릭터(두리)의 quizToken으로 누리 쪽을 제출하면 거부된다
     // (서명은 유효해도 이 캐릭터에게 출제된 문제가 아니므로).
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 3, [0, 0]) }
     const quizResDuri = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'duri' } }), quizResDuri)
     const crossSubmit = mockRes()
@@ -1420,6 +1448,37 @@ async function run() {
       malformedSubmit,
     )
     t.assert(malformedSubmit.statusCode === 400, '답이 2개가 아니면 400으로 거부된다')
+
+    // 8) Gemini가 선택지 개수를 어기거나(choices 길이 불일치) JSON을
+    // 해석할 수 없는 응답을 주면 502 — 틀린 응답을 그대로 신뢰해 보기
+    // 개수가 안 맞는 퀴즈를 내보내지 않는다.
+    geminiBehavior = { kind: 'json', result: [{ text: '문제', choices: ['A', 'B'], correctIndex: 0, explanation: '해설' }, { text: '문제2', choices: ['C', 'D', 'E'], correctIndex: 0, explanation: '해설2' }] }
+    const badChoiceCountQuiz = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), badChoiceCountQuiz)
+    t.assert(badChoiceCountQuiz.statusCode === 502, 'Gemini가 보기 개수(3개)를 어기면 502로 거부된다')
+  }
+
+  // --- 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장)
+  // 완료조건: 20대 계정에서 보기가 7개인지 직접 확인한다. objective-quiz
+  // 액션 자체는 UI에서 toddler/teen 단계에서만 쓰이지만, API는 캐릭터의
+  // 실제 연령대로 선택지 개수를 계산하므로 junior_20s 레벨로 직접
+  // 검증할 수 있다(characterAge.ts의 objectiveQuizChoiceCountForTier와
+  // selfStudyDraftCountForTier가 같은 숫자 표를 공유함을 간접 확인).
+  {
+    mock.seedUser(17, { email: 'junior20s-objective@test.com' })
+    const juniorCookie = cookieHeaderFor(auth, 17, 0, 'junior20s-objective@test.com')
+    const juniorReq = (overrides = {}) => ({ headers: { cookie: juniorCookie }, query: {}, ...overrides })
+    await characterHandler(juniorReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(juniorReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const juniorNuri = mock.state.characters.find((c) => c.user_id === 17 && c.companion_type === 'nuri')
+    juniorNuri.level = 10
+    juniorNuri.exp = 4500
+
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 7, [0, 0]) }
+    const juniorQuizRes = mockRes()
+    await characterHandler(juniorReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), juniorQuizRes)
+    t.assert(juniorQuizRes.statusCode === 200, '20대 캐릭터도 객관식 퀴즈를 받을 수 있다')
+    t.assert(juniorQuizRes.body.questions.every((q) => q.choices.length === 7), '20대(junior_20s) 단계는 보기 7개가 출제된다')
   }
 
   // --- 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen 전용 ④단계
@@ -1442,11 +1501,14 @@ async function run() {
     teenNuri.exp = 1000
 
     // 1) teen 캐릭터는 객관식 퀴즈를 3문제 받는다(toddler는 2문제 —
-    // 위 mina 블록에서 이미 확인됨 — 회귀 없음).
+    // 위 mina 블록에서 이미 확인됨 — 회귀 없음). 선택지도 toddler(3개)가
+    // 아니라 teen 기준 5개씩이다(연령대별 선택지 개수).
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(3, 5, [0, 1, 2]) }
     const teenQuizRes = mockRes()
     await characterHandler(teenReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), teenQuizRes)
     t.assert(teenQuizRes.statusCode === 200, 'teen 캐릭터도 객관식 퀴즈를 받을 수 있다')
     t.assert(Array.isArray(teenQuizRes.body.questions) && teenQuizRes.body.questions.length === 3, 'teen은 2문제가 아니라 3문제를 받는다')
+    t.assert(teenQuizRes.body.questions.every((q) => q.choices.length === 5), '10대(teen) 단계는 보기 5개가 출제된다')
 
     // 2) 직업을 아직 안 고른 캐릭터는 카드 맞추기 완료도 막힌다(다른
     // 액션들과 같은 "직업 먼저" 가드).

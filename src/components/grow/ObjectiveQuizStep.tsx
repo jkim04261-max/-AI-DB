@@ -124,7 +124,16 @@ export default function ObjectiveQuizStep({
             <p className="text-base font-bold text-slate-100">
               {qIdx + 1}. {q.text}
             </p>
-            <div className="flex flex-col gap-1.5">
+            {/* 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형
+                확장): 보기 개수가 연령대가 올라갈수록 늘어나(최대 15개)
+                한 줄로만 쌓으면 세로로 너무 길어진다 — 10개 이상일 때만
+                2열 그리드로 바꾼다(완료조건 "반응형 디자인 고려"). 버튼
+                높이는 고정하지 않아(px-3 py-2, text-wrap 기본값) 긴
+                보기 텍스트도 잘리지 않고 자연스럽게 줄바꿈된다. */}
+            <div
+              data-testid={`objective-quiz-choices-${qIdx}`}
+              className={`grid gap-1.5 ${q.choices.length >= 10 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}
+            >
               {q.choices.map((choice, cIdx) => (
                 <button
                   key={cIdx}

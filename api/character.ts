@@ -15,6 +15,7 @@ import {
   GeminiConfigError,
   verifyKnowledge,
   generateSelfStudyBatch,
+  generateObjectiveQuizBatch,
   type KnowledgeVerificationResult,
 } from './_lib/gemini'
 import { DAILY_TEACH_LIMIT, reserveTeach, refundTeach, peekTeachUsage } from './_lib/knowledgeLimit'
@@ -44,7 +45,6 @@ import {
   levelForExp,
 } from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
-import { getObjectiveQuizQuestionById, pickRandomObjectiveQuizQuestions } from './_lib/objectiveQuizQuestions'
 import { signObjectiveQuizToken, verifyObjectiveQuizToken } from './_lib/objectiveQuizToken'
 import {
   meetsAgeTier,
@@ -54,6 +54,7 @@ import {
   ageBlockedMessage,
   ageNumberForTier,
   selfStudyDraftCountForTier,
+  objectiveQuizChoiceCountForTier,
 } from './_lib/characterAge'
 import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
@@ -1393,13 +1394,19 @@ async function handleSubmitQuiz(req: VercelRequest, res: VercelResponse, userId:
   }
 }
 
-// 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" — 직업과 무관하게
-// 모든 캐릭터에 같은 안전한 생활 상식 문제은행(objectiveQuizQuestions.ts)
-// 에서 2문제를 무작위로 뽑는다(사용자 승인: "직업 무관 생활상식 동일
-// 문제은행" — 기존 getQuiz/getExam과 달리 EXAM_SUPPORTED_PROFESSIONS
-// 가드가 없다, 50개 직업 전체에서 똑같이 동작해야 하기 때문). 정답은
-// 서명된 quizToken에 담지 않고 문제 id만 담아, 채점 시 다시 문제은행에서
-// 찾아 비교한다(correctIndex는 절대 클라이언트로 내려가지 않음).
+// 지시서(학습 플로우 전면 개편) 2단계 "객관식 2문제" — 원래는 직업과
+// 무관한 고정 생활상식 문제은행(objectiveQuizQuestions.ts)에서 2문제를
+// 무작위로 뽑았다(기존 getQuiz/getExam과 달리 EXAM_SUPPORTED_PROFESSIONS
+// 가드 없이 50개 직업 전체에서 동작).
+//
+// 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 이제는
+// 그 자리에서 직업별 역사·도구·목적·핵심역량을 묻는 문제를 Gemini가 매번
+// 새로 만든다(generateObjectiveQuizBatch) — 선택지 개수도 캐릭터의 지금
+// 연령대에 맞춰 늘어난다(objectiveQuizChoiceCountForTier, selfStudy의
+// "예시 개수"와 같은 연령대별 표를 공유). 사용자 확인: 의사·변호사·약사
+// 같은 전문직도 포함해 전체 적용하기로 했다 — 정답(correctIndex)은
+// 여전히 응답에 내려가지 않고, 생성된 문제 전체를 서명된 quizToken에
+// 담아(objectiveQuizToken.ts) 채점 시 그 서명만 신뢰한다.
 async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, userId: number) {
   const companionType = req.query.companionType
 
@@ -1420,13 +1427,31 @@ async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, u
     // 그대로 2문제, teen(10대) ④번 단계만 3문제 — 클라이언트가 보낸 값은
     // 신뢰하지 않고 서버가 "지금" 연령대로 직접 정한다(연령 게이트와 같은
     // 신뢰 모델).
-    const objectiveQuizCount = effectiveAgeTier(character) === 'teen' ? 3 : 2
-    const questions = pickRandomObjectiveQuizQuestions(objectiveQuizCount)
+    const characterAgeTier = effectiveAgeTier(character)
+    const objectiveQuizCount = characterAgeTier === 'teen' ? 3 : 2
+    const choiceCount = objectiveQuizChoiceCountForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
+
+    let generated
+    try {
+      generated = await generateObjectiveQuizBatch(resolveProfessionLabel(character), characterAgeTier, objectiveQuizCount, choiceCount)
+    } catch (err) {
+      const { status, message } = resolveGeminiFailureMessage(err)
+      res.status(status).json({ error: message })
+      return
+    }
+
+    const questions = generated.map((g, idx) => ({
+      id: `q-${idx}`,
+      text: g.text,
+      choices: g.choices,
+      correctIndex: g.correctIndex,
+      explanation: g.explanation,
+    }))
     const quizToken = signObjectiveQuizToken({
       userId,
       characterId: character.id,
       companionType: String(companionType),
-      questionIds: questions.map((q) => q.id),
+      questions,
     })
 
     res.status(200).json({
@@ -1470,7 +1495,7 @@ async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse
   // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 문제 수가 더 이상
   // 항상 2로 고정되지 않으므로, 토큰이 실제로 출제한 문제 수와 제출한
   // 답의 개수가 정확히 같은지부터 확인한다.
-  if (answers.length !== tokenPayload.questionIds.length) {
+  if (answers.length !== tokenPayload.questions.length) {
     res.status(400).json({ error: '모든 문제의 답을 선택해주세요.' })
     return
   }
@@ -1493,12 +1518,11 @@ async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse
       return
     }
 
-    const questions = tokenPayload.questionIds.map((id) => getObjectiveQuizQuestionById(id))
-    if (questions.some((q) => !q)) {
-      res.status(400).json({ error: '문제가 만료되었거나 올바르지 않아요. 다시 받아주세요.' })
-      return
-    }
-    const resolvedQuestions = questions as NonNullable<(typeof questions)[number]>[]
+    // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장):
+    // 더 이상 id로 문제은행을 다시 찾지 않는다 — 서명된 토큰 자체가
+    // 문제 전체(정답 인덱스 포함)를 담고 있으므로, 토큰 검증을 통과했다는
+    // 사실이 곧 "이 문제들이 실제로 출제됐다"는 보증이다.
+    const resolvedQuestions = tokenPayload.questions
 
     const results = resolvedQuestions.map((q, idx) => ({ questionId: q.id, correct: answers[idx] === q.correctIndex }))
     const allCorrect = results.every((r) => r.correct)

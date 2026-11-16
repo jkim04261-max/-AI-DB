@@ -2921,3 +2921,62 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-submit-button').click()
   await expect(page.getByTestId('final-subjective-step')).toBeVisible()
 })
+
+// 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 선택지
+// 개수가 연령대별로 늘어나므로(토들러 3 ~ 60대 15), 화면에는 실제로
+// 서버가 내려준 만큼의 보기 버튼이 그려지고, 10개 이상일 때만 2열
+// 그리드로 바뀌는지(완료조건 "반응형 디자인 고려") 직접 확인한다.
+test('objective quiz choices render in a 2-column grid once there are 10+ options, and a single column below that', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  const missionProgressAtObjectiveStep = {
+    ageTier: 'toddler',
+    ageTierLabel: '8~9살',
+    byType: {
+      objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+      subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
+      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+    },
+    confirmedTotal: 3,
+    requiredTotal: 6,
+    allConfirmed: false,
+    nextAgeTier: 'teen',
+    nextAgeTierLabel: '10대',
+  }
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onMissions: async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ missionProgress: missionProgressAtObjectiveStep }) })
+    },
+    onObjectiveQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          // 지시서 완료조건 예시(연령대별 선택지 개수)에 맞춰, 1번
+          // 문제는 50대(13개, 아직 한 자리 미만인 토들러 3개와 대비)
+          // 보기를, 2번 문제는 10개 미만(toddler 기준 3개)인 보기를
+          // 섞어 같은 화면 안에서 2열/1열이 함께 올바르게 갈리는지 본다.
+          questions: [
+            { id: 'wide-obj-1', text: '보기 13개짜리 문제', choices: Array.from({ length: 13 }, (_, i) => `보기 ${i + 1}`) },
+            { id: 'wide-obj-2', text: '보기 3개짜리 문제', choices: ['보기 1', '보기 2', '보기 3'] },
+          ],
+          quizToken: 'tok-wide-choices',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+
+  await expect(page.getByTestId('objective-quiz-choice-0-0')).toHaveCount(1)
+  await expect(page.locator('[data-testid="objective-quiz-choices-0"] button')).toHaveCount(13)
+  await expect(page.getByTestId('objective-quiz-choices-0')).toHaveClass(/sm:grid-cols-2/)
+
+  await expect(page.locator('[data-testid="objective-quiz-choices-1"] button')).toHaveCount(3)
+  await expect(page.getByTestId('objective-quiz-choices-1')).not.toHaveClass(/sm:grid-cols-2/)
+})
