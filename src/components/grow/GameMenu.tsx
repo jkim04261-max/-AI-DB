@@ -1,6 +1,16 @@
-import { BookOpen, MessageCircle, HelpCircle, Sparkles, TrendingUp, Images, Shirt, Store, ShoppingBag } from 'lucide-react'
+import { BookOpen, MessageCircle, HelpCircle, Sparkles, TrendingUp, Images, Shirt, Store, ShoppingBag, Gamepad2 } from 'lucide-react'
 
-export type GameMenuAction = 'teach' | 'chat-log' | 'quiz' | 'study' | 'growth' | 'album' | 'customize' | 'market' | 'universalMarket'
+export type GameMenuAction =
+  | 'teach'
+  | 'chat-log'
+  | 'quiz'
+  | 'study'
+  | 'growth'
+  | 'album'
+  | 'customize'
+  | 'market'
+  | 'universalMarket'
+  | 'minigames'
 
 interface MenuItem {
   action: GameMenuAction
@@ -22,6 +32,10 @@ const ITEMS: MenuItem[] = [
   { action: 'study', label: '스스로 공부하기', icon: Sparkles },
   { action: 'growth', label: '성장 보기', icon: TrendingUp },
   { action: 'album', label: '앨범·기록', icon: Images },
+  // 지시서(연령별 미니게임 보조 편성): 학습의 흥미를 돕는 보조 기능 —
+  // "가르치기" 등과 같은 자리(직업 선택 필요)에 둔다. 연령대별로 몇
+  // 개가 열려 있는지는 이 버튼이 여는 MinigameHub 안에서 보여준다.
+  { action: 'minigames', label: '미니게임', icon: Gamepad2 },
   { action: 'customize', label: '커스터마이징', icon: Shirt, alwaysEnabled: true },
   { action: 'market', label: '아이템 마켓', icon: Store, alwaysEnabled: true },
   // 지시서(누리AI 만능마켓): 기존 "아이템 마켓"(Gold, 옷/배경)과 완전히
