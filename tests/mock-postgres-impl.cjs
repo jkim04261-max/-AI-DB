@@ -25,6 +25,8 @@ const state = {
   nextCharacterMessageId: 1,
   examAttempts: [], // { id, user_id, character_id, kind, profession, question_id, score, passed, exp_awarded }
   nextExamAttemptId: 1,
+  townBuildings: [], // { id, owner_user_id, region, business_name, normalized_region, normalized_business_name }
+  nextTownBuildingId: 1,
   quizFirsts: new Set(), // `${characterId}|${questionId}`
   examFirsts: new Set(), // `${characterId}|${profession}`
   nextKnowledgeEntryId: 1,
@@ -72,6 +74,8 @@ function reset() {
   state.nextCharacterMessageId = 1
   state.examAttempts = []
   state.nextExamAttemptId = 1
+  state.townBuildings = []
+  state.nextTownBuildingId = 1
   state.quizFirsts.clear()
   state.examFirsts.clear()
   state.nextKnowledgeEntryId = 1
@@ -976,6 +980,78 @@ function sql(strings, ...values) {
     }
     state.examAttempts.push(entry)
     return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // --- api/character.ts: handleRegisterBuilding (ON CONFLICT DO NOTHING on
+  // the (normalized_region, normalized_business_name) unique pair) ---
+  if (has(text, 'INSERT INTO town_buildings')) {
+    const [ownerUserId, region, businessName, normalizedRegion, normalizedBusinessName] = values
+    const exists = state.townBuildings.some(
+      (b) => b.normalized_region === normalizedRegion && b.normalized_business_name === normalizedBusinessName,
+    )
+    if (exists) return Promise.resolve({ rows: [] })
+    const id = state.nextTownBuildingId++
+    const now = new Date().toISOString()
+    const row = {
+      id,
+      owner_user_id: ownerUserId,
+      region,
+      business_name: businessName,
+      normalized_region: normalizedRegion,
+      normalized_business_name: normalizedBusinessName,
+      created_at: now,
+    }
+    state.townBuildings.push(row)
+    return Promise.resolve({ rows: [{ ...row }] })
+  }
+
+  // --- api/character.ts: handleGetBuilding's businessName-scoped lookup
+  // (checked before the owner-scoped lookup below, since both start with
+  // the same SELECT column list and only the WHERE clause differs) ---
+  if (has(text, 'FROM town_buildings', 'AND normalized_business_name =')) {
+    const [normalizedRegion, normalizedBusinessName] = values
+    const row = state.townBuildings.find(
+      (b) => b.normalized_region === normalizedRegion && b.normalized_business_name === normalizedBusinessName,
+    )
+    return Promise.resolve({ rows: row ? [{ ...row }] : [] })
+  }
+
+  // --- api/character.ts: handleGetBuilding's owner-scoped lookup ---
+  if (has(text, 'FROM town_buildings', 'AND owner_user_id =') && has(text, 'SELECT')) {
+    const [normalizedRegion, ownerUserId] = values
+    const row = state.townBuildings.find((b) => b.normalized_region === normalizedRegion && b.owner_user_id === ownerUserId)
+    return Promise.resolve({ rows: row ? [{ ...row }] : [] })
+  }
+
+  // --- api/character.ts: handleUpdateBuilding (owner-gated rename; throws a
+  // node-postgres-shaped unique-violation error, code '23505', if the new
+  // name collides with a different building already in the same region —
+  // same thing a real UNIQUE(normalized_region, normalized_business_name)
+  // constraint would raise) ---
+  if (has(text, 'UPDATE town_buildings')) {
+    const [businessName, normalizedBusinessName, buildingId, ownerUserId] = values
+    const row = state.townBuildings.find((b) => b.id === buildingId && b.owner_user_id === ownerUserId)
+    if (!row) return Promise.resolve({ rows: [] })
+    const collision = state.townBuildings.some(
+      (b) => b.id !== buildingId && b.normalized_region === row.normalized_region && b.normalized_business_name === normalizedBusinessName,
+    )
+    if (collision) {
+      const err = new Error('duplicate key value violates unique constraint')
+      err.code = '23505'
+      throw err
+    }
+    row.business_name = businessName
+    row.normalized_business_name = normalizedBusinessName
+    return Promise.resolve({ rows: [{ ...row }] })
+  }
+
+  // --- api/character.ts: handleDeleteBuilding (owner-gated delete) ---
+  if (has(text, 'DELETE FROM town_buildings')) {
+    const [buildingId, ownerUserId] = values
+    const idx = state.townBuildings.findIndex((b) => b.id === buildingId && b.owner_user_id === ownerUserId)
+    if (idx === -1) return Promise.resolve({ rows: [] })
+    const [removed] = state.townBuildings.splice(idx, 1)
+    return Promise.resolve({ rows: [{ id: removed.id }] })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)

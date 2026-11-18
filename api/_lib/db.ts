@@ -698,3 +698,54 @@ export interface CharacterExamAttemptRow {
   exp_awarded: number
   created_at: string
 }
+
+let townBuildingsTableReady: Promise<unknown> | null = null
+
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): 건물 등록은
+// "같은 지역에 같은 상호명이 이미 있는가"를 모든 유저에 걸쳐(이 유저
+// 혼자만의 로컬 상태가 아니라) 확인해야 해서, 프로필 작성 폼의 다른
+// 입력(이름·생일·거주지역·직업 이력, GrowPage.tsx의 로컬 스토리지)과는
+// 달리 반드시 서버 DB에 저장한다 — 중복 방지 자체가 여러 유저가 공유
+// 하는 진짜 상태 없이는 성립하지 않는 기능이다.
+//
+// region/business_name은 사용자가 입력한 원문 그대로 보여주기용으로
+// 저장하고, normalized_region/normalized_business_name(트림+소문자+
+// 공백 정리, 서버에서 직접 계산 — 클라이언트 값을 신뢰하지 않는다)에
+// UNIQUE 제약을 걸어 "경기도 일산 정발산동"과 " 경기도 일산 정발산동 "
+// 처럼 사소하게 다른 입력도 같은 지역/상호로 취급해 중복을 막는다.
+export function ensureTownBuildingsTable() {
+  if (!townBuildingsTableReady) {
+    townBuildingsTableReady = (async () => {
+      await ensureUsersTable()
+      await sql`
+        CREATE TABLE IF NOT EXISTS town_buildings (
+          id SERIAL PRIMARY KEY,
+          owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          region TEXT NOT NULL,
+          business_name TEXT NOT NULL,
+          normalized_region TEXT NOT NULL,
+          normalized_business_name TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (normalized_region, normalized_business_name)
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS town_buildings_owner_idx ON town_buildings (owner_user_id)
+      `
+    })().catch((err) => {
+      townBuildingsTableReady = null
+      throw err
+    })
+  }
+  return townBuildingsTableReady
+}
+
+export interface TownBuildingRow {
+  id: number
+  owner_user_id: number
+  region: string
+  business_name: string
+  normalized_region: string
+  normalized_business_name: string
+  created_at: string
+}
