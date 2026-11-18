@@ -26,6 +26,7 @@ import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
 import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import JobEventModal from '../components/grow/JobEventModal'
+import TownEntryOverlay from '../components/grow/TownEntryOverlay'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -113,6 +114,35 @@ function writeJobHistory(userId: number, companionType: CompanionType, record: J
   } catch {
     // 저장 실패(프라이빗 모드 등)해도 온보딩 자체는 그대로 진행돼야
     // 하므로 조용히 무시한다 — 체험판 부가 정보일 뿐이다.
+  }
+}
+
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): "일하는 지역"
+// 기반 동네 배경/건물 조회가 재방문 때도 동작하려면 이 값이 최소한
+// 로컬에는 남아 있어야 한다 — OpeningProfileScreen의 region은 지금까지
+// "어디에도 저장하지 않는다"는 방침이었지만(생일과 같은 순수 표시용
+// 입력), job-history와 달리 이 기능은 region이 없으면 아예 동작할 수
+// 없다. job-history와 같은 이유(Preview/Production DB 분리 미검증)로
+// 여전히 서버 DB에는 쓰지 않고, 같은 로컬 스토리지 영속화만 추가한다.
+const REGION_STORAGE_PREFIX = 'nuri-ai:region:'
+
+function regionStorageKey(userId: number, companionType: CompanionType): string {
+  return `${REGION_STORAGE_PREFIX}${userId}:${companionType}`
+}
+
+export function readRegion(userId: number, companionType: CompanionType): string {
+  try {
+    return window.localStorage.getItem(regionStorageKey(userId, companionType)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function writeRegion(userId: number, companionType: CompanionType, region: string) {
+  try {
+    window.localStorage.setItem(regionStorageKey(userId, companionType), region)
+  } catch {
+    // 생략해도 동네 배경 대신 건너뛰기로 자연히 대체되므로 조용히 무시.
   }
 }
 const SHEET_TITLE: Record<GameMenuAction, string> = {
@@ -286,6 +316,13 @@ export default function GrowPage() {
   // 모달 표시 중 — teen 커리큘럼 안에서 두 번 별도로 열린다(카드 맞추기
   // 직후 1회, 기존 알바 슬롯에서 1회).
   const [jobEventOpen, setJobEventOpen] = useState(false)
+  // 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): 메인 화면
+  // 진입 시 한 번 보여주는 동네/건물 오버레이. townEntryShownForRef는
+  // "이 페이지가 켜져 있는 동안 이 캐릭터에 대해 이미 한 번 보여줬는지"
+  // 추적해 재방문(탭 전환 등)마다 반복해서 뜨지 않게 한다 — 리렌더와
+  // 무관하게 유지돼야 해서 상태(state)가 아니라 ref로 둔다.
+  const [townEntryOpen, setTownEntryOpen] = useState(false)
+  const townEntryShownForRef = useRef<Set<CompanionType>>(new Set())
   // PR #49: 상단 리소스 바의 "행동력" — 오늘 남은 가르치기/스스로
   // 공부하기 횟수(계정 전체 하루 한도, 캐릭터별이 아님). 소비 없는
   // 조회(getUsage)만 쓴다.
@@ -639,6 +676,9 @@ export default function GrowPage() {
           visibility: profile.jobHistoryVisibility,
         })
       }
+      if (profile.region.trim()) {
+        writeRegion(user.id, companionType, profile.region.trim())
+      }
       wallet.grantInitialAllowance(GROW_INITIAL_ALLOWANCE_WON)
       selectCompanion(companionType)
       setOnboardingFor(null)
@@ -911,6 +951,24 @@ export default function GrowPage() {
       setHungryQuizRemaining(remaining)
     }
   }
+
+  // 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): "프로필 작성
+  // 후 메인 화면 진입 시" — 온보딩이 끝나 직업까지 있는 캐릭터가 막
+  // 보이기 시작한 시점(그리고 재방문 시에도 이 페이지에 처음 들어온
+  // 시점) 한 번만 연다. 입력해 둔 "일하는 지역"이 없으면(옛날 계정 등)
+  // 이 기능 자체를 건드릴 데이터가 없으므로 조용히 건너뛴다 — 기존
+  // 메인 화면 진입 흐름은 전혀 달라지지 않는다. 아래 "로그인 필요"
+  // 조건부 return보다 먼저 와야 한다 — 그 아래에 두면 return이 먼저
+  // 실행되는 렌더와 아닌 렌더에서 이 Hook 호출 순서가 달라진다
+  // (rules-of-hooks 위반).
+  useEffect(() => {
+    if (!user || !character || !character.profession || onboardingFor) return
+    if (townEntryShownForRef.current.has(character.companionType)) return
+    const region = readRegion(user.id, character.companionType)
+    if (!region) return
+    townEntryShownForRef.current.add(character.companionType)
+    setTownEntryOpen(true)
+  }, [user, character, onboardingFor])
 
   if (!authLoading && !user) {
     return (
@@ -1222,6 +1280,16 @@ export default function GrowPage() {
                       ageTier={ageTier}
                       ageNumber={ageNumber}
                       onComplete={handleJobEventComplete}
+                    />
+                  )}
+                  {townEntryOpen && user && (
+                    <TownEntryOverlay
+                      companionType={character.companionType}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      region={readRegion(user.id, character.companionType)}
+                      workplaceName={readJobHistory(user.id, character.companionType)?.workplaceName ?? ''}
+                      onDone={() => setTownEntryOpen(false)}
                     />
                   )}
                 </div>
