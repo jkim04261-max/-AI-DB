@@ -168,6 +168,17 @@ export interface TicketBalances {
   knowledgeValidationTickets: number
 }
 
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): api/character.ts의
+// toTownBuildingJson과 같은 모양. owner_user_id는 내려주지 않고(다른
+// 유저 id를 노출하지 않음) isOwner만 내려준다.
+export interface TownBuilding {
+  id: number
+  region: string
+  businessName: string
+  createdAt: string
+  isOwner: boolean
+}
+
 interface GrowthContextValue {
   characters: Character[]
   loading: boolean
@@ -218,6 +229,11 @@ interface GrowthContextValue {
     { entry: KnowledgeEntry; savedReply: string; missionProgress: MissionProgress | null; focusPercent: number } & GrowthUpdate & EvolutionUpdate
   >
   getMissionProgress: (companionType: CompanionType) => Promise<MissionProgress>
+  // businessName을 함께 주면 소유자와 무관하게 그 지역·상호명 건물을
+  // 찾는다(동료가 이미 만든 회사 건물에 입장할 수 있는지 확인). 생략하면
+  // 이 유저가 그 지역에 등록해 둔 내 건물을 찾는다.
+  getBuilding: (region: string, businessName?: string) => Promise<TownBuilding | null>
+  registerBuilding: (region: string, businessName: string) => Promise<TownBuilding>
   listKnowledge: (
     companionType: CompanionType,
     options?: { limit?: number; offset?: number },
@@ -891,6 +907,35 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     return data.missionProgress
   }, [])
 
+  // 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): 소비 없는 순수
+  // 조회 — getMissionProgress와 같은 원칙.
+  const getBuilding = useCallback(async (region: string, businessName?: string) => {
+    const params = new URLSearchParams({ action: 'building', region })
+    if (businessName) params.set('businessName', businessName)
+    const res = await fetch(`/api/character?${params.toString()}`)
+    const data = (await res.json().catch(() => ({}))) as { building?: TownBuilding | null; error?: string }
+    if (!res.ok) {
+      throw new Error(data.error || '건물 정보를 불러오는 중 오류가 발생했어요.')
+    }
+    return data.building ?? null
+  }, [])
+
+  // 지시서: 같은 지역에 같은 상호명이 이미 있으면 서버가 409와 함께
+  // "이미 등록된 상호명입니다. 다른 이름을 사용해 주세요"를 돌려준다 —
+  // 그 메시지를 그대로 Error에 담아 호출부(등록 모달)가 보여주게 한다.
+  const registerBuilding = useCallback(async (region: string, businessName: string) => {
+    const res = await fetch('/api/character?action=register-building', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region, businessName }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { building?: TownBuilding; error?: string }
+    if (!res.ok || !data.building) {
+      throw new Error(data.error || '건물을 등록하는 중 오류가 발생했어요.')
+    }
+    return data.building
+  }, [])
+
   return (
     <GrowthContext.Provider
       value={{
@@ -906,6 +951,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         completeCardGame,
         saveKnowledge,
         getMissionProgress,
+        getBuilding,
+        registerBuilding,
         listKnowledge,
         listMessages,
         getQuiz,

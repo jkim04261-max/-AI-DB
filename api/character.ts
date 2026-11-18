@@ -4,10 +4,12 @@ import {
   ensureKnowledgeTable,
   ensureCharacterMessagesTable,
   ensureGrowthTables,
+  ensureTownBuildingsTable,
   sql,
   type CharacterRow,
   type KnowledgeEntryRow,
   type CharacterMessageRow,
+  type TownBuildingRow,
 } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
 import {
@@ -185,6 +187,13 @@ const NO_KNOWLEDGE_VALIDATION_TICKETS_MESSAGE =
 // 것 위주로 충분히 참고할 수 있는 수.
 const SELF_STUDY_KNOWN_TITLES_LIMIT = 20
 
+const MAX_TOWN_REGION_LENGTH = 50
+const MAX_TOWN_BUSINESS_NAME_LENGTH = 30
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템)의 문구를 그대로
+// 쓴다 — 프런트가 이 메시지를 그대로 보여주면 되므로 여기서 임의로
+// 바꾸지 않는다.
+const DUPLICATE_BUILDING_MESSAGE = '이미 등록된 상호명입니다. 다른 이름을 사용해 주세요'
+
 // PR #65: 집중력 게이지(characters.focus_percent)의 1차 최소 반영 —
 // "교육·장비" 단계 자체는 PR #66에서 다루므로, 지금은 실제로 지식을
 // 완성 저장했는지(성공=집중력 소폭 상승)와 검증에서 막혔는지(수정
@@ -261,6 +270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetMissions(req, res, session.sub)
       return
     }
+    if (action === 'building') {
+      await handleGetBuilding(req, res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -302,6 +315,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handlePurchaseKnowledgeValidationTicket(res, session.sub)
       return
     }
+    if (action === 'register-building') {
+      await handleRegisterBuilding(req, res, session.sub)
+      return
+    }
+    if (action === 'update-building') {
+      await handleUpdateBuilding(req, res, session.sub)
+      return
+    }
+    if (action === 'delete-building') {
+      await handleDeleteBuilding(req, res, session.sub)
+      return
+    }
     await handlePost(req, res, session.sub)
     return
   }
@@ -326,6 +351,24 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
   return result.rows[0] ?? null
+}
+
+// town_buildings의 UNIQUE(normalized_region, normalized_business_name)과
+// 짝을 이루는 정규화 규칙 — 트림 + 소문자 + 내부 연속 공백을 1개로
+// 정리한다. db.ts의 주석대로 이 계산은 항상 서버에서 하고, 클라이언트가
+// 보낸 정규화 값은 절대 쓰지 않는다.
+function normalizeTownField(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function toTownBuildingJson(row: TownBuildingRow, viewerUserId: number) {
+  return {
+    id: row.id,
+    region: row.region,
+    businessName: row.business_name,
+    createdAt: row.created_at,
+    isOwner: row.owner_user_id === viewerUserId,
+  }
 }
 
 // PR #63: 캐릭터 행을 JSON으로 내보낼 때마다 effectiveAgeTier를 함께
@@ -430,6 +473,170 @@ async function handlePurchaseKnowledgeValidationTicket(res: VercelResponse, user
   } catch (err) {
     console.error('[api/character] unexpected error on purchase-knowledge-validation-ticket', err)
     res.status(500).json({ error: '지식 검증 충전권을 지급하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): 소비 없는 순수
+// 조회(peekTeachUsage/handleGetMissions와 같은 원칙)다. 두 가지 호출
+// 방식을 하나로 합쳤다:
+// - region만 보내면: 이 유저가 그 지역에 이미 등록해 둔 내 건물을 찾는다
+//   (자영업자가 [내 가게 등록] 버튼을 보여줄지 "입장"을 보여줄지 정할 때).
+// - region + businessName을 같이 보내면: 소유자와 무관하게 그 지역·상호명
+//   건물이 이미 있는지 찾는다(회사원이 동료가 이미 만들어둔 회사 건물에
+//   입장할 수 있는지 확인할 때, 그리고 등록 전 중복 여부를 먼저 보여줄 때).
+async function handleGetBuilding(req: VercelRequest, res: VercelResponse, userId: number) {
+  const region = typeof req.query.region === 'string' ? req.query.region.trim() : ''
+  const businessNameParam = typeof req.query.businessName === 'string' ? req.query.businessName.trim() : ''
+
+  if (!region) {
+    res.status(400).json({ error: '일하는 지역 정보가 필요해요.' })
+    return
+  }
+
+  try {
+    await ensureTownBuildingsTable()
+    const normalizedRegion = normalizeTownField(region)
+
+    const result = businessNameParam
+      ? await sql<TownBuildingRow>`
+          SELECT id, owner_user_id, region, business_name, normalized_region, normalized_business_name, created_at
+          FROM town_buildings
+          WHERE normalized_region = ${normalizedRegion} AND normalized_business_name = ${normalizeTownField(businessNameParam)}
+        `
+      : await sql<TownBuildingRow>`
+          SELECT id, owner_user_id, region, business_name, normalized_region, normalized_business_name, created_at
+          FROM town_buildings
+          WHERE normalized_region = ${normalizedRegion} AND owner_user_id = ${userId}
+        `
+
+    const building = result.rows[0] ?? null
+    res.status(200).json({ building: building ? toTownBuildingJson(building, userId) : null })
+  } catch (err) {
+    console.error('[api/character] unexpected error on GET building', err)
+    res.status(500).json({ error: '건물 정보를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(지역 기반 2.5D 동네 및 직업 건물 건설 시스템): 자영업자가
+// [내 가게 등록]을 눌러 상호명을 등록한다. handlePost(캐릭터 생성)의
+// ON CONFLICT DO NOTHING 패턴과 똑같이, UNIQUE(normalized_region,
+// normalized_business_name) 제약 자체가 "이미 있는지 확인"과 "생성"을
+// 한 번의 왕복으로 처리한다 — 확인 쿼리와 삽입 쿼리를 따로 날리면 그
+// 사이에 다른 유저가 먼저 등록하는 경쟁 상태(race condition)가 생기지만,
+// 이 방식은 DB가 그 경쟁을 원천적으로 막아준다.
+async function handleRegisterBuilding(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { region, businessName } = (req.body ?? {}) as { region?: unknown; businessName?: unknown }
+
+  if (typeof region !== 'string' || !region.trim() || region.trim().length > MAX_TOWN_REGION_LENGTH) {
+    res.status(400).json({ error: `일하는 지역을 ${MAX_TOWN_REGION_LENGTH}자 이내로 입력해주세요.` })
+    return
+  }
+  if (typeof businessName !== 'string' || !businessName.trim() || businessName.trim().length > MAX_TOWN_BUSINESS_NAME_LENGTH) {
+    res.status(400).json({ error: `상호명을 ${MAX_TOWN_BUSINESS_NAME_LENGTH}자 이내로 입력해주세요.` })
+    return
+  }
+
+  const trimmedRegion = region.trim()
+  const trimmedBusinessName = businessName.trim()
+
+  try {
+    await ensureTownBuildingsTable()
+
+    const inserted = await sql<TownBuildingRow>`
+      INSERT INTO town_buildings (owner_user_id, region, business_name, normalized_region, normalized_business_name)
+      VALUES (${userId}, ${trimmedRegion}, ${trimmedBusinessName}, ${normalizeTownField(trimmedRegion)}, ${normalizeTownField(trimmedBusinessName)})
+      ON CONFLICT (normalized_region, normalized_business_name) DO NOTHING
+      RETURNING id, owner_user_id, region, business_name, normalized_region, normalized_business_name, created_at
+    `
+    const building = inserted.rows[0]
+    if (!building) {
+      res.status(409).json({ error: DUPLICATE_BUILDING_MESSAGE })
+      return
+    }
+
+    res.status(201).json({ building: toTownBuildingJson(building, userId) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on register-building', err)
+    res.status(500).json({ error: '건물을 등록하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(무단 등록 방지: 최초 등록자에게만 수정/삭제 권한): update/delete
+// 모두 `WHERE id = ... AND owner_user_id = ${userId}`로 소유자 일치를
+// 쿼리 자체의 조건으로 걸어, handlePatch/conversations [id].ts의 delete와
+// 같은 "한 번의 왕복이 곧 소유권 확인"패턴을 따른다 — 다른 사람의
+// building id를 보내면 그냥 0행이 매칭되어 404가 된다(존재는 하지만
+// 내 것이 아니라는 사실 자체를 굳이 구분해서 알려주지 않는다).
+async function handleUpdateBuilding(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { id, businessName } = (req.body ?? {}) as { id?: unknown; businessName?: unknown }
+
+  const buildingId = typeof id === 'number' ? id : Number(id)
+  if (!Number.isInteger(buildingId) || buildingId <= 0) {
+    res.status(400).json({ error: '건물 정보를 찾을 수 없어요.' })
+    return
+  }
+  if (typeof businessName !== 'string' || !businessName.trim() || businessName.trim().length > MAX_TOWN_BUSINESS_NAME_LENGTH) {
+    res.status(400).json({ error: `상호명을 ${MAX_TOWN_BUSINESS_NAME_LENGTH}자 이내로 입력해주세요.` })
+    return
+  }
+  const trimmedBusinessName = businessName.trim()
+
+  try {
+    await ensureTownBuildingsTable()
+
+    const updated = await sql<TownBuildingRow>`
+      UPDATE town_buildings
+      SET business_name = ${trimmedBusinessName}, normalized_business_name = ${normalizeTownField(trimmedBusinessName)}
+      WHERE id = ${buildingId} AND owner_user_id = ${userId}
+      RETURNING id, owner_user_id, region, business_name, normalized_region, normalized_business_name, created_at
+    `
+    const building = updated.rows[0]
+    if (!building) {
+      res.status(404).json({ error: '건물을 찾을 수 없어요.' })
+      return
+    }
+
+    res.status(200).json({ building: toTownBuildingJson(building, userId) })
+  } catch (err) {
+    // UNIQUE(normalized_region, normalized_business_name) 위반(같은
+    // 지역에 이미 쓰이는 상호명으로 바꾸려는 시도) — @vercel/postgres는
+    // node-postgres 에러를 그대로 던지므로 err.code === '23505'로
+    // 구분한다.
+    if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
+      res.status(409).json({ error: DUPLICATE_BUILDING_MESSAGE })
+      return
+    }
+    console.error('[api/character] unexpected error on update-building', err)
+    res.status(500).json({ error: '건물 정보를 수정하는 중 오류가 발생했어요.' })
+  }
+}
+
+async function handleDeleteBuilding(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { id } = (req.body ?? {}) as { id?: unknown }
+
+  const buildingId = typeof id === 'number' ? id : Number(id)
+  if (!Number.isInteger(buildingId) || buildingId <= 0) {
+    res.status(400).json({ error: '건물 정보를 찾을 수 없어요.' })
+    return
+  }
+
+  try {
+    await ensureTownBuildingsTable()
+
+    const deleted = await sql<{ id: number }>`
+      DELETE FROM town_buildings
+      WHERE id = ${buildingId} AND owner_user_id = ${userId}
+      RETURNING id
+    `
+    if (!deleted.rows[0]) {
+      res.status(404).json({ error: '건물을 찾을 수 없어요.' })
+      return
+    }
+
+    res.status(200).json({ deleted: true })
+  } catch (err) {
+    console.error('[api/character] unexpected error on delete-building', err)
+    res.status(500).json({ error: '건물을 삭제하는 중 오류가 발생했어요.' })
   }
 }
 
