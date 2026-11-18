@@ -1,8 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSessionUser } from '../_lib/auth'
+import { handleWorkProfile } from '../_lib/workProfile'
 import { DAILY_QUESTION_LIMIT, getRemainingQuestions, isDailyLimitEnabled } from '../_lib/dailyLimit'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.query?.action === 'work-profile') return handleWorkProfile(req, res)
+
   const session = await getSessionUser(req)
 
   if (!session) {

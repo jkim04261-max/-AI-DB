@@ -120,6 +120,66 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 })
 
+test('첫걸음에서 근무지를 비공개로 저장하고 실패 시 다시 시도할 수 있다', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let created = false
+  let attempts = 0
+  let savedProfile: Record<string, unknown> | undefined
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ json: { characters: [] } })
+      return true
+    }
+    if (method === 'POST') {
+      expect(savedProfile).toBeDefined()
+      created = true
+      await route.fulfill({ status: 201, json: { character: {
+        id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child',
+        profession: null, level: 1, exp: 0, created_at: new Date().toISOString(),
+      } } })
+      return true
+    }
+    return false
+  })
+  await page.route('**/api/account/work-profile', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      attempts += 1
+      if (attempts === 1) {
+        await route.fulfill({ status: 500, json: { error: 'temporary failure' } })
+        return
+      }
+      savedProfile = route.request().postDataJSON()
+    }
+    await route.fulfill({ json: { profile: savedProfile } })
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  const dialog = page.getByTestId('opening-profile-screen')
+  const work = dialog.getByLabel('직장/상호명', { exact: true })
+  const start = dialog.getByTestId('opening-profile-start-button')
+  await expect(dialog.getByLabel('비공개', { exact: true })).toBeChecked()
+  await expect(dialog.getByLabel('공개', { exact: true })).toBeVisible()
+  await work.fill('자양청년치킨')
+  await dialog.getByLabel('업종/직무 분야').fill('요식업')
+  await dialog.getByLabel('경력 시작일 (연도/월)').fill('2024-06')
+  await start.click()
+  await expect(dialog.getByRole('alert')).toContainText('저장하지 못했어요')
+  await expect(work).toHaveValue('자양청년치킨')
+  expect(created).toBe(false)
+  await start.click()
+
+  await expect(dialog).toHaveCount(0)
+  expect(savedProfile).toEqual({
+    workplace: '자양청년치킨', industry: '요식업', careerStartDate: '2024-06-01', workplaceVisibility: 'private',
+  })
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+  await page.goto('/mypage')
+  await expect(page.getByLabel('직장·상호명', { exact: true })).toHaveValue('자양청년치킨')
+})
+
 // Stage 1(오프닝 프로필): 취소하면 캐릭터가 생성되지 않고 그대로
 // 생성 버튼 화면으로 돌아간다.
 test('cancelling the opening profile screen creates no character', async ({ page }) => {
@@ -430,6 +490,9 @@ test('the My Page "내 AI" section reflects the signed-in user\'s characters', a
     })
   })
 
+  await page.route('**/api/account/work-profile', (route) => route.fulfill({
+    json: { profile: { workplace: '', industry: '', careerStartDate: '', workplaceVisibility: 'private' } },
+  }))
   await page.goto('/mypage')
 
   await expect(page.getByText('내 AI')).toBeVisible()

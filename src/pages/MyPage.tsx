@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useChats } from '../context/ChatContext'
 import { useGrowth } from '../context/GrowthContext'
 import { useComingSoonNotice } from '../lib/comingSoon'
+import WorkProfileForm from '../components/WorkProfileForm'
 import ComingSoonToast from '../components/ComingSoonToast'
 import { PROFESSION_LABEL } from '../data/characterProfessions'
 
@@ -95,6 +96,8 @@ export default function MyPage() {
           </span>
         </div>
       </div>
+
+      <WorkProfileForm key={user.id} />
 
       {/* 이용 현황 + 데이터 관리 */}
       <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5">
