@@ -761,6 +761,21 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [{ count }] })
   }
 
+  // --- api/character.ts: handleGetObjectiveQuiz's "already asked
+  // questions" list (checked before handleGenerateStudy's known-titles
+  // matcher below, since both start with the same SELECT text but only
+  // this one filters by mission_type='objective') ---
+  if (has(text, 'SELECT title FROM character_knowledge_entries', "mission_type = 'objective'")) {
+    const [characterId, userId, limit] = values
+    const rows = state.knowledgeEntries
+      .filter((e) => e.character_id === characterId && e.user_id === userId && e.mission_type === 'objective')
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map((e) => ({ title: e.title }))
+    return Promise.resolve({ rows })
+  }
+
   // --- api/character.ts: handleGenerateStudy's "already known titles" list
   // (checked before the generic list matcher below, which returns full
   // entry rows rather than just { title }) ---
