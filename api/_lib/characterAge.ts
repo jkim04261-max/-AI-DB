@@ -169,7 +169,7 @@ export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow
 // 자체를 뜻한다 — allConfirmed가 true가 되는 순간이 곧 마스터 시험
 // 통과 시점이다(src/components/grow/InteractionPanel.tsx 참고).
 export const MISSIONS_REQUIRED_TOTAL_BY_TIER: Record<AgeTier, number> = {
-  toddler: 6,
+  toddler: 8,
   teen: 10,
   junior_20s: 20,
   career_30s: 30,
@@ -196,16 +196,18 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
   return result
 }
 
-// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): toddler
-// (8~9살)의 3단계가 더 이상 "주관식(AI 추천 받기 중 하나 고르기)"이
-// 아니라 "직업 카드 맞추기"다 — "1단계 직접입력 3문제 → 2단계 객관식
-// 2문제(전부 정답 필요) → 3단계 직업 카드 맞추기 1개"(knowhow 3 +
-// objective 2 + card_game 1 = 6, MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와
-// 동일, teen의 card_game 단계와 똑같은 컴포넌트를 재사용한다). "AI 추천
-// 받기" 카드 자체는 1단계(direct)에서 여전히 보이지만(showDirectInputCards),
-// 더 이상 "3단계 전용" 필수 미션은 아니다. 6/6을 채워도 더 이상 그
-// 즉시 진화하지 않는다 — maybeEvolveAgeTier가 toddler→teen 전환에서
-// final_exam_passed도 함께 확인한다(아래 종합 최종 시험 참고).
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정, 8~9세
+// 문제 유형 변경 및 종합 최종 시험/패스권 시스템 지시서를 수정): toddler
+// (8~9살)의 커리큘럼은 "① 직접입력 3문제 → ② 객관식 3문제(전부 정답
+// 필요) → ③ 직업 카드 맞추기 1개 → ④ 8살 아이에게 해주고 싶은 노하우
+// 1문제"로 정확히 8문제다(knowhow 3+1=4 + objective 3 + card_game 1 = 8,
+// MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와 동일). ①·④는 teen의
+// ①③⑤ 패턴과 똑같이 같은 knowhow 버킷을 나눠 채운다(사용자 확인: "10대
+// ⑤단계 개인 꿀팁/노하우와 같은 성격"). ③은 teen의 card_game 단계와
+// 똑같은 컴포넌트를 재사용한다. 8/8을 채워도 그 즉시 진화하지 않는다 —
+// maybeEvolveAgeTier가 toddler→teen 전환에서 final_exam_passed도 함께
+// 확인한다(아래 종합 최종 시험 참고. 사용자 확인: "8문제 모두 풀고
+// 최종시험 8개 모두 합격해야 10살로 넘어감").
 //
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)도 더 이상
 // 균등분배가 아니라 고정 순서 흐름이다 — "①직접입력 3 → ②직업 카드
@@ -219,7 +221,7 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // 이번 지시서의 범위 밖이라(사용자 승인: "일단은 10대 커리큘럼부터
 // 완벽히 구현") 기존 균등분배 공식을 그대로 둔다.
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
-  toddler: { knowhow: 3, objective: 2, subjective: 0, card_game: 1 },
+  toddler: { knowhow: 4, objective: 3, subjective: 0, card_game: 1 },
   teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1 },
 }
 
@@ -263,15 +265,22 @@ export function isFinalExamPassBlockedForTier(tier: AgeTier, ageNumber?: number)
   return tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60
 }
 
-// "종합 최종 시험"이 한 번에 몇 문제를 낼지 — 지시서("3~5문제 랜덤
-// 출제")에 따라 서버가 매번 3·4·5 중 하나를 무작위로 고른다.
-export function pickFinalExamQuestionCount(): number {
-  return 3 + Math.floor(Math.random() * 3)
-}
-
-// 지시서("100점 만점에 80점 이상"): 문제 개수에 관계없이 정답률로
-// 100점 만점 점수를 환산하고, 80점 이상이면 합격이다.
-export const FINAL_EXAM_PASS_SCORE = 80
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): "종합
+// 최종 시험 8개 모두 합격해야 10살로 넘어감" — 랜덤 3~5문제가 아니라,
+// 이번 단계에서 실제로 저장한 학습 기록 전부(최대
+// MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]개)를 1:1로 복습한다. 몇 개를
+// 복습할지는 handleGetFinalExam이 실제 저장 개수로 직접 정하므로 이
+// 함수는 더 이상 쓰지 않는다(삭제).
+//
+// 100점 만점 점수는 화면 표시용으로 남겨두되(scoreFinalExam), 합격
+// 기준은 더 이상 "80점 이상"이 아니라 "전부 정답"이다 — 재시험은
+// 전체를 다시 보는 게 아니라 틀린 문제만 다시 보는 구조(아래 참고)라,
+// 부분 점수를 허용하면 "틀린 문제만 재시험"이라는 요구 자체가 의미가
+// 없어진다. FINAL_EXAM_PASS_SCORE=100으로 두어, scoreFinalExam의 환산
+// 점수와 비교하는 기존 호출부(handleSubmitFinalExam)가 그대로
+// "score >= FINAL_EXAM_PASS_SCORE"만으로 "전부 정답"과 동치가 되게 한다
+// (정답 1개라도 빠지면 환산 점수가 100에 못 미친다).
+export const FINAL_EXAM_PASS_SCORE = 100
 export function scoreFinalExam(correctCount: number, totalCount: number): number {
   if (totalCount <= 0) return 0
   return Math.round((correctCount / totalCount) * 100)

@@ -97,19 +97,20 @@ export function buildObjectiveQuizResultMessage(
   return base + (evolvedStageLabel ? evolvedSuffix(newLevel, evolvedStageLabel) : levelUpSuffix(leveledUp, newLevel))
 }
 
-// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "종합
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): "종합
 // 최종 시험" 결과 문구 — 합격이면 그 즉시 teen으로 진화하므로 항상
-// evolvedStageLabel이 함께 온다. 불합격은 1차(재시험 안내)와 2차(재시험도
+// evolvedStageLabel이 함께 온다. 합격 기준은 "전부 정답"(부분 점수 없음)
+// 이다. 불합격은 1차(틀린 문제만 재복습 후 재시험 안내)와 2차(재시험도
 // 실패 — 다시 키우기/패스권 안내)에 따라 문구가 다르다.
 export function buildFinalExamResultMessage(passed: boolean, score: number, attemptNumber: number, evolvedStageLabel: string | null): string {
   if (passed) {
     const evolvedText = evolvedStageLabel ? ` 🎉 ${evolvedStageLabel} 단계로 성장했어요!` : ''
-    return `종합 최종 시험 합격이에요! ${score}점을 받았어요. 정말 대단해요!${evolvedText}`
+    return `종합 최종 시험 합격이에요! ${score}점(모두 정답)을 받았어요. 정말 대단해요!${evolvedText}`
   }
   if (attemptNumber >= 2) {
-    return `아쉽지만 이번에도 ${score}점으로 불합격이에요(80점 이상 필요). 처음부터 다시 키우거나, 마켓에서 패스권을 구매하면 다음 단계로 넘어갈 수 있어요.`
+    return `아쉽지만 재시험에서도 틀린 문제가 있었어요(${score}점, 모두 정답이어야 합격). 처음부터 다시 키우거나, 마켓에서 패스권을 구매하면 다음 단계로 넘어갈 수 있어요.`
   }
-  return `아쉽지만 ${score}점으로 불합격이에요(80점 이상 필요). 틀린 문제를 다시 복습하고 재시험을 봐요!`
+  return `아쉽지만 ${score}점으로 틀린 문제가 있었어요(모두 정답이어야 합격). 틀린 문제만 다시 복습하고 재시험을 봐요!`
 }
 
 export const KNOWLEDGE_VS_MODEL_DISCLAIMER =

@@ -277,9 +277,11 @@ interface GrowthContextValue {
     characterReply: string
   }>
   // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
-  // 모두 마친 toddler만 호출할 수 있다(서버가 재확인) — 매번 그 캐릭터가
-  // 실제로 저장한 학습 기록을 복습하는 새 문제 세트를 받는다(재시험도
-  // 이 함수를 다시 불러 새 세트를 받는다).
+  // 모두 마친 toddler만 호출할 수 있다(서버가 재확인) — "1차(전체)"
+  // 시험 문제 세트만 이 함수로 받는다. 1차 불합격 뒤의 재시험은 이
+  // 함수를 다시 부르지 않고, submitFinalExam의 실패 응답에 실려오는
+  // retakeExamToken(틀린 문제만 담은 토큰)을 그대로 submitFinalExam에
+  // 다시 넘긴다.
   getFinalExam: (companionType: CompanionType) => Promise<{
     questions: FinalExamQuestion[]
     examToken: string
@@ -301,10 +303,13 @@ interface GrowthContextValue {
       // '처음부터 다시 키우기'/'패스권 구매' 중 하나를 골라야 한다.
       blocked: boolean
       missionProgress: MissionProgress | null
-      wrongQuestions: { text: string; correctAnswer: string; explanation: string }[]
+      // 1차 불합격(blocked가 아닐 때)에만 값이 있다 — 틀린 문제만 담은
+      // 서명 토큰으로, 재시험 제출 시 examToken 자리에 그대로 넣는다.
+      retakeExamToken: string | null
+      wrongQuestions: { id: string; text: string; choices: string[]; correctAnswer: string; explanation: string }[]
     } & EvolutionUpdate
   >
-  // 만능마켓의 [8~9세 음서재 패스권] 구매 — 6미션·최종 시험을 전부
+  // 만능마켓의 [8~9세 음서재 패스권] 구매 — 8미션·최종 시험을 전부
   // 건너뛰고 즉시 teen으로 올라간다.
   purchaseFinalExamPass: (companionType: CompanionType) => Promise<{
     evolved: boolean
@@ -855,7 +860,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       questions: data.questions,
       examToken: data.examToken,
       attemptNumber: data.attemptNumber ?? 1,
-      passScore: data.passScore ?? 80,
+      passScore: data.passScore ?? 100,
     }
   }, [])
 
@@ -877,7 +882,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         evolved?: boolean
         newAgeTier?: AgeTier | null
         newAgeTierLabel?: string | null
-        wrongQuestions?: { text: string; correctAnswer: string; explanation: string }[]
+        retakeExamToken?: string | null
+        wrongQuestions?: { id: string; text: string; choices: string[]; correctAnswer: string; explanation: string }[]
         error?: string
       }
       if (!res.ok || data.passed === undefined || data.score === undefined) {
@@ -895,6 +901,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         evolved: data.evolved ?? false,
         newAgeTier: data.newAgeTier ?? null,
         newAgeTierLabel: data.newAgeTierLabel ?? null,
+        retakeExamToken: data.retakeExamToken ?? null,
         wrongQuestions: data.wrongQuestions ?? [],
       }
     },

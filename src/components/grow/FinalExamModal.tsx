@@ -3,14 +3,15 @@ import { useGrowth, type CompanionType, type FinalExamQuestion } from '../../con
 import type { MissionProgress } from '../../data/characterMissions'
 import BottomSheet from './BottomSheet'
 
-// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 8~9세
-// 6문제(직접입력 3+객관식 2+카드 맞추기 1)를 모두 마치면 뜨는 "종합
-// 최종 시험" 전용 모달 — ObjectiveQuizStep과 같은 "문제 받기 → 답
-// 고르기 → 제출" 모양이지만, 완전히 별도 흐름(최종 시험 2회 한도,
-// 5분 타이머, 불합격 시 재복습/처음부터 다시 키우기/패스권 구매
-// 선택지)이라 새 컴포넌트로 만들었다(toddlerStep==='final' 자리에
-// 있던 FinalSubjectiveStep을 대체하는 게 아니라, 6문제를 모두 마친
-// 뒤에만 여는 완전히 새 단계).
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8~9세
+// 8문제(직접입력3+객관식3+카드맞추기1+노하우1)를 모두 마치면 뜨는
+// "종합 최종 시험" 전용 모달. 합격 기준은 "전부 정답"(부분 점수 없음)
+// 이고, 1차 불합격은 틀린 문제만 다시 묻는 재시험으로 이어진다 — 이
+// 재시험은 서버가 submitFinalExam 실패 응답에 실어 보낸
+// retakeExamToken/wrongQuestions를 그대로 다시 questions/examToken
+// 자리에 채워서 같은 "문제 받기 → 답 고르기 → 제출" 화면을 재사용한다
+// (별도 GET 호출 없음). 2차 불합격이면 처음부터 다시 키우기/패스권
+// 구매 선택지를 보여준다.
 const EXAM_DURATION_SECONDS = 5 * 60
 
 function formatTime(seconds: number): string {
@@ -40,7 +41,7 @@ export default function FinalExamModal({
   const [questions, setQuestions] = useState<FinalExamQuestion[] | null>(null)
   const [examToken, setExamToken] = useState<string | null>(null)
   const [answers, setAnswers] = useState<(number | null)[]>([])
-  const [passScore, setPassScore] = useState(80)
+  const [passScore, setPassScore] = useState(100)
   const [secondsLeft, setSecondsLeft] = useState(EXAM_DURATION_SECONDS)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -52,7 +53,8 @@ export default function FinalExamModal({
     attemptNumber: number
     blocked: boolean
     message: string
-    wrongQuestions: { text: string; correctAnswer: string; explanation: string }[]
+    retakeExamToken: string | null
+    wrongQuestions: { id: string; text: string; choices: string[]; correctAnswer: string; explanation: string }[]
   } | null>(null)
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -104,6 +106,7 @@ export default function FinalExamModal({
         attemptNumber: data.attemptNumber,
         blocked: data.blocked,
         message: data.message,
+        retakeExamToken: data.retakeExamToken,
         wrongQuestions: data.wrongQuestions,
       })
       if (data.passed) onPassed(data.missionProgress)
@@ -127,6 +130,19 @@ export default function FinalExamModal({
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questions, result, secondsLeft])
+
+  // 지시서: "불합격하면 틀린문제만 다시 시험" — 새 GET 없이, 방금 받은
+  // retakeExamToken/wrongQuestions로 questions/examToken/answers를 그대로
+  // 바꿔 끼워 같은 문제-풀이 화면을 재시험용으로 재사용한다.
+  const startRetake = () => {
+    if (!result?.retakeExamToken) return
+    const retakeQuestions = result.wrongQuestions.map((w) => ({ id: w.id, text: w.text, choices: w.choices }))
+    setQuestions(retakeQuestions)
+    setAnswers(retakeQuestions.map(() => null))
+    setExamToken(result.retakeExamToken)
+    setSecondsLeft(EXAM_DURATION_SECONDS)
+    setResult(null)
+  }
 
   const handleResetProgress = async () => {
     if (resetting) return
@@ -165,7 +181,7 @@ export default function FinalExamModal({
         <div className="flex flex-col gap-4" data-testid="final-exam-step">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3">
             <p className="text-sm font-semibold text-cyan-200/80">
-              {questions.length}문제 중 {passScore}점 이상이면 합격이에요.
+              {questions.length}문제를 모두 맞혀야 합격이에요({passScore}점 만점).
             </p>
             <p data-testid="final-exam-timer" className={`text-lg font-extrabold ${secondsLeft <= 30 ? 'text-rose-300' : 'text-cyan-200'}`}>
               ⏱️ {formatTime(secondsLeft)}
@@ -237,10 +253,10 @@ export default function FinalExamModal({
           <button
             type="button"
             data-testid="final-exam-retry-button"
-            onClick={() => void loadExam()}
+            onClick={startRetake}
             className="self-start rounded-xl border-2 border-rose-300/60 bg-rose-400/20 px-4 py-2 text-sm font-bold text-rose-100 hover:bg-rose-400/30"
           >
-            틀린 문제 다시 복습하고 재시험 보기
+            틀린 문제만 다시 시험 보기
           </button>
         </div>
       )}

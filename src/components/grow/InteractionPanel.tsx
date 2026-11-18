@@ -180,29 +180,34 @@ export default function InteractionPanel({
     }
   }, [character.companionType, getMissionProgress])
 
-  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 8~9살
-  // (toddler) 단계는 "1단계 직접입력 3문제 → 2단계 객관식 2문제(세트
-  // 전부 정답 필요) → 3단계 직업 카드 맞추기 1개" 순서(총 6문제)로
-  // 바뀌었다 — 예전엔 3단계가 AI 추천 예시 기반 주관식(subjective)
-  // 1문제였지만, 이제 teen의 card_game 단계와 같은 카드 맞추기로
-  // 대체됐다(characterAge.ts의 toddler override: subjective:0,
-  // card_game:1). 6문제를 모두 끝내면(complete) 더 이상 곧바로 진화하지
-  // 않고, 그 6문제 내용을 복습하는 "종합 최종 시험"을 봐야 teen으로
-  // 진화한다(백엔드의 toddler→teen 게이트에 finalExamPassed 조건 추가 —
-  // api/_lib/characterMissions.ts 참고). 단계는 서버가 내려준
-  // missionProgress(byType별 confirmed/required)에서 그때그때 다시
-  // 계산한다 — 클라이언트에 별도로 저장하지 않으므로 새로고침·패널
-  // 재오픈 후에도 항상 정확한 단계로 복원된다.
+  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8~9살
+  // (toddler) 단계는 "① 직접입력 3문제 → ② 객관식 3문제(세트 전부
+  // 정답 필요) → ③ 직업 카드 맞추기 1개 → ④ 8살 아이에게 해주고 싶은
+  // 노하우 1문제" 순서(총 8문제)다 — teen의 ①③⑤(직접입력/노하우)
+  // 패턴과 똑같이 ①·④가 같은 knowhow 버킷을 나눠 채우므로, 그 안에서
+  // 몇 번째 구간인지는 knowhow.confirmed의 누적값(0→3→4)으로만 구분한다
+  // (characterAge.ts의 toddler override: knowhow:4, objective:3,
+  // card_game:1). 8문제를 모두 끝내면(complete) 곧바로 진화하지 않고,
+  // 그 8문제 내용을 1:1로 복습하는 "종합 최종 시험"에 전부 합격해야
+  // teen으로 진화한다(백엔드의 toddler→teen 게이트에 finalExamPassed
+  // 조건 추가 — api/_lib/characterMissions.ts 참고, 사용자 확인: "8문제
+  // 모두 풀고 최종시험 8개 모두 합격해야 10살로 넘어감"). 단계는 서버가
+  // 내려준 missionProgress(byType별 confirmed/required)에서 그때그때
+  // 다시 계산한다 — 클라이언트에 별도로 저장하지 않으므로 새로고침·
+  // 패널 재오픈 후에도 항상 정확한 단계로 복원된다.
   const isToddlerStagedFlow = characterAgeTier === 'toddler'
-  type ToddlerStep = 'direct' | 'multiple' | 'card_game' | 'complete'
+  type ToddlerStep = 'direct' | 'multiple' | 'card_game' | 'direct2' | 'complete'
+  const TODDLER_DIRECT1_COUNT = 3
   const toddlerStep: ToddlerStep = (() => {
     if (!missionProgress) return 'direct'
     const { knowhow, objective, card_game } = missionProgress.byType
-    if (knowhow.confirmed < knowhow.required) return 'direct'
+    if (knowhow.confirmed < TODDLER_DIRECT1_COUNT) return 'direct'
     if (objective.confirmed < objective.required) return 'multiple'
     if (card_game.confirmed < card_game.required) return 'card_game'
+    if (knowhow.confirmed < knowhow.required) return 'direct2'
     return 'complete'
   })()
+  const isToddlerDirectStep = isToddlerStagedFlow && (toddlerStep === 'direct' || toddlerStep === 'direct2')
 
   // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)도 toddler와
   // 같은 원리의 고정 순서 흐름이다 — "①직접입력 3 → ②직업 카드 맞추기
@@ -228,8 +233,9 @@ export default function InteractionPanel({
   })()
   const isTeenDirectStep = isTeenStagedFlow && (teenStep === 'direct1' || teenStep === 'direct2' || teenStep === 'direct3')
   // 선택지에서 고르기(칩)/직접 입력하기 카드를 보여줄지 — toddler는
-  // 1단계(direct)에서만, teen은 직접입력 하위 단계(①·③·⑤)에서만.
-  const showDirectInputCards = (!isToddlerStagedFlow || toddlerStep === 'direct') && (!isTeenStagedFlow || isTeenDirectStep)
+  // 직접입력 하위 단계(①·④)에서만, teen은 직접입력 하위 단계(①·③·⑤)
+  // 에서만.
+  const showDirectInputCards = (!isToddlerStagedFlow || isToddlerDirectStep) && (!isTeenStagedFlow || isTeenDirectStep)
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -250,7 +256,7 @@ export default function InteractionPanel({
   // (completeCardGame → saveKnowledge) 진행 중 중복 호출을 막는다.
   const [cardGameBusy, setCardGameBusy] = useState(false)
   const [cardGameError, setCardGameError] = useState<string | null>(null)
-  // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
+  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8문제를
   // 모두 마친 toddler가 "종합 최종 시험 보기"를 누르면 연다.
   const [finalExamOpen, setFinalExamOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -404,7 +410,7 @@ export default function InteractionPanel({
   const applyTopicSuggestion = (topic: { title: string; content: string }) => {
     setTitle(topic.title)
     setContent(topic.content)
-    setMissionType((isToddlerStagedFlow && toddlerStep === 'direct') || isTeenDirectStep ? 'knowhow' : 'objective')
+    setMissionType(isToddlerDirectStep || isTeenDirectStep ? 'knowhow' : 'objective')
     setVerification(null)
     setVerifiedSnapshot(null)
     setVerificationToken(null)
@@ -694,8 +700,13 @@ export default function InteractionPanel({
               무료 N회 / 구매 N회" 한 줄로 하루 무료 횟수와 구매한
               이용권을 함께 보여준다 — 구매한 이용권은 더 이상 표시용
               placeholder가 아니라, 무료 횟수가 0이 될 때 버튼이 실제로
-              그 수량을 깎아 쓴다. */}
-          {studyRemaining && (
+              그 수량을 깎아 쓴다. 지시서(8세 학습 총 8문제 제한 및
+              10대 강제 레벨업 로직 수정): toddler는 이제 "총 8문제"
+              고정 흐름이라, 이 하루 무료 횟수 숫자는 전혀 다른
+              개념(계정 전체 일일 한도)인데도 "몇 문제가 남았다"처럼
+              오해를 줄 수 있어 toddler에서는 숨긴다(위 mission-progress-
+              summary의 confirmedTotal/8이 실제 진행도를 보여준다). */}
+          {studyRemaining && !isToddlerStagedFlow && (
             <p data-testid="ai-recommend-remaining" className="text-sm font-semibold text-purple-200/70 sm:text-base">
               남은 횟수: 무료 {studyRemaining.remaining}회 / 구매 {tickets.aiRecommendTickets}회
             </p>
@@ -756,20 +767,23 @@ export default function InteractionPanel({
         </div>
       )}
 
-      {/* 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
-          toddler 단계는 "① 직접입력 3 → ② 객관식 2 → ③ 직업 카드
-          맞추기 1"(총 6문제) 순서다 — ③은 예전 AI 추천 예시 기반
-          주관식(FinalSubjectiveStep) 대신, teen의 card_game 단계와
-          똑같은 CardMatchGame을 재사용한다. 다른 연령대는 여기 들어오지
-          않고 아래 기존 "직접 입력하기" 카드(③)를 그대로 쓴다. */}
+      {/* 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+          toddler 단계는 "① 직접입력 3 → ② 객관식 3 → ③ 직업 카드
+          맞추기 1 → ④ 노하우 1"(총 8문제) 순서다 — ③은 teen의
+          card_game 단계와 똑같은 CardMatchGame을 재사용하고, ④는 아래
+          기존 "직접 입력하기" 카드(③과 같은 knowhow 버킷)를 그대로
+          쓴다. 다른 연령대는 여기 들어오지 않는다. */}
       {isToddlerStagedFlow && toddlerStep === 'multiple' && (
         <ObjectiveQuizStep
           companionType={character.companionType}
+          title="🎯 ②단계 · 객관식 3문제"
+          description="세 문제 모두 맞혀야 다음 단계로 넘어가요."
           onAllCorrect={(progress) => {
             setMissionProgress(progress)
             onKnowledgeSaved?.()
             onKnowledgeSaved?.()
-            pushLine('character', '정답이에요! 2문제 모두 맞혔어요. 🎉')
+            onKnowledgeSaved?.()
+            pushLine('character', '정답이에요! 3문제 모두 맞혔어요. 🎉')
             flashPose('happy', 2500)
           }}
         />
@@ -781,7 +795,7 @@ export default function InteractionPanel({
         >
           <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 ③단계 · 직업 카드 맞추기</p>
           <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
-            직업 카드와 도구 카드를 전부 맞추면 오늘 학습이 모두 끝나요.
+            직업 카드와 도구 카드를 전부 맞추면 다음 단계로 넘어가요.
           </p>
           <CardMatchGame onCleared={() => void handleCardGameCleared()} />
           {cardGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
@@ -863,19 +877,28 @@ export default function InteractionPanel({
       )}
 
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
-          경로. toddler 단계에서는 1단계(direct)일 때만, teen 단계에서는
-          직접입력 하위 단계(①·③·⑤)일 때만 보인다. */}
+          경로. toddler 단계에서는 직접입력 하위 단계(①·④)일 때만, teen
+          단계에서는 직접입력 하위 단계(①·③·⑤)일 때만 보인다. */}
       {showDirectInputCards && (
       <div className="flex flex-col gap-3 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-4">
         {/* 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen만 지금
             몇 번째 직접입력 하위 단계인지 알려준다(①③은 같은 "직접
             입력하기"지만 ⑤는 요청하신 "개인 꿀팁/노하우" 라벨) — 아래
-            고정 헤더 문구는 그대로 둔 채 그 위에만 추가한다. */}
+            고정 헤더 문구는 그대로 둔 채 그 위에만 추가한다.
+            지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직
+            수정): toddler도 같은 자리에 ①(직접입력)/④(노하우) 라벨을
+            보여준다. */}
         {isTeenStagedFlow && (
           <p data-testid="teen-direct-step-label" className="text-sm font-bold text-cyan-300/80">
             {teenStep === 'direct1' && '①단계 · 직접 입력하기 3문제'}
             {teenStep === 'direct2' && '③단계 · 직접 입력하기 1문제'}
             {teenStep === 'direct3' && '⑤단계 · 개인 꿀팁/노하우 2문제'}
+          </p>
+        )}
+        {isToddlerStagedFlow && (
+          <p data-testid="toddler-direct-step-label" className="text-sm font-bold text-cyan-300/80">
+            {toddlerStep === 'direct' && '①단계 · 직접 입력하기 3문제'}
+            {toddlerStep === 'direct2' && '④단계 · 8살 아이에게 해주고 싶은 노하우 1문제'}
           </p>
         )}
         <div className="flex items-center gap-1.5">
@@ -940,8 +963,12 @@ export default function InteractionPanel({
           </p>
           {/* 지시서(만능마켓 구매 즉시 이용권 실시간 연동): "남은 횟수:
               무료 N회 / 구매 N회" 한 줄로 하루 무료 검증 횟수와 구매한
-              이용권을 함께 보여준다. */}
-          {teachRemaining && (
+              이용권을 함께 보여준다. 지시서(8세 학습 총 8문제 제한 및
+              10대 강제 레벨업 로직 수정): toddler는 "총 8문제" 고정
+              흐름이라("남은 횟수: 무료 9회" 같은 계정 전체 일일 한도
+              숫자가 "문제가 몇 개 남았다"처럼 오해를 줄 수 있어) 이
+              줄을 숨긴다. */}
+          {teachRemaining && !isToddlerStagedFlow && (
             <p data-testid="validation-remaining" className="text-sm font-semibold text-slate-400 sm:text-base">
               남은 횟수: 무료 {teachRemaining.remaining}회 / 구매 {tickets.knowledgeValidationTickets}회
             </p>
@@ -1041,7 +1068,7 @@ export default function InteractionPanel({
             <p className="text-base font-bold text-rose-300">이 내용은 저장할 수 없어요. 내용을 다시 확인해주세요.</p>
           )}
 
-          {teachRemaining && (
+          {teachRemaining && !isToddlerStagedFlow && (
             <p className="text-sm font-semibold text-cyan-200/60 sm:text-base">
               오늘 남은 지식 검증 횟수: {teachRemaining.remaining}/{teachRemaining.limit}
             </p>

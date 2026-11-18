@@ -59,10 +59,10 @@ import {
   ageNumberForTier,
   selfStudyDraftCountForTier,
   objectiveQuizChoiceCountForTier,
-  pickFinalExamQuestionCount,
   scoreFinalExam,
   FINAL_EXAM_PASS_SCORE,
   isFinalExamPassBlockedForTier,
+  MISSIONS_REQUIRED_TOTAL_BY_TIER,
 } from './_lib/characterAge'
 import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
@@ -1651,14 +1651,17 @@ async function handleSubmitObjectiveQuiz(req: VercelRequest, res: VercelResponse
   }
 }
 
-// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6미션을
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8미션을
 // 모두 끝낸(allConfirmed) toddler만 볼 수 있다 — 그 전에는 아직 "다음
 // 단계" 진입점 자체가 안 보인다(InteractionPanel의 toddlerStep==='complete').
-// 최종 시험은 총 2회(1차+재시험)만 허용 — 두 번째 불합격 이후엔 재시험
-// 자체를 다시 받지 못하고 '처음부터 다시 키우기'/'패스권 구매' 중 하나를
-// 선택해야 한다(handleResetCharacterProgress/handlePurchaseFinalExamPass).
-// 문제는 이 캐릭터가 toddler 단계에서 실제로 저장한 학습 기록(title/
-// final_content)을 복습하는 내용으로만 생성한다(자유 주제가 아님).
+// 이 GET은 "1차(전체)" 시험만 발급한다 — 1차 불합격 뒤의 재시험은 새로
+// GET을 부르지 않고, handleSubmitFinalExam이 그 응답에 실어 보낸
+// retakeExamToken(틀린 문제만 담은 서명 토큰)을 그대로 써서 제출한다
+// (사용자 확인: "불합격하면 틀린문제만 다시 시험"). 두 번째 불합격
+// 이후엔 '처음부터 다시 키우기'/'패스권 구매' 중 하나를 선택해야 한다
+// (handleResetCharacterProgress/handlePurchaseFinalExamPass). 문제는 이
+// 캐릭터가 toddler 단계에서 실제로 저장한 학습 기록(title/final_content)
+// 전부를 1:1로 복습하는 내용으로만 생성한다(자유 주제·랜덤 개수 아님).
 async function handleGetFinalExam(req: VercelRequest, res: VercelResponse, userId: number) {
   const companionType = req.query.companionType
 
@@ -1688,7 +1691,7 @@ async function handleGetFinalExam(req: VercelRequest, res: VercelResponse, userI
 
     const progress = await getMissionProgress(userId, character.id, tier, character.reset_at)
     if (!progress.allConfirmed) {
-      res.status(400).json({ error: '6개 학습을 모두 끝내야 종합 최종 시험을 볼 수 있어요.' })
+      res.status(400).json({ error: `${MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]}개 학습을 모두 끝내야 종합 최종 시험을 볼 수 있어요.` })
       return
     }
 
@@ -1699,13 +1702,17 @@ async function handleGetFinalExam(req: VercelRequest, res: VercelResponse, userI
         AND (${character.reset_at}::timestamptz IS NULL OR created_at > ${character.reset_at}::timestamptz)
       ORDER BY created_at ASC
     `
-    const savedEntries = entriesResult.rows.map((r) => ({ title: r.title, content: r.final_content }))
-    if (savedEntries.length === 0) {
+    if (entriesResult.rows.length === 0) {
       res.status(400).json({ error: '복습할 학습 기록을 찾을 수 없어요.' })
       return
     }
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+    // "종합 최종 시험 8개"는 3~5개 랜덤이 아니라, 저장한 학습 기록을
+    // 1:1로 복습한다 — 혹시 더 많이 저장됐어도(재시도 등) 요구 개수만큼
+    // 만 가져와 시험 문제 수가 커리큘럼 총 개수를 넘지 않게 한다.
+    const savedEntries = entriesResult.rows.slice(0, MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]).map((r) => ({ title: r.title, content: r.final_content }))
 
-    const questionCount = pickFinalExamQuestionCount()
+    const questionCount = savedEntries.length
     const choiceCount = objectiveQuizChoiceCountForTier(tier, ageNumberForTier(tier, character.level))
 
     let generated
@@ -1745,12 +1752,17 @@ async function handleGetFinalExam(req: VercelRequest, res: VercelResponse, userI
 
 // 합격하면 이 즉시(final_exam_passed=true → maybeEvolveAgeTier) teen으로
 // 진화한다 — 패스권 구매(handlePurchaseFinalExamPass)와 똑같은 진화
-// 호출을 공유한다(둘 다 "시험을 통과한 것으로 친다"). 불합격은 1차/2차를
-// final_exam_attempts로 구분한다: 1차 불합격(0→1)은 재시험을 계속 받을 수
-// 있고(handleGetFinalExam이 attempts<2인 동안 허용), 2차 불합격(1→2)
-// 이후엔 더 이상 재시험을 못 받고 틀린 문제 목록(wrongQuestions)과 함께
-// blocked:true를 돌려줘, 클라이언트가 '처음부터 다시 키우기'/'패스권
-// 구매' 선택 모달을 띄우게 한다.
+// 호출을 공유한다(둘 다 "시험을 통과한 것으로 친다"). 합격 기준은 "전부
+// 정답"이다(사용자 확인: "8개 모두 합격해야 10살로 넘어감") — 부분
+// 점수를 인정하지 않는다. 불합격은 1차/2차를 final_exam_attempts로
+// 구분한다: 1차 불합격(0→1)은 틀린 문제만 다시 묻는 재시험을 볼 수
+// 있다 — 이 핸들러가 직접 그 틀린 문제들만 담은 retakeExamToken을
+// 서명해 응답에 실어 보내므로, 재시험은 handleGetFinalExam을 다시
+// 부르지 않고(전체를 다시 랜덤 생성하면 "틀린 문제만" 요구사항과
+// 맞지 않는다) 이 토큰을 그대로 들고 이 핸들러에 다시 제출하면 된다.
+// 2차 불합격(1→2) 이후엔 retakeExamToken 없이 blocked:true만 돌려줘,
+// 클라이언트가 '처음부터 다시 키우기'/'패스권 구매' 선택 모달을
+// 띄우게 한다.
 async function handleSubmitFinalExam(req: VercelRequest, res: VercelResponse, userId: number) {
   const { companionType, examToken, answers } = (req.body ?? {}) as {
     companionType?: unknown
@@ -1806,7 +1818,9 @@ async function handleSubmitFinalExam(req: VercelRequest, res: VercelResponse, us
     }))
     const correctCount = results.filter((r) => r.correct).length
     const score = scoreFinalExam(correctCount, resolvedQuestions.length)
-    const passed = score >= FINAL_EXAM_PASS_SCORE
+    // 지시서: "8개 모두 합격해야" — 환산 점수(표시용)와는 별개로, 실제
+    // 합격 여부는 정답 개수가 전체 문제 수와 정확히 같을 때만이다.
+    const passed = correctCount === resolvedQuestions.length
 
     if (passed) {
       await sql`UPDATE characters SET final_exam_passed = true WHERE id = ${character.id} AND user_id = ${userId}`
@@ -1833,6 +1847,21 @@ async function handleSubmitFinalExam(req: VercelRequest, res: VercelResponse, us
     const blocked = newAttempts >= 2
     const message = buildFinalExamResultMessage(false, score, newAttempts, null)
 
+    // 지시서: 1차 불합격(아직 blocked가 아님)이면 틀린 문제만 담은 새
+    // 서명 토큰을 발급한다 — 전체 질문 중 틀린 것만 뽑아도 각 질문의
+    // correctIndex는 원래 토큰 그대로 보존되므로(클라이언트에는 여전히
+    // text/choices만 내려가고 정답 인덱스는 노출하지 않는다), 재시험
+    // 제출도 이 핸들러가 그대로 채점할 수 있다.
+    const wrongQuestionsFull = resolvedQuestions.filter((q, idx) => answers[idx] !== q.correctIndex)
+    const retakeExamToken = blocked
+      ? null
+      : signFinalExamToken({
+          userId,
+          characterId: character.id,
+          companionType: String(companionType),
+          questions: wrongQuestionsFull,
+        })
+
     res.status(200).json({
       passed: false,
       score,
@@ -1840,7 +1869,8 @@ async function handleSubmitFinalExam(req: VercelRequest, res: VercelResponse, us
       message,
       attemptNumber: newAttempts,
       blocked,
-      wrongQuestions: results.filter((r) => !r.correct).map((r) => ({ text: r.text, correctAnswer: r.correctAnswer, explanation: r.explanation })),
+      retakeExamToken,
+      wrongQuestions: wrongQuestionsFull.map((q) => ({ id: q.id, text: q.text, choices: q.choices, correctAnswer: q.choices[q.correctIndex], explanation: q.explanation })),
     })
   } catch (err) {
     console.error('[api/character] unexpected error on final-exam-submit', err)
@@ -1849,7 +1879,7 @@ async function handleSubmitFinalExam(req: VercelRequest, res: VercelResponse, us
 }
 
 // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템) 2번:
-// 만능마켓에서 [8~9세 음서재 패스권]을 구매하면 8~9세 학습(6미션+최종
+// 만능마켓에서 [8~9세 음서재 패스권]을 구매하면 8~9세 학습(8미션+최종
 // 시험)을 전부 건너뛰고 즉시 teen으로 진화한다 — maybeEvolveAgeTier의
 // 일반 미션 게이트(allConfirmed)를 그대로 타면 "건너뛴다"는 요구사항과
 // 맞지 않으므로, 이 핸들러만은 mission_unlocked_tier를 직접 'teen'으로
