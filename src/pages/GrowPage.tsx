@@ -37,6 +37,7 @@ import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWalle
 import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
 import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
+import { saveWorkProfile } from '../lib/workProfile'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -573,12 +574,17 @@ export default function GrowPage() {
   // 생일·거주지역·초기 용돈은 어디에도 저장하지 않고 화면(말풍선·
   // wallet 체험판 상태)에만 반영한다.
   const handleOnboardingComplete = async (profile: OpeningProfile) => {
-    if (!onboardingFor) return
+    if (!onboardingFor || onboardingSubmitting) return
     const companionType = onboardingFor
     setOnboardingSubmitting(true)
     setError(null)
     try {
-      await createCharacter(companionType)
+      if (Object.keys(profile.workProfile).length > 0) {
+        await saveWorkProfile(profile.workProfile, 'PATCH')
+      }
+      if (!characters.some((entry) => entry.companionType === companionType)) {
+        await createCharacter(companionType)
+      }
       if (profile.profession) {
         await setProfession(companionType, 'custom', profile.profession)
       }
@@ -1021,7 +1027,7 @@ export default function GrowPage() {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && !onboardingFor && <p className="text-sm text-red-500">{error}</p>}
 
       {!loading && character && (
         <div className="flex flex-col gap-2">
@@ -1372,7 +1378,11 @@ export default function GrowPage() {
         <OpeningProfileScreen
           companionType={onboardingFor}
           submitting={onboardingSubmitting}
-          onCancel={() => setOnboardingFor(null)}
+          error={error}
+          onCancel={() => {
+            setError(null)
+            setOnboardingFor(null)
+          }}
           onComplete={handleOnboardingComplete}
         />
       )}

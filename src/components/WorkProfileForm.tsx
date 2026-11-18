@@ -1,13 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
-interface WorkProfile {
-  workplace: string
-  industry: string
-  careerStartDate: string
-  workplaceVisibility: 'private' | 'public'
-}
+import { WORK_PROFILE_ENDPOINT, saveWorkProfile, type WorkProfile } from '../lib/workProfile'
 
-const ENDPOINT = '/api/account/work-profile'
 const INPUT_CLASS = 'min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900'
 
 export default function WorkProfileForm() {
@@ -19,7 +13,7 @@ export default function WorkProfileForm() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch(ENDPOINT, { signal: controller.signal })
+    fetch(WORK_PROFILE_ENDPOINT, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error()
         const data: { profile: WorkProfile } = await response.json()
@@ -44,14 +38,7 @@ export default function WorkProfileForm() {
     setSaved(false)
     setError('')
     try {
-      const response = await fetch(ENDPOINT, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
-      })
-      if (!response.ok) throw new Error()
-      const data: { profile: WorkProfile } = await response.json()
-      setProfile(data.profile)
+      setProfile(await saveWorkProfile(profile, 'PUT'))
       setSaved(true)
     } catch {
       setError('직업 프로필을 저장하지 못했어요. 다시 시도해 주세요.')

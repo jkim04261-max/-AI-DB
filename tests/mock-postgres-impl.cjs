@@ -100,7 +100,13 @@ function sql(strings, ...values) {
     const [workplace, industry, careerStartDate, workplaceVisibility, userId] = values
     const user = state.users.get(userId)
     if (!user) return Promise.resolve({ rows: [] })
-    user.workProfile = { workplace, industry, careerStartDate: careerStartDate ?? '', workplaceVisibility }
+    const previous = user.workProfile
+    user.workProfile = {
+      workplace: workplace ?? previous?.workplace ?? '',
+      industry: industry ?? previous?.industry ?? '',
+      careerStartDate: careerStartDate ?? previous?.careerStartDate ?? '',
+      workplaceVisibility: workplaceVisibility ?? previous?.workplaceVisibility ?? 'private',
+    }
     return Promise.resolve({ rows: [{ ...user.workProfile }] })
   }
   if (has(text, 'SELECT workplace, industry', 'FROM users WHERE id =')) {

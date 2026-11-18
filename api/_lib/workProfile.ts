@@ -26,9 +26,13 @@ function ensureWorkProfileColumns() {
   return columnsReady
 }
 
-function parseWorkProfile(body: unknown): WorkProfile | null {
+function parseWorkProfile(body: unknown, partial: boolean): Partial<WorkProfile> | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null
-  const { workplace, industry, careerStartDate, workplaceVisibility } = body as Partial<WorkProfile>
+  const fields = body as Partial<WorkProfile>
+  const { workplace, industry, careerStartDate, workplaceVisibility } = {
+    ...(partial ? { workplace: '', industry: '', careerStartDate: '', workplaceVisibility: 'private' } : {}),
+    ...fields,
+  }
   if (typeof workplace !== 'string' || typeof industry !== 'string' || typeof careerStartDate !== 'string') return null
   if (workplace.trim().length > 100 || industry.trim().length > 80) return null
   if (workplace.includes('\0') || industry.includes('\0')) return null
@@ -40,13 +44,18 @@ function parseWorkProfile(body: unknown): WorkProfile | null {
     if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== careerStartDate) return null
   }
 
-  return { workplace: workplace.trim(), industry: industry.trim(), careerStartDate, workplaceVisibility }
+  return {
+    workplace: partial && fields.workplace === undefined ? undefined : workplace.trim(),
+    industry: partial && fields.industry === undefined ? undefined : industry.trim(),
+    careerStartDate: partial && fields.careerStartDate === undefined ? undefined : careerStartDate,
+    workplaceVisibility: partial && fields.workplaceVisibility === undefined ? undefined : workplaceVisibility,
+  }
 }
 
 export async function handleWorkProfile(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'private, no-store')
-  if (req.method !== 'GET' && req.method !== 'PUT') {
-    res.setHeader('Allow', 'GET, PUT')
+  if (req.method !== 'GET' && req.method !== 'PUT' && req.method !== 'PATCH') {
+    res.setHeader('Allow', 'GET, PUT, PATCH')
     return res.status(405).json({ error: '지원하지 않는 요청이에요.' })
   }
 
@@ -54,8 +63,8 @@ export async function handleWorkProfile(req: VercelRequest, res: VercelResponse)
     const session = await getSessionUser(req)
     if (!session) return res.status(401).json({ error: '로그인이 필요해요.' })
 
-    const profile = req.method === 'PUT' ? parseWorkProfile(req.body) : null
-    if (req.method === 'PUT' && !profile) {
+    const profile = req.method === 'GET' ? null : parseWorkProfile(req.body, req.method === 'PATCH')
+    if (req.method !== 'GET' && !profile) {
       return res.status(400).json({ error: '직장·상호명, 업종, 경력 시작일과 공개 범위를 확인해 주세요.' })
     }
 
@@ -64,9 +73,11 @@ export async function handleWorkProfile(req: VercelRequest, res: VercelResponse)
     const result = profile
       ? await sql<WorkProfile>`
         UPDATE users
-        SET workplace = ${profile.workplace}, industry = ${profile.industry},
-            career_start_date = ${profile.careerStartDate || null},
-            workplace_visibility = ${profile.workplaceVisibility}
+        SET workplace = COALESCE(${profile.workplace ?? null}, workplace),
+            industry = COALESCE(${profile.industry ?? null}, industry),
+            career_start_date = NULLIF(COALESCE(${profile.careerStartDate ?? null},
+              to_char(career_start_date, 'YYYY-MM-DD')), '')::DATE,
+            workplace_visibility = COALESCE(${profile.workplaceVisibility ?? null}, workplace_visibility)
         WHERE id = ${session.sub}
         RETURNING workplace, industry, COALESCE(to_char(career_start_date, 'YYYY-MM-DD'), '') AS "careerStartDate",
                   workplace_visibility AS "workplaceVisibility"

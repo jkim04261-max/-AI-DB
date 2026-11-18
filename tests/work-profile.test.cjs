@@ -43,6 +43,13 @@ async function run() {
     assert.equal((await request('PUT', 1, invalid)).statusCode, 400)
   }
   assert.deepEqual((await request('GET', 1)).body.profile, profile)
+  assert.equal((await request('PATCH', undefined, { workplace: '누리상점' })).statusCode, 401)
+  assert.equal((await request('PATCH', 1, { careerStartDate: '2024-13-01' })).statusCode, 400)
+  const partial = await request('PATCH', 1, { industry: 'IT/개발', workplaceVisibility: 'private' })
+  assert.equal(partial.statusCode, 200)
+  assert.deepEqual(partial.body.profile, { ...profile, industry: 'IT/개발', workplaceVisibility: 'private' })
+  assert.deepEqual((await request('GET', 1)).body.profile, partial.body.profile)
+  assert.deepEqual((await request('GET', 2)).body.profile, empty)
   assert.deepEqual((await request('PUT', 1, empty)).body.profile, empty)
   assert.deepEqual((await request('GET', 1)).body.profile, empty)
   return true
