@@ -2636,7 +2636,7 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
 // handleGetObjectiveQuiz의 세트 크기, toddler 필요 개수 3과는 별개
 // 상수) 같은 세트를 한 번 더 제출해야 2/3→3/3이 된다 — 틀린 게 아니라
 // 이미 다 맞은 선택을 그대로 다시 제출하는 것뿐이다.
-test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×3(두 세트) → card-match game → direct×1(노하우) — reaches the 종합 최종 시험 보기 button without evolving yet', async ({ page }) => {
+test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×3(한 세트) → card-match game → direct×1(노하우) — reaches the 종합 최종 시험 보기 button without evolving yet', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -2698,12 +2698,32 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
         }),
       })
     },
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후
+    // handleGetObjectiveQuiz는 toddler도 objective 요구치(3)와 똑같은
+    // 크기의 세트를 내려준다(objectiveQuizCount가 더 이상 티어별
+    // 고정값이 아니라 MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier].objective
+    // 그대로다) — 3문제 세트 하나만 받는다.
+    onObjectiveQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: [
+            { id: 'mock-obj-1', text: '객관식 문제 1', choices: ['정답', '오답1', '오답2'] },
+            { id: 'mock-obj-2', text: '객관식 문제 2', choices: ['정답', '오답1', '오답2'] },
+            { id: 'mock-obj-3', text: '객관식 문제 3', choices: ['정답', '오답1', '오답2'] },
+          ],
+          quizToken: 'mock-objective-quiz-token',
+        }),
+      })
+    },
     onObjectiveQuizSubmit: async (route) => {
-      const body = route.request().postDataJSON() as { answers?: [number, number] }
-      const allCorrect = body.answers?.[0] === 0 && body.answers?.[1] === 0
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const answers = body.answers ?? []
+      const allCorrect = answers.length === 3 && answers.every((a) => a === 0)
       if (allCorrect) {
-        saveCount += 2
-        confirmed.objective = Math.min(confirmed.objective + 2, REQUIRED.objective)
+        saveCount += 3
+        confirmed.objective = Math.min(confirmed.objective + 3, REQUIRED.objective)
       }
       const progress = missionProgressFor()
       await route.fulfill({
@@ -2711,12 +2731,9 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
         contentType: 'application/json',
         body: JSON.stringify({
           allCorrect,
-          results: [
-            { questionId: 'mock-obj-1', correct: body.answers?.[0] === 0 },
-            { questionId: 'mock-obj-2', correct: body.answers?.[1] === 0 },
-          ],
-          message: allCorrect ? '정답이에요! 2문제 모두 맞혔어요.' : '앗, 틀렸어요! 다시 도전해 볼까요?',
-          expAwarded: allCorrect ? 20 : 0,
+          results: answers.map((a, i) => ({ questionId: `mock-obj-${i + 1}`, correct: a === 0 })),
+          message: allCorrect ? '정답이에요! 3문제 모두 맞혔어요.' : '앗, 틀렸어요! 다시 도전해 볼까요?',
+          expAwarded: allCorrect ? 30 : 0,
           exp: saveCount * 10,
           level: 1,
           leveledUp: false,
@@ -2754,23 +2771,21 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
   await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
 
   // ②단계: 객관식 3문제(세트 전부 정답) — 배고픔 이벤트가 패널을
-  // 자동으로 닫았으므로 다시 연다. 서버가 한 세트에 2문제씩만 내려줘서
-  // (toddler 필요 개수 3과는 별개 상수), "정답"(선택지 0번)을 둘 다
-  // 고르고 제출하면 2/3까지만 오른다 — 같은 선택을 그대로 한 번 더
-  // 제출해야 3/3이 된다.
+  // 자동으로 닫았으므로 다시 연다. handleGetObjectiveQuiz가 이제
+  // toddler의 objective 요구치(3)와 같은 크기의 세트를 내려주므로,
+  // "정답"(선택지 0번)을 셋 다 고르고 한 번만 제출하면 3/3이 된다.
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
-  await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+  await page.getByTestId('objective-quiz-choice-2-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
 
   // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 식사·
   // 심부름 2단계 로테이션은 onKnowledgeSaved 호출 총횟수(여기서는
-  // 3(직접입력) + 2+2(객관식 두 세트) = 7번째 호출 중 6번째)로만
-  // 판정되어 미션 종류와 무관하게 발동한다 — 두 번째 세트를 제출하는
-  // 순간이 정확히 그 6번째 호출과 겹친다.
+  // 3(직접입력) + 3(객관식 한 세트) = 6번째 호출)로만 판정되어 미션
+  // 종류와 무관하게 발동한다 — 이 세트를 제출하는 순간이 정확히 그
+  // 6번째 호출과 겹친다.
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-accept-button').click()
   await expect(page.getByTestId('money-popup')).toContainText('10,000원')
@@ -2794,15 +2809,12 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
 
   // ④단계: 노하우 1문제(knowhow, 직접입력과 같은 자리) — 카드 맞추기를
   // 끝내도 패널이 자동으로 닫히지 않으므로(식사·심부름 이벤트와 달리)
-  // 다시 열지 않고 그대로 이어간다. 이 저장이 onKnowledgeSaved 통산
-  // 9번째 호출이라 식사·심부름 로테이션의 세 번째 발동(이번엔 식사
-  // 차례)과 겹친다.
+  // 다시 열지 않고 그대로 이어간다. onKnowledgeSaved 통산 호출은
+  // 3(직접입력)+3(객관식 한 세트)+1(카드 맞추기)+1(이 저장)=8번째라
+  // 식사·심부름 로테이션(3의 배수마다 발동)의 다음 차례(9번째)에는
+  // 아직 못 미쳐 이번엔 아무 이벤트도 뜨지 않는다.
   await expect(page.getByTestId('toddler-direct-step-label')).toContainText('④단계')
   await teachKnowhow(4)
-  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
-  await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
-  await page.getByRole('button', { name: '가르치기' }).click()
 
   await expect(page.getByTestId('evolution-banner')).not.toBeVisible()
   await expect(page.getByTestId('toddler-staged-flow-complete')).toBeVisible()

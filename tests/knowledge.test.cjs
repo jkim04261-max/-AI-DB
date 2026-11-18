@@ -1690,9 +1690,14 @@ async function run() {
     '이 직업의 주된 목적은 무엇인가요?',
     '이 직업에 필요한 핵심 역량은 무엇인가요?',
   ]
-  // toddler 기준 선택지 3개짜리 문제 2개를 만든다 — correctIndex를
-  // 테스트가 직접 지정해 정답/오답 제출에 그대로 쓴다(더 이상
-  // objectiveQuizQuestions.ts 같은 정적 은행에서 id로 되찾아오지 않는다).
+  // toddler 기준 선택지 3개짜리 문제 3개를 만든다(지시서(8세 학습 총
+  // 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후 toddler의 objective
+  // 필요 개수가 2→3으로 늘면서, handleGetObjectiveQuiz도 한 세트에
+  // 정확히 그 요구 개수만큼 내려주도록 바뀌었다 — characterAge.ts의
+  // MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier].objective를 그대로 쓴다)
+  // — correctIndex를 테스트가 직접 지정해 정답/오답 제출에 그대로 쓴다
+  // (더 이상 objectiveQuizQuestions.ts 같은 정적 은행에서 id로
+  // 되찾아오지 않는다).
   const makeObjectiveQuizMock = (count, choiceCount, correctIndexes) =>
     Array.from({ length: count }, (_, i) => ({
       text: `문제 ${i + 1} (${choiceCount}지선다)`,
@@ -1710,22 +1715,22 @@ async function run() {
     await characterHandler(minaReq({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
     await characterHandler(minaReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'doctor' } }), mockRes())
 
-    // 1) 문제 2개 + quizToken을 받고, 정답(correctIndex)은 전혀
+    // 1) 문제 3개 + quizToken을 받고, 정답(correctIndex)은 전혀
     // 포함되지 않으며, toddler 단계는 보기 3개씩 출제된다. Gemini는
     // 정확히 1번만 호출된다(비용 절감 — N개를 1번에 배치 생성).
-    const mockedSet1 = makeObjectiveQuizMock(2, 3, [1, 0])
+    const mockedSet1 = makeObjectiveQuizMock(3, 3, [1, 0, 2])
     geminiBehavior = { kind: 'json', result: mockedSet1 }
     const callCountBefore1 = geminiCallCount
     const quizRes1 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes1)
     t.assert(quizRes1.statusCode === 200, '의사 직업이어도 객관식 퀴즈를 바로 받을 수 있다(전문직 포함 전체 적용)')
-    t.assert(geminiCallCount === callCountBefore1 + 1, 'Gemini는 문제 2개를 1번의 배치 호출로 생성한다(비용 절감)')
-    t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 2, '문제 2개를 받는다')
+    t.assert(geminiCallCount === callCountBefore1 + 1, 'Gemini는 문제 3개를 1번의 배치 호출로 생성한다(비용 절감)')
+    t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 3, '문제 3개를 받는다(toddler의 objective 필요 개수와 같은 세트 크기)')
     t.assert(typeof quizRes1.body.quizToken === 'string' && quizRes1.body.quizToken.length > 0, '서명된 quizToken을 받는다')
     t.assert(quizRes1.body.questions.every((q) => q.correctIndex === undefined), '정답(correctIndex)은 클라이언트로 내려가지 않는다')
     t.assert(quizRes1.body.questions.every((q) => q.choices.length === 3), 'toddler(8~9살) 단계는 보기 3개가 출제된다(연령대별 선택지 개수)')
     const matchedTemplates1 = OBJECTIVE_QUIZ_TEMPLATE_PHRASES.filter((p) => lastSystemInstruction.includes(p))
-    t.assert(matchedTemplates1.length === 2, '프롬프트에 서로 다른 문제 유형(역사/목적/도구/핵심역량) 2종이 지정된다(문제 유형 다양화)')
+    t.assert(matchedTemplates1.length >= 2, '프롬프트에 서로 다른 문제 유형(역사/목적/도구/핵심역량)이 여러 종류 지정된다(문제 유형 다양화)')
 
     // 2) 하나라도 틀리면 통과하지 못하고, 아무것도 저장되지 않는다.
     const wrongAnswers = mockedSet1.map((q) => (q.correctIndex + 1) % q.choices.length)
@@ -1740,15 +1745,16 @@ async function run() {
     )
     t.assert(wrongSubmit.statusCode === 200, '틀려도 200으로 응답한다(에러가 아니라 결과)')
     t.assert(wrongSubmit.body.allCorrect === false, '하나라도 틀리면 allCorrect:false다')
-    t.assert(wrongSubmit.body.results.length === 2, '두 문제 각각의 정오답이 내려온다')
+    t.assert(wrongSubmit.body.results.length === 3, '세 문제 각각의 정오답이 내려온다')
     t.assert(wrongSubmit.body.expAwarded === 0, '틀리면 XP가 지급되지 않는다')
     const afterWrongKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterWrongKnowledge)
     t.assert(afterWrongKnowledge.body.entries.length === 0, '틀리면 지식 항목이 전혀 저장되지 않는다')
 
-    // 3) 새 세트를 받아 둘 다 맞히면 통과하고, 2건이 저장되며 XP가
-    // 20(지식 저장 10XP × 2) 지급된다.
-    const mockedSet2 = makeObjectiveQuizMock(2, 3, [2, 1])
+    // 3) 새 세트를 받아 셋 다 맞히면 세트 1개만으로 objective 요구치
+    // (3개)가 정확히 채워져 통과하고, 3건이 저장되며 XP가 30(지식 저장
+    // 10XP × 3) 지급된다.
+    const mockedSet2 = makeObjectiveQuizMock(3, 3, [2, 1, 0])
     geminiBehavior = { kind: 'json', result: mockedSet2 }
     const quizRes2 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes2)
@@ -1762,20 +1768,15 @@ async function run() {
       }),
       correctSubmit,
     )
-    t.assert(correctSubmit.statusCode === 201, '둘 다 맞히면 201로 응답한다')
-    t.assert(correctSubmit.body.allCorrect === true, '둘 다 맞히면 allCorrect:true다')
-    t.assert(correctSubmit.body.expAwarded === 20, '지식 저장 XP(10) × 2건 = 20XP가 지급된다')
-    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후
-    // toddler의 objective 필요 개수는 3개로 늘었지만, 한 번의 GET이
-    // 내려주는 세트 크기는 여전히 2문제로 고정돼 있다(이 파일 윗부분의
-    // handleGetObjectiveQuiz 참고) — 그래서 세트 1개(2문제)만 통과하면
-    // 2/3로 아직 미완료다.
-    t.assert(correctSubmit.body.missionProgress.byType.objective.confirmed === 2 && correctSubmit.body.missionProgress.byType.objective.complete === false, 'objective 미션은 세트 크기(2)가 필요 개수(3)보다 작아 한 세트만으로는 2/3로 아직 미완료다')
-    t.assert(correctSubmit.body.evolved === false, 'objective 자체도 아직 미완료이고 knowhow/card_game도 안 채워져 있어 진화하지 않는다')
+    t.assert(correctSubmit.statusCode === 201, '셋 다 맞히면 201로 응답한다')
+    t.assert(correctSubmit.body.allCorrect === true, '셋 다 맞히면 allCorrect:true다')
+    t.assert(correctSubmit.body.expAwarded === 30, '지식 저장 XP(10) × 3건 = 30XP가 지급된다')
+    t.assert(correctSubmit.body.missionProgress.byType.objective.confirmed === 3 && correctSubmit.body.missionProgress.byType.objective.complete === true, 'objective 미션은 세트 크기(3)가 필요 개수(3)와 같아 한 세트만으로 3/3 완료된다')
+    t.assert(correctSubmit.body.evolved === false, 'objective는 완료됐어도 knowhow/card_game이 아직 안 채워져 있어 진화하지 않는다')
     const afterCorrectKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterCorrectKnowledge)
-    t.assert(afterCorrectKnowledge.body.entries.length === 2, '통과한 2문제가 각각 지식 항목으로 저장된다')
-    t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '두 항목 모두 mission_type=objective로 저장된다')
+    t.assert(afterCorrectKnowledge.body.entries.length === 3, '통과한 3문제가 각각 지식 항목으로 저장된다')
+    t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '세 항목 모두 mission_type=objective로 저장된다')
 
     // 4) 같은 requestId로 재제출(네트워크 재시도 등)하면 중복 저장·중복
     // XP 지급 없이 현재 상태를 그대로 돌려준다.
@@ -1791,11 +1792,11 @@ async function run() {
     t.assert(replaySubmit.statusCode === 200 && replaySubmit.body.allCorrect === true && replaySubmit.body.expAwarded === 0, '같은 requestId의 재제출은 중복 지급 없이 현재 상태를 돌려준다')
     const afterReplayKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterReplayKnowledge)
-    t.assert(afterReplayKnowledge.body.entries.length === 2, '재제출로 지식 항목이 중복 저장되지 않는다(여전히 2건)')
+    t.assert(afterReplayKnowledge.body.entries.length === 3, '재제출로 지식 항목이 중복 저장되지 않는다(여전히 3건)')
 
     // 5) 다른 캐릭터(두리)의 quizToken으로 누리 쪽을 제출하면 거부된다
     // (서명은 유효해도 이 캐릭터에게 출제된 문제가 아니므로).
-    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 3, [0, 0]) }
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(3, 3, [0, 0, 0]) }
     const quizResDuri = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'duri' } }), quizResDuri)
     const crossSubmit = mockRes()
@@ -1803,7 +1804,7 @@ async function run() {
       minaReq({
         method: 'POST',
         query: { action: 'objective-quiz-submit' },
-        body: { companionType: 'nuri', quizToken: quizResDuri.body.quizToken, answers: [0, 0] },
+        body: { companionType: 'nuri', quizToken: quizResDuri.body.quizToken, answers: [0, 0, 0] },
       }),
       crossSubmit,
     )
@@ -1817,18 +1818,26 @@ async function run() {
     await characterHandler({ headers: { cookie: npCookie }, query: { action: 'objective-quiz', companionType: 'nuri' }, method: 'GET' }, noProfessionQuiz)
     t.assert(noProfessionQuiz.statusCode === 400, '직업이 없으면 객관식 퀴즈를 받을 수 없다(400)')
 
-    // 7) 답을 하나만 보내거나 형식이 잘못되면 400.
+    // 7) 답 개수가 문제 수(3개)와 다르면 400.
     const malformedSubmit = mockRes()
     await characterHandler(
-      minaReq({ method: 'POST', query: { action: 'objective-quiz-submit' }, body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: [0] } }),
+      minaReq({ method: 'POST', query: { action: 'objective-quiz-submit' }, body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: [0, 0] } }),
       malformedSubmit,
     )
-    t.assert(malformedSubmit.statusCode === 400, '답이 2개가 아니면 400으로 거부된다')
+    t.assert(malformedSubmit.statusCode === 400, '답이 3개가 아니면 400으로 거부된다')
 
     // 8) Gemini가 선택지 개수를 어기거나(choices 길이 불일치) JSON을
     // 해석할 수 없는 응답을 주면 502 — 틀린 응답을 그대로 신뢰해 보기
-    // 개수가 안 맞는 퀴즈를 내보내지 않는다.
-    geminiBehavior = { kind: 'json', result: [{ text: '문제', choices: ['A', 'B'], correctIndex: 0, explanation: '해설' }, { text: '문제2', choices: ['C', 'D', 'E'], correctIndex: 0, explanation: '해설2' }] }
+    // 개수가 안 맞는 퀴즈를 내보내지 않는다. 문제 수(3개) 자체는
+    // 맞췄지만, 그중 1개의 보기 개수(2개)가 요구치(3개)를 어긴다.
+    geminiBehavior = {
+      kind: 'json',
+      result: [
+        { text: '문제', choices: ['A', 'B'], correctIndex: 0, explanation: '해설' },
+        { text: '문제2', choices: ['C', 'D', 'E'], correctIndex: 0, explanation: '해설2' },
+        { text: '문제3', choices: ['F', 'G', 'H'], correctIndex: 0, explanation: '해설3' },
+      ],
+    }
     const badChoiceCountQuiz = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), badChoiceCountQuiz)
     t.assert(badChoiceCountQuiz.statusCode === 502, 'Gemini가 보기 개수(3개)를 어기면 502로 거부된다')
@@ -1850,10 +1859,16 @@ async function run() {
     juniorNuri.level = 10
     juniorNuri.exp = 4500
 
-    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 7, [0, 0]) }
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후
+    // handleGetObjectiveQuiz는 세트 크기도 티어별 objective 요구치
+    // 그대로 쓴다 — junior_20s는 splitMissionsRequiredByType(20)의
+    // 균등분배로 objective=7(remainder가 앞쪽 2개 유형에 먼저 +1되는
+    // 규칙상 objective/subjective가 7, knowhow가 6)이라 문제도 7개다.
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(7, 7, [0, 0, 0, 0, 0, 0, 0]) }
     const juniorQuizRes = mockRes()
     await characterHandler(juniorReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), juniorQuizRes)
     t.assert(juniorQuizRes.statusCode === 200, '20대 캐릭터도 객관식 퀴즈를 받을 수 있다')
+    t.assert(juniorQuizRes.body.questions.length === 7, '20대(junior_20s) 단계는 objective 요구치(7)만큼 문제가 출제된다')
     t.assert(juniorQuizRes.body.questions.every((q) => q.choices.length === 7), '20대(junior_20s) 단계는 보기 7개가 출제된다')
   }
 

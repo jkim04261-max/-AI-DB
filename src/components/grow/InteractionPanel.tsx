@@ -777,18 +777,20 @@ export default function InteractionPanel({
         <ObjectiveQuizStep
           companionType={character.companionType}
           title="🎯 ②단계 · 객관식 3문제"
-          description="두 문제씩 모두 맞혀야(필요하면 두 번) 다음 단계로 넘어가요."
+          description="세 문제 모두 맞혀야 다음 단계로 넘어가요."
           onAllCorrect={(progress) => {
-            // handleGetObjectiveQuiz가 한 번에 내려주는 세트는 toddler도
-            // 여전히 2문제(objectiveQuizCount)다 — 이 단계의 필요
-            // 개수(3)와는 별개 상수라, 실제로 이번에 저장된 지식 2건과
-            // 정확히 맞춰 onKnowledgeSaved를 2번만 부른다(세트 하나로
-            // 3/3이 안 끝나면 같은 컴포넌트가 새 세트 제출을 한 번 더
-            // 받는다).
+            // 지시서(8세 학습 onKnowledgeSaved 과다호출 버그): 한때
+            // handleGetObjectiveQuiz가 toddler에도 2문제(옛 objective
+            // 요구치)만 내려주는 상수를 따로 갖고 있어, 이 3번 호출과
+            // 실제 저장 2건이 어긋났었다 — handleGetObjectiveQuiz가 이제
+            // characterAge.ts의 요구치(MISSIONS_REQUIRED_PER_TYPE_BY_TIER
+            // [tier].objective)를 그대로 쓰도록 고쳐서, 한 세트의 문제
+            // 수와 이 호출 횟수가 항상 같은 숫자(3)에서 나온다.
             setMissionProgress(progress)
             onKnowledgeSaved?.()
             onKnowledgeSaved?.()
-            pushLine('character', '정답이에요! 2문제 모두 맞혔어요. 🎉')
+            onKnowledgeSaved?.()
+            pushLine('character', '정답이에요! 3문제 모두 맞혔어요. 🎉')
             flashPose('happy', 2500)
           }}
         />

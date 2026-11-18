@@ -63,6 +63,7 @@ import {
   FINAL_EXAM_PASS_SCORE,
   isFinalExamPassBlockedForTier,
   MISSIONS_REQUIRED_TOTAL_BY_TIER,
+  MISSIONS_REQUIRED_PER_TYPE_BY_TIER,
 } from './_lib/characterAge'
 import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
@@ -1447,12 +1448,18 @@ async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, u
       return
     }
 
-    // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): toddler(8~9살)의 2단계는
-    // 그대로 2문제, teen(10대) ④번 단계만 3문제 — 클라이언트가 보낸 값은
-    // 신뢰하지 않고 서버가 "지금" 연령대로 직접 정한다(연령 게이트와 같은
-    // 신뢰 모델).
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+    // 한 세트의 문제 수는 더 이상 티어별로 따로 하드코딩하지 않고,
+    // characterAge.ts의 미션 필요 개수(MISSIONS_REQUIRED_PER_TYPE_BY_TIER
+    // [tier].objective)를 그대로 쓴다 — 이렇게 해야 "한 세트를 모두
+    // 맞히면 그 티어의 objective 요구치가 정확히 다 채워진다"는 게
+    // 항상 보장된다(두 값이 따로 하드코딩돼 있으면, 한쪽만 바뀌었을 때
+    // "세트는 2문제인데 필요 개수는 3개"처럼 어긋나는 회귀가 생긴다 —
+    // 8~9세 요구치를 2→3으로 올렸을 때 실제로 겪은 버그). 클라이언트가
+    // 보낸 값은 신뢰하지 않고 서버가 "지금" 연령대로 직접 정한다(연령
+    // 게이트와 같은 신뢰 모델).
     const characterAgeTier = effectiveAgeTier(character)
-    const objectiveQuizCount = characterAgeTier === 'teen' ? 3 : 2
+    const objectiveQuizCount = MISSIONS_REQUIRED_PER_TYPE_BY_TIER[characterAgeTier].objective
     const choiceCount = objectiveQuizChoiceCountForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
 
     let generated
