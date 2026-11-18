@@ -228,3 +228,44 @@ test('a workplace name that already matches another user\'s registered building 
   await expect(page.getByTestId('town-entry-register-open-button')).toHaveCount(0)
   await expect(page.getByTestId('town-entry-primary-button')).toHaveText('입장하기')
 })
+
+// 지시서(캐릭터 걷기 및 건물 입장 연출 — "지정 경로 방식"): 메인 화면
+// 진입 시 자동으로 한 번 뜨는 것과 별개로, [내 가게로 가기]를 누르면
+// 언제든 같은 걷기→입장 연출을 다시 볼 수 있어야 한다.
+test('the "내 가게로 가기" button replays the walk-and-enter overlay on demand, not just once automatically', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await seedProfile(page, { region: '경기도 일산 정발산동', workplaceName: '자양청년치킨' })
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onGetBuilding: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          building: { id: 1, region: '경기도 일산 정발산동', businessName: '자양청년치킨', createdAt: new Date().toISOString(), isOwner: true },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  // 메인 화면 진입 시 자동으로 한 번 뜬 오버레이부터 닫는다.
+  await expect(page.getByTestId('town-entry-overlay')).toBeVisible()
+  await page.getByTestId('town-entry-primary-button').click()
+  await expect(page.getByTestId('town-entry-overlay')).toBeHidden()
+
+  // 상호명을 등록해 둔 경우의 버튼 문구 확인 후, 다시 눌러 같은 연출을
+  // 재생한다(걷기→입장).
+  const button = page.getByTestId('town-entry-button')
+  await expect(button).toHaveText('🏪 내 가게로 가기')
+  await button.click()
+  await expect(page.getByTestId('town-entry-overlay')).toBeVisible()
+  await expect(page.getByText('‘자양청년치킨’ 건물이 보여요!')).toBeVisible()
+
+  await page.getByTestId('town-entry-primary-button').click()
+  await expect(page.getByTestId('town-entry-overlay')).toBeHidden()
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+})

@@ -1319,6 +1319,24 @@ export default function GrowPage() {
                     <span className="w-8 shrink-0 text-right text-[10px] text-amber-200/70">{character.focusPercent}%</span>
                   </div>
                   <QuestBanner text={quest.text} action={quest.action} onAction={handleMenuSelect} />
+                  {/* 지시서(캐릭터 걷기 및 건물 입장 연출): "지정 경로
+                      방식" — [내 가게]/[직장] 버튼을 누르면 메인 화면
+                      진입 시 한 번만 자동으로 뜨던 TownEntryOverlay를
+                      언제든 다시 열 수 있다(걷기 애니메이션+입장 페이드
+                      전환 재생). 일하는 지역을 입력한 적 없으면 이
+                      기능 자체를 쓸 데이터가 없으므로 버튼을 보여주지
+                      않는다 — 기존 메뉴(GameMenu)는 전혀 건드리지 않음. */}
+                  {user && readRegion(user.id, character.companionType) && (
+                    <button
+                      type="button"
+                      data-testid="town-entry-button"
+                      onClick={() => setTownEntryOpen(true)}
+                      disabled={townEntryOpen}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100 active:scale-95 disabled:opacity-50"
+                    >
+                      {readJobHistory(user.id, character.companionType)?.workplaceName ? '🏪 내 가게로 가기' : '🏘️ 동네 둘러보기'}
+                    </button>
+                  )}
                 </div>
               </div>
 
