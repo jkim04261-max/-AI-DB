@@ -96,6 +96,19 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  if (has(text, 'UPDATE users', 'SET workplace =', 'AS "workplaceVisibility"')) {
+    const [workplace, industry, careerStartDate, workplaceVisibility, userId] = values
+    const user = state.users.get(userId)
+    if (!user) return Promise.resolve({ rows: [] })
+    user.workProfile = { workplace, industry, careerStartDate: careerStartDate ?? '', workplaceVisibility }
+    return Promise.resolve({ rows: [{ ...user.workProfile }] })
+  }
+  if (has(text, 'SELECT workplace, industry', 'FROM users WHERE id =')) {
+    const user = state.users.get(values[0])
+    const defaults = { workplace: '', industry: '', careerStartDate: '', workplaceVisibility: 'private' }
+    return Promise.resolve({ rows: user ? [{ ...(user.workProfile ?? defaults) }] : [] })
+  }
+
   // --- auth.ts: token_version lookup ---
   if (has(text, 'SELECT token_version FROM users')) {
     const u = state.users.get(values[0])

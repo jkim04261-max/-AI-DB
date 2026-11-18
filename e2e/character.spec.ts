@@ -430,6 +430,9 @@ test('the My Page "내 AI" section reflects the signed-in user\'s characters', a
     })
   })
 
+  await page.route('**/api/account/work-profile', (route) => route.fulfill({
+    json: { profile: { workplace: '', industry: '', careerStartDate: '', workplaceVisibility: 'private' } },
+  }))
   await page.goto('/mypage')
 
   await expect(page.getByText('내 AI')).toBeVisible()
