@@ -431,6 +431,48 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+  // handleResetCharacterProgress's full soft-reset UPDATE...RETURNING —
+  // checked FIRST among every 'UPDATE characters' matcher (before exp/
+  // level/mission_unlocked_tier/focus_percent below), because its SET
+  // clause literally starts with "SET level = 1, exp = 0, ..." and so
+  // contains "SET level =" as a substring — checking the narrower
+  // exp/level matchers first would wrongly intercept this statement and
+  // destructure `values` with the wrong shape (this statement binds only
+  // [characterId, userId]; every literal value is inline, not bound). ---
+  if (has(text, 'UPDATE characters', 'reset_at = NOW()')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.level = 1
+    row.exp = 0
+    row.focus_percent = 90
+    row.mission_unlocked_tier = null
+    row.final_exam_attempts = 0
+    row.final_exam_passed = false
+    row.reset_at = new Date().toISOString()
+    return Promise.resolve({
+      rows: [
+        {
+          id: row.id,
+          user_id: row.user_id,
+          companion_type: row.companion_type,
+          stage: row.stage,
+          profession: row.profession,
+          custom_profession_label: row.custom_profession_label ?? null,
+          level: row.level,
+          exp: row.exp,
+          mission_unlocked_tier: row.mission_unlocked_tier,
+          focus_percent: row.focus_percent,
+          final_exam_attempts: row.final_exam_attempts,
+          final_exam_passed: row.final_exam_passed,
+          reset_at: row.reset_at,
+          created_at: new Date().toISOString(),
+        },
+      ],
+    })
+  }
+
   // --- api/character.ts: applyExpGain's exp update (checked before the
   // generic 'UPDATE characters' profession matcher below, since both start
   // with "UPDATE characters" but have completely different bound params) ---
@@ -474,44 +516,6 @@ function sql(strings, ...values) {
     if (!row) return Promise.resolve({ rows: [] })
     row.focus_percent = Math.min(100, Math.max(0, (row.focus_percent ?? 90) + delta))
     return Promise.resolve({ rows: [{ focus_percent: row.focus_percent }] })
-  }
-
-  // --- 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
-  // handleResetCharacterProgress's full soft-reset UPDATE...RETURNING —
-  // checked first among the 4 new matchers below (most distinctive literal,
-  // 'reset_at = NOW()'), before the narrower final_exam_passed/attempts
-  // matchers and the generic profession fallback. ---
-  if (has(text, 'UPDATE characters', 'reset_at = NOW()')) {
-    const [characterId, userId] = values
-    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
-    if (!row) return Promise.resolve({ rows: [] })
-    row.level = 1
-    row.exp = 0
-    row.focus_percent = 90
-    row.mission_unlocked_tier = null
-    row.final_exam_attempts = 0
-    row.final_exam_passed = false
-    row.reset_at = new Date().toISOString()
-    return Promise.resolve({
-      rows: [
-        {
-          id: row.id,
-          user_id: row.user_id,
-          companion_type: row.companion_type,
-          stage: row.stage,
-          profession: row.profession,
-          custom_profession_label: row.custom_profession_label ?? null,
-          level: row.level,
-          exp: row.exp,
-          mission_unlocked_tier: row.mission_unlocked_tier,
-          focus_percent: row.focus_percent,
-          final_exam_attempts: row.final_exam_attempts,
-          final_exam_passed: row.final_exam_passed,
-          reset_at: row.reset_at,
-          created_at: new Date().toISOString(),
-        },
-      ],
-    })
   }
 
   // --- handlePurchaseFinalExamPass's combined UPDATE (final_exam_passed +

@@ -14,13 +14,17 @@ export default function GrowGuideSheet({ onClose }: { onClose: () => void }) {
         <section className="flex flex-col gap-1.5">
           <h2 className="text-sm font-bold text-amber-800">🌱 성장 규칙 (8~9살 → 10대)</h2>
           <p className="text-amber-800/80">
-            8~9살 단계에서 아래 6가지 학습/시험을 모두 마치면, 레벨과 상관없이 그 즉시 10대로 자동 진화해요.
+            8~9살 단계에서 아래 8가지 학습을 모두 마치면 "종합 최종 시험"을 볼 수 있어요. 배운 내용을 모두 맞혀야 합격이고, 합격하면 바로 10대로 진화해요.
           </p>
           <ul className="flex flex-col gap-1 rounded-xl bg-amber-100/60 p-3">
-            <li>🎯 예시 문제 풀이형 2개 (AI 추천 받기)</li>
-            <li>📝 객관식 2개 (선택지에서 고르기)</li>
-            <li>✏️ 노하우 설계형 2개 (직접 입력하기)</li>
+            <li>📌 직접 입력하기 3개 (예시 추천 포함)</li>
+            <li>📝 객관식 3개 (선택지에서 고르기)</li>
+            <li>🃏 직업 카드 맞추기 1개</li>
+            <li>💡 노하우 알려주기 1개</li>
           </ul>
+          <p className="text-amber-800/80">
+            시험에서 틀리면 틀린 문제만 다시 풀 수 있고, 재시험도 불합격하면 처음부터 다시 키우거나 패스권(30,000원)을 살 수 있어요.
+          </p>
           <p className="text-xs text-amber-700/70">
             "가르치기 · 스스로 공부하기" 화면을 열면 지금까지 몇 개를 채웠는지 진행 현황이 함께 보여요.
           </p>

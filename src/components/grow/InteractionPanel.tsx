@@ -777,13 +777,18 @@ export default function InteractionPanel({
         <ObjectiveQuizStep
           companionType={character.companionType}
           title="🎯 ②단계 · 객관식 3문제"
-          description="세 문제 모두 맞혀야 다음 단계로 넘어가요."
+          description="두 문제씩 모두 맞혀야(필요하면 두 번) 다음 단계로 넘어가요."
           onAllCorrect={(progress) => {
+            // handleGetObjectiveQuiz가 한 번에 내려주는 세트는 toddler도
+            // 여전히 2문제(objectiveQuizCount)다 — 이 단계의 필요
+            // 개수(3)와는 별개 상수라, 실제로 이번에 저장된 지식 2건과
+            // 정확히 맞춰 onKnowledgeSaved를 2번만 부른다(세트 하나로
+            // 3/3이 안 끝나면 같은 컴포넌트가 새 세트 제출을 한 번 더
+            // 받는다).
             setMissionProgress(progress)
             onKnowledgeSaved?.()
             onKnowledgeSaved?.()
-            onKnowledgeSaved?.()
-            pushLine('character', '정답이에요! 3문제 모두 맞혔어요. 🎉')
+            pushLine('character', '정답이에요! 2문제 모두 맞혔어요. 🎉')
             flashPose('happy', 2500)
           }}
         />

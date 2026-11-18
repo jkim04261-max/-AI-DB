@@ -56,6 +56,15 @@ async function mockCharacterApi(
     // 내려주는 기본값을 쓴다(이 단계 자체를 다루지 않는 테스트를 위한
     // 기본값, 다른 onXxx들과 같은 패턴).
     onCompleteCardGame?: (route: Route) => Promise<void>
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+    // "종합 최종 시험" 전용 — 지정하지 않으면 2문제(둘 다 정답은
+    // 0번)짜리 기본 시험을 내려주고, 제출은 모두 0번을 골랐을 때만
+    // 합격(그리고 즉시 teen으로 진화) 처리한다(이 단계 자체를 다루지
+    // 않는 테스트를 위한 기본값, 다른 onXxx들과 같은 패턴).
+    onFinalExam?: (route: Route) => Promise<void>
+    onFinalExamSubmit?: (route: Route) => Promise<void>
+    onPurchaseFinalExamPass?: (route: Route) => Promise<void>
+    onResetCharacterProgress?: (route: Route) => Promise<void>
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
     // 않은 기본값(10/10, 3/3)을 돌려준다.
     onUsage?: (route: Route) => Promise<void>
@@ -137,9 +146,11 @@ async function mockCharacterApi(
       await options.onSetProfession(route)
       return
     }
-    // PR #63: InteractionPanel이 열릴 때마다 6미션 진행상황을 조회한다 —
-    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 항상 빈(0/6)
-    // 기본값을 돌려준다.
+    // PR #63/지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직
+    // 수정): InteractionPanel이 열릴 때마다 미션 진행상황을 조회한다 —
+    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 toddler의 현재
+    // 커리큘럼(직접입력3+노하우1=knowhow4, 객관식3, 카드맞추기1=총 8)
+    // 기준 빈(0/8) 기본값을 돌려준다.
     if (method === 'GET' && action === 'missions') {
       if (options.onMissions) {
         await options.onMissions(route)
@@ -153,13 +164,13 @@ async function mockCharacterApi(
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
-              knowhow: { type: 'knowhow', confirmed: 0, required: 2, complete: false },
-              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+              objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 0, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
             },
             confirmedTotal: 0,
-            requiredTotal: 6,
+            requiredTotal: 8,
             allConfirmed: false,
             nextAgeTier: 'teen',
             nextAgeTierLabel: '10대',
@@ -266,6 +277,87 @@ async function mockCharacterApi(
           evolved: false,
           newAgeTier: null,
           newAgeTierLabel: null,
+        }),
+      })
+      return
+    }
+    if (method === 'GET' && action === 'final-exam') {
+      if (options.onFinalExam) {
+        await options.onFinalExam(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: [
+            { id: 'mock-fe-1', text: '복습 문제 1', choices: ['정답', '오답1', '오답2'] },
+            { id: 'mock-fe-2', text: '복습 문제 2', choices: ['정답', '오답1', '오답2'] },
+          ],
+          examToken: 'mock-final-exam-token',
+          attemptNumber: 1,
+          passScore: 100,
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'final-exam-submit') {
+      if (options.onFinalExamSubmit) {
+        await options.onFinalExamSubmit(route)
+        return
+      }
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const passed = (body.answers ?? []).every((a) => a === 0)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed,
+          score: passed ? 100 : 0,
+          results: [],
+          message: passed ? '종합 최종 시험 합격이에요! 100점(모두 정답)을 받았어요. 정말 대단해요! 🎉 청소년 단계로 성장했어요!' : '아쉽지만 불합격이에요.',
+          attemptNumber: 1,
+          blocked: !passed,
+          retakeExamToken: passed ? null : null,
+          wrongQuestions: [],
+          missionProgress: null,
+          evolved: passed,
+          newAgeTier: passed ? 'teen' : null,
+          newAgeTierLabel: passed ? '10대' : null,
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'purchase-final-exam-pass') {
+      if (options.onPurchaseFinalExamPass) {
+        await options.onPurchaseFinalExamPass(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          evolved: true,
+          newAgeTier: 'teen',
+          newAgeTierLabel: '10대',
+          newAgeTierStageLabel: '청소년',
+          missionProgress: null,
+          message: '패스권을 사용해서 10대로 올라갔어요! 새로운 모험을 시작해볼까요?',
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'reset-character-progress') {
+      if (options.onResetCharacterProgress) {
+        await options.onResetCharacterProgress(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { ...NURI_ACCOUNTANT, level: 1, exp: 0, age_tier: 'toddler', focus_percent: 90 },
+          message: '처음부터 다시 시작해요! 새로운 마음으로 다시 키워볼까요?',
         }),
       })
       return
@@ -503,7 +595,10 @@ test('verifying appropriate knowledge shows the result and enables 저장, which
 
   await expect(page.getByText('적합', { exact: true })).toBeVisible()
   await expect(page.getByText('설명: 정확해요')).toBeVisible()
-  await expect(page.getByText('오늘 남은 지식 검증 횟수: 9/10')).toBeVisible()
+  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+  // toddler는 "총 8문제" 고정 흐름이라 이 계정 전체 일일 한도 표시를
+  // 더 이상 보여주지 않는다(InteractionPanel.tsx의 isToddlerStagedFlow
+  // 가드) — 이 테스트의 본 목적(검증 결과 표시)과는 무관해 그냥 뺀다.
   // PR #45 checkpoint 2: an appropriate verification briefly switches the
   // character sprite's pose to "happy" (CharacterSprite.tsx, wired from
   // KnowledgeTeachPanel's onPoseChange).
@@ -964,9 +1059,12 @@ test('filling the form from a topic suggestion chip at the toddler direct-input 
 // 때 toddler(8~9살) 전체 구간에서 "AI 추천 받기" 카드가 사라졌는데,
 // 실제로는 1단계(direct, 직접 입력 카드와 같은 자리)에서는 다시
 // 보여야 한다는 요청 — 선택예시하기(3개) 버튼을 되돌린 것과 같은
-// 범위(showDirectInputCards)다. 버튼 클릭 → 저장까지 missionType이
-// 여전히 subjective로 태깅되어 toddler의 subjective(1개) 미션
-// 진행도가 올라가는지 함께 확인한다.
+// 범위(showDirectInputCards)다. 지시서(8세 학습 총 8문제 제한 및
+// 10대 강제 레벨업 로직 수정) 이후 toddler의 subjective 필요 개수는
+// 0(항상 "완료" 처리)이라 더 이상 미션 진행도를 올리는 입력 경로가
+// 아니지만, 저장 자체는 여전히 missionType='subjective'로 태깅된다
+// (이 태깅 자체는 분류용으로 남아 있다) — 버튼 클릭 → 저장까지 그
+// 흐름이 그대로 동작하는지 확인한다.
 test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-input stage, and saving it still tags missionType=subjective', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
@@ -1044,13 +1142,13 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-              subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
-              knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+              objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
             },
             confirmedTotal: 3,
-            requiredTotal: 6,
+            requiredTotal: 8,
             allConfirmed: false,
             nextAgeTier: 'teen',
             nextAgeTierLabel: '10대',
@@ -1063,8 +1161,11 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  // knowhow가 이미 3/3이라 2단계(객관식)로 들어와 있다 — 여기서는
-  // AI 추천 받기 카드가 보이면 안 된다.
+  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+  // 1단계(직접입력)는 knowhow.confirmed가 3(TODDLER_DIRECT1_COUNT)에
+  // 도달하면 끝나므로(전체 필요 개수 4와는 별개), knowhow 3/4인 채로도
+  // 이미 2단계(객관식)로 들어와 있다 — 여기서는 AI 추천 받기 카드가
+  // 보이면 안 된다.
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await expect(page.getByText('✨ AI 추천 받기', { exact: true })).toHaveCount(0)
 })
@@ -1175,13 +1276,16 @@ test('typing the title/content directly and saving tags the save request as miss
   expect(saveRequestBody?.missionType).toBe('knowhow')
 })
 
-test('the mission progress summary shows the current tier\'s 6-slot progress, by type', async ({ page }) => {
+test('the mission progress summary shows the current tier\'s 8-slot progress, by type', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   await mockCharacterApi(page, {
     characters: [NURI_ACCOUNTANT],
-    // 이 테스트만 2/0/1(objective는 이미 완료)로 기본 진행 상태를 덮어쓴다.
+    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+    // 이 테스트만 objective 2/3(아직 미완료)+knowhow 1/4+card_game
+    // 0/1로 기본 진행 상태를 덮어쓴다. subjective는 toddler에서
+    // 0/0(항상 완료)이다.
     onMissions: async (route) => {
       await route.fulfill({
         status: 200,
@@ -1191,13 +1295,13 @@ test('the mission progress summary shows the current tier\'s 6-slot progress, by
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 2, required: 2, complete: true },
-              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
-              knowhow: { type: 'knowhow', confirmed: 1, required: 2, complete: false },
-              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+              objective: { type: 'objective', confirmed: 2, required: 3, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 1, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
             },
             confirmedTotal: 3,
-            requiredTotal: 6,
+            requiredTotal: 8,
             allConfirmed: false,
             nextAgeTier: 'teen',
             nextAgeTierLabel: '10대',
@@ -1210,10 +1314,10 @@ test('the mission progress summary shows the current tier\'s 6-slot progress, by
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  await expect(page.getByTestId('mission-progress-summary')).toContainText('8~9살 성장 미션 (3/6)')
-  await expect(page.getByTestId('mission-progress-objective')).toContainText('2/2')
-  await expect(page.getByTestId('mission-progress-subjective')).toContainText('0/2')
-  await expect(page.getByTestId('mission-progress-knowhow')).toContainText('1/2')
+  await expect(page.getByTestId('mission-progress-summary')).toContainText('8~9살 성장 미션 (3/8)')
+  await expect(page.getByTestId('mission-progress-objective')).toContainText('2/3')
+  await expect(page.getByTestId('mission-progress-subjective')).toContainText('0/0')
+  await expect(page.getByTestId('mission-progress-knowhow')).toContainText('1/4')
 })
 
 // PR #65: 지식 카드 10종 분류 — missionType(입력 방식)과는 독립된 선택값
@@ -2116,7 +2220,14 @@ test('when the daily 지식 검증(teach) limit is exhausted, buying 지식 검�
         companion_type: body.companionType,
         stage: 'child',
         profession: null,
-        level: 1,
+        // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+        // toddler는 "남은 횟수" 표시를 더 이상 보여주지 않으므로(이
+        // 테스트의 실제 목적), 이 테스트만 junior_20s로 만든다 —
+        // GrowthContext.fromApiRow가 age_tier를 그대로 신뢰하므로
+        // (없으면 'toddler' 기본값) level만 올리는 걸로는 부족하고
+        // age_tier도 함께 내려줘야 한다.
+        level: 10,
+        age_tier: 'junior_20s',
         exp: 0,
         created_at: new Date().toISOString(),
       }
@@ -2131,7 +2242,8 @@ test('when the daily 지식 검증(teach) limit is exhausted, buying 지식 검�
         stage: 'child',
         profession: body.profession,
         custom_profession_label: body.customProfessionLabel ?? null,
-        level: 1,
+        level: 10,
+        age_tier: 'junior_20s',
         exp: 0,
         created_at: new Date().toISOString(),
       }
@@ -2510,36 +2622,39 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
-// 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(학습
-// 플로우 전면 개편)로 흐름 자체가 바뀌었다: 더 이상 유형별 2개씩 자유
-// 순서가 아니라, toddler(8~9살)는 "1단계 직접입력 3문제(knowhow) →
-// 2단계 객관식 2문제(세트 전부 정답, objective) → 3단계 주관식
-// 1문제(subjective)"라는 고정 순서로 정확히 6개(3+2+1)를 채워야
-// 진화한다(사용자 승인: "게이트를 3:2:1로 변경"). 이 테스트는 그 세
-// 단계를 실제 UI로 끝까지 따라가, 토들러의 "6개 저장" 보상(지시서(서점
-// 팝업 흐름 수정) 이후로는 식사·알바 2단계 로테이션이라 정확히 2번째
-// 로테이션인 알바 이벤트가 2단계의 객관식 통과+3단계 완료가 겹치는
-// 6번째 저장에서 함께 발동함)과 겹치는 실제 상황에서도 진화 배너·
-// 캐릭터 그림·상태창이 전부 올바르게 바뀌는지 확인한다.
-test('evolving from toddler to teen via the new 3-stage flow (direct×3 → objective quiz×2 → subjective×1) shows the evolution banner and swaps the portrait to teen — even though it coincides with the part-time job event', async ({ page }) => {
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정)로 흐름이
+// 다시 바뀌었다: toddler(8~9살)는 "① 직접입력 3문제(knowhow) → ②
+// 객관식 3문제(세트 전부 정답, objective) → ③ 직업 카드 맞추기 1개
+// (card_game) → ④ 노하우 1문제(knowhow)"라는 고정 순서로 정확히
+// 8개(3+1=knowhow4, objective3, card_game1)를 채워야 "종합 최종 시험
+// 보기" 버튼이 나타난다 — 8개를 다 채워도 더 이상 그 즉시 진화하지
+// 않는다(사용자 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야
+// 10살로 넘어감"). 이 테스트는 그 네 단계를 실제 UI로 끝까지 따라가,
+// 8개를 다 채운 뒤에도 진화 배너가 뜨지 않고 "종합 최종 시험 보기"
+// 버튼만 나타나는지 확인한다(최종 시험 자체는 별도 테스트에서
+// 다룬다). ②단계는 서버가 한 번에 2문제씩만 내려주므로(기존
+// handleGetObjectiveQuiz의 세트 크기, toddler 필요 개수 3과는 별개
+// 상수) 같은 세트를 한 번 더 제출해야 2/3→3/3이 된다 — 틀린 게 아니라
+// 이미 다 맞은 선택을 그대로 다시 제출하는 것뿐이다.
+test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×3(두 세트) → card-match game → direct×1(노하우) — reaches the 종합 최종 시험 보기 button without evolving yet', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCount = 0
-  const REQUIRED = { knowhow: 3, objective: 2, subjective: 1 }
-  const confirmed = { objective: 0, subjective: 0, knowhow: 0 }
+  const REQUIRED = { knowhow: 4, objective: 3, card_game: 1 }
+  const confirmed = { objective: 0, knowhow: 0, card_game: 0 }
   const missionProgressFor = () => ({
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
       objective: { type: 'objective', confirmed: confirmed.objective, required: REQUIRED.objective, complete: confirmed.objective >= REQUIRED.objective },
-      subjective: { type: 'subjective', confirmed: confirmed.subjective, required: REQUIRED.subjective, complete: confirmed.subjective >= REQUIRED.subjective },
+      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
       knowhow: { type: 'knowhow', confirmed: confirmed.knowhow, required: REQUIRED.knowhow, complete: confirmed.knowhow >= REQUIRED.knowhow },
-      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+      card_game: { type: 'card_game', confirmed: confirmed.card_game, required: REQUIRED.card_game, complete: confirmed.card_game >= REQUIRED.card_game },
     },
-    confirmedTotal: confirmed.objective + confirmed.subjective + confirmed.knowhow,
-    requiredTotal: 6,
-    allConfirmed: confirmed.objective >= REQUIRED.objective && confirmed.subjective >= REQUIRED.subjective && confirmed.knowhow >= REQUIRED.knowhow,
+    confirmedTotal: confirmed.objective + confirmed.knowhow + confirmed.card_game,
+    requiredTotal: 8,
+    allConfirmed: confirmed.objective >= REQUIRED.objective && confirmed.knowhow >= REQUIRED.knowhow && confirmed.card_game >= REQUIRED.card_game,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
   })
@@ -2571,44 +2686,37 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
         contentType: 'application/json',
         body: JSON.stringify({
           entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
-          savedReply: progress.allConfirmed ? '청소년 단계로 성장했어요!' : '배웠어요!',
+          savedReply: '배웠어요!',
           expAwarded: 10,
           exp: saveCount * 10,
           level: 1,
           leveledUp: false,
           missionProgress: progress,
-          ...(progress.allConfirmed ? { evolved: true, newAgeTier: 'teen', newAgeTierLabel: '10대' } : {}),
-        }),
-      })
-    },
-    onObjectiveQuiz: async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          questions: [
-            { id: 'evolve-obj-1', text: '객관식 문제 1', choices: ['정답', '오답'] },
-            { id: 'evolve-obj-2', text: '객관식 문제 2', choices: ['정답', '오답'] },
-          ],
-          quizToken: 'tok-evolve-objective-quiz',
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
         }),
       })
     },
     onObjectiveQuizSubmit: async (route) => {
-      saveCount += 2
-      confirmed.objective = Math.min(confirmed.objective + 2, REQUIRED.objective)
+      const body = route.request().postDataJSON() as { answers?: [number, number] }
+      const allCorrect = body.answers?.[0] === 0 && body.answers?.[1] === 0
+      if (allCorrect) {
+        saveCount += 2
+        confirmed.objective = Math.min(confirmed.objective + 2, REQUIRED.objective)
+      }
       const progress = missionProgressFor()
       await route.fulfill({
-        status: 201,
+        status: allCorrect ? 201 : 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          allCorrect: true,
+          allCorrect,
           results: [
-            { questionId: 'evolve-obj-1', correct: true },
-            { questionId: 'evolve-obj-2', correct: true },
+            { questionId: 'mock-obj-1', correct: body.answers?.[0] === 0 },
+            { questionId: 'mock-obj-2', correct: body.answers?.[1] === 0 },
           ],
-          message: '정답이에요! 2문제 모두 맞혔어요.',
-          expAwarded: 20,
+          message: allCorrect ? '정답이에요! 2문제 모두 맞혔어요.' : '앗, 틀렸어요! 다시 도전해 볼까요?',
+          expAwarded: allCorrect ? 20 : 0,
           exp: saveCount * 10,
           level: 1,
           leveledUp: false,
@@ -2623,7 +2731,7 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
 
   await page.goto('/grow')
 
-  // 1단계: 직접입력 3문제(knowhow) — 3번째 저장 직후 배고픔 이벤트
+  // ①단계: 직접입력 3문제(knowhow) — 3번째 저장 직후 배고픔 이벤트
   // 모달로 패널이 자동으로 닫힌다(기존 패턴과 동일). 저장 성공 핸들러가
   // title/content를 비동기로 비우므로, 다음 입력을 채우기 전에 그게
   // 끝났는지 확인한다(기존 "completing 3 knowledge saves" 테스트와
@@ -2645,38 +2753,152 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
   await page.getByTestId('hungry-event-feed-button').click()
   await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
 
-  // 2단계: 객관식 2문제(세트 전부 정답) — 둘 다 "정답"(선택지 0번)을
-  // 고르고 제출하면 통과한다.
+  // ②단계: 객관식 3문제(세트 전부 정답) — 배고픔 이벤트가 패널을
+  // 자동으로 닫았으므로 다시 연다. 서버가 한 세트에 2문제씩만 내려줘서
+  // (toddler 필요 개수 3과는 별개 상수), "정답"(선택지 0번)을 둘 다
+  // 고르고 제출하면 2/3까지만 오른다 — 같은 선택을 그대로 한 번 더
+  // 제출해야 3/3이 된다.
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('final-subjective-step')).toBeVisible()
+  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+  await page.getByTestId('objective-quiz-submit-button').click()
 
-  // 3단계: 주관식 1문제(개인 노하우) — 이 저장이 "유형별로 정해진
-  // 개수(3+2+1)"를 완성시키는 마지막 저장이고, 토들러의 "6개 저장"
-  // 보상(알바 이벤트)도 정확히 같은 저장에서 함께 발동한다.
-  await page.getByTestId('final-subjective-textarea').fill('모르는 건 부끄러운 게 아니야, 꼭 물어봐도 괜찮아!')
-  await page.getByTestId('final-subjective-complete-button').click()
-
-  // 진화 배너가 뜬다 — 같은 저장에서 동시에 열리는 알바 연출에 가려지지
-  // 않고 실제로 보이는지 확인한다(핵심 회귀 포인트).
-  await expect(page.getByTestId('evolution-banner')).toBeVisible()
-  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
-
-  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
-  // toddler는 "알바" 자리에서 선택형 심부름 이벤트가 뜬다 — 이 저장
-  // 자체가 teen으로 "방금" 진화시킨 저장이지만, 그 판정에 쓰인
-  // ageTier 클로저는 이 저장이 일어난 "그 순간"(아직 toddler) 기준
-  // 이라 심부름이 맞다.
+  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 식사·
+  // 심부름 2단계 로테이션은 onKnowledgeSaved 호출 총횟수(여기서는
+  // 3(직접입력) + 2+2(객관식 두 세트) = 7번째 호출 중 6번째)로만
+  // 판정되어 미션 종류와 무관하게 발동한다 — 두 번째 세트를 제출하는
+  // 순간이 정확히 그 6번째 호출과 겹친다.
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-accept-button').click()
   await expect(page.getByTestId('money-popup')).toContainText('10,000원')
 
-  // 모든 연출이 끝난 뒤 — 실제 화면의 캐릭터 그림이 teen(10대) 일러스트로
-  // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고
-  // 10대로 넘어간다").
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
+
+  // ③단계: 직업 카드 맞추기 — 6쌍을 모두 맞추면 onCleared가 자동으로
+  // complete-card-game → save-knowledge(card_game)까지 이어간다.
+  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정)로
+  // 고친 handleCardGameCleared의 isTeenStagedFlow 가드 덕분에, teen
+  // 전용 알바 이벤트(onTeenJobEventDue)는 여기서 뜨지 않는다.
+  for (let i = 0; i < 6; i++) {
+    const backs = page.getByTestId('card-match-back')
+    const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
+    const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
+    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+  }
+  await expect(page.getByTestId('job-event-modal')).not.toBeVisible()
+
+  // ④단계: 노하우 1문제(knowhow, 직접입력과 같은 자리) — 카드 맞추기를
+  // 끝내도 패널이 자동으로 닫히지 않으므로(식사·심부름 이벤트와 달리)
+  // 다시 열지 않고 그대로 이어간다. 이 저장이 onKnowledgeSaved 통산
+  // 9번째 호출이라 식사·심부름 로테이션의 세 번째 발동(이번엔 식사
+  // 차례)과 겹친다.
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('④단계')
+  await teachKnowhow(4)
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('evolution-banner')).not.toBeVisible()
+  await expect(page.getByTestId('toddler-staged-flow-complete')).toBeVisible()
+  await expect(page.getByTestId('open-final-exam-button')).toBeVisible()
+  await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-toddler/)
+})
+
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8문제를
+// 모두 마친 뒤 "종합 최종 시험 보기"를 눌러 8문제를 모두 맞히면(부분
+// 점수 없음) 그 즉시 teen으로 진화한다 — 진화 배너와 캐릭터 그림이
+// 실제로 바뀌는지까지 확인한다(위 테스트가 8문제 완성까지, 이 테스트는
+// 최종 시험 통과 이후를 맡는다).
+test('passing the 종합 최종 시험 (all 8 questions correct) evolves toddler to teen and swaps the portrait', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onMissions: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 3, required: 3, complete: true },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 4, required: 4, complete: true },
+              card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
+            },
+            confirmedTotal: 8,
+            requiredTotal: 8,
+            allConfirmed: true,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+    onFinalExam: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: Array.from({ length: 8 }, (_, i) => ({ id: `fe-${i}`, text: `복습 문제 ${i + 1}`, choices: ['정답', '오답1', '오답2'] })),
+          examToken: 'tok-final-exam',
+          attemptNumber: 1,
+          passScore: 100,
+        }),
+      })
+    },
+    onFinalExamSubmit: async (route) => {
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const passed = (body.answers ?? []).every((a) => a === 0)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed,
+          score: passed ? 100 : 0,
+          results: [],
+          message: passed
+            ? '종합 최종 시험 합격이에요! 100점(모두 정답)을 받았어요. 정말 대단해요! 🎉 청소년 단계로 성장했어요!'
+            : '아쉽지만 불합격이에요.',
+          attemptNumber: 1,
+          blocked: false,
+          retakeExamToken: passed ? null : 'tok-retake',
+          wrongQuestions: [],
+          missionProgress: null,
+          evolved: passed,
+          newAgeTier: passed ? 'teen' : null,
+          newAgeTierLabel: passed ? '10대' : null,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('open-final-exam-button')).toBeVisible()
+  await page.getByTestId('open-final-exam-button').click()
+
+  await expect(page.getByTestId('final-exam-step')).toBeVisible()
+  await expect(page.getByTestId('final-exam-question-7')).toBeVisible()
+  for (let i = 0; i < 8; i++) {
+    await page.getByTestId(`final-exam-choice-${i}-0`).click()
+  }
+  await page.getByTestId('final-exam-submit-button').click()
+
+  await expect(page.getByTestId('final-exam-passed')).toBeVisible()
+  await page.getByRole('button', { name: '확인' }).click()
+
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
   await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
 })
 
@@ -2935,13 +3157,13 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
-      objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-      subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+      objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+      knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+      card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
     },
     confirmedTotal: 3,
-    requiredTotal: 6,
+    requiredTotal: 8,
     allConfirmed: false,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
@@ -2990,8 +3212,13 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
           exp: 50,
           level: 1,
           leveledUp: false,
+          // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직
+          // 수정): toddler의 objective 필요 개수는 3개인데 세트 크기는
+          // 2문제라, 이 한 세트를 통과해도 2/3로 아직 미완료다 —
+          // objective-quiz-step에 그대로 머문다(카드 맞추기로 넘어가지
+          // 않는다).
           missionProgress: allCorrect
-            ? { ...missionProgressAtObjectiveStep, byType: { ...missionProgressAtObjectiveStep.byType, objective: { type: 'objective', confirmed: 2, required: 2, complete: true } }, confirmedTotal: 5 }
+            ? { ...missionProgressAtObjectiveStep, byType: { ...missionProgressAtObjectiveStep.byType, objective: { type: 'objective', confirmed: 2, required: 3, complete: false } }, confirmedTotal: 5 }
             : null,
           evolved: false,
           newAgeTier: null,
@@ -3018,11 +3245,12 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-retry-button').click()
   await expect(page.getByTestId('objective-quiz-question-0')).toContainText('세트 2')
 
-  // 이번엔 정답을 고르면 통과하고, 3단계(주관식)로 넘어간다.
+  // 이번엔 정답을 고르면 통과하지만, objective는 세트 하나(2문제)로는
+  // 필요 개수(3)를 다 못 채워 objective-quiz-step에 그대로 머문다.
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('final-subjective-step')).toBeVisible()
+  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
 })
 
 // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 선택지
@@ -3037,13 +3265,13 @@ test('objective quiz choices render in a 2-column grid once there are 10+ option
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
-      objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-      subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+      objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+      knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+      card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
     },
     confirmedTotal: 3,
-    requiredTotal: 6,
+    requiredTotal: 8,
     allConfirmed: false,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
