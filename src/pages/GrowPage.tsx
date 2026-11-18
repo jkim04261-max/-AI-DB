@@ -68,6 +68,53 @@ function writeLastCompanion(userId: number, companionType: CompanionType) {
     // 하므로 조용히 무시한다 — 이 값은 편의용 복원일 뿐이다.
   }
 }
+
+// 지시서(프로필 작성 폼 확장: 직업 이력 및 근무지 상세 등록 기능 추가):
+// 상호명/업종/경력 시작일/공개 범위를 저장한다. useMockWallet의 체험판
+// 가상 용돈과 같은 이유로 실제 서버 DB에는 쓰지 않는다 — 이 온보딩
+// 화면의 다른 입력(이름·생일·거주지역)도 전부 "어디에도 저장하지
+// 않는다"는 기존 방침이었는데, Preview/Production DB 분리가 아직
+// 검증되지 않은 상태에서 새 컬럼을 추가하는 위험을 피하기 위해서다
+// (useMockWallet.ts 주석 참고). 로컬에만 영속화해도 "저장됐는지
+// 확인"이라는 완료조건은 그대로 만족하고, 나중에 실제 공개 지식DB/
+// 마켓·지도 기능을 설계할 때 그때 가서 서버 스키마로 옮기면 된다.
+const JOB_HISTORY_STORAGE_PREFIX = 'nuri-ai:job-history:'
+
+export interface JobHistoryRecord {
+  workplaceName: string
+  industry: string
+  careerStartMonth: string
+  visibility: 'public' | 'private'
+}
+
+function jobHistoryStorageKey(userId: number, companionType: CompanionType): string {
+  return `${JOB_HISTORY_STORAGE_PREFIX}${userId}:${companionType}`
+}
+
+export function readJobHistory(userId: number, companionType: CompanionType): JobHistoryRecord | null {
+  try {
+    const raw = window.localStorage.getItem(jobHistoryStorageKey(userId, companionType))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<JobHistoryRecord>
+    return {
+      workplaceName: parsed.workplaceName ?? '',
+      industry: parsed.industry ?? '',
+      careerStartMonth: parsed.careerStartMonth ?? '',
+      visibility: parsed.visibility === 'public' ? 'public' : 'private',
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeJobHistory(userId: number, companionType: CompanionType, record: JobHistoryRecord) {
+  try {
+    window.localStorage.setItem(jobHistoryStorageKey(userId, companionType), JSON.stringify(record))
+  } catch {
+    // 저장 실패(프라이빗 모드 등)해도 온보딩 자체는 그대로 진행돼야
+    // 하므로 조용히 무시한다 — 체험판 부가 정보일 뿐이다.
+  }
+}
 const SHEET_TITLE: Record<GameMenuAction, string> = {
   teach: '가르치기 · 스스로 공부하기',
   'chat-log': '함께 나눈 대화',
@@ -573,7 +620,7 @@ export default function GrowPage() {
   // 생일·거주지역·초기 용돈은 어디에도 저장하지 않고 화면(말풍선·
   // wallet 체험판 상태)에만 반영한다.
   const handleOnboardingComplete = async (profile: OpeningProfile) => {
-    if (!onboardingFor) return
+    if (!onboardingFor || !user) return
     const companionType = onboardingFor
     setOnboardingSubmitting(true)
     setError(null)
@@ -581,6 +628,16 @@ export default function GrowPage() {
       await createCharacter(companionType)
       if (profile.profession) {
         await setProfession(companionType, 'custom', profile.profession)
+      }
+      // 지시서(프로필 작성 폼 확장): 상호명/업종/경력 시작일/공개 범위를
+      // 전부 비워뒀으면(완전히 선택 입력) 굳이 빈 기록을 남기지 않는다.
+      if (profile.workplaceName || profile.industry || profile.careerStartMonth) {
+        writeJobHistory(user.id, companionType, {
+          workplaceName: profile.workplaceName,
+          industry: profile.industry,
+          careerStartMonth: profile.careerStartMonth,
+          visibility: profile.jobHistoryVisibility,
+        })
       }
       wallet.grantInitialAllowance(GROW_INITIAL_ALLOWANCE_WON)
       selectCompanion(companionType)

@@ -201,6 +201,94 @@ test('entering a profession in the opening profile screen saves it as a free-tex
   expect(patchBody).toMatchObject({ companionType: 'nuri', profession: 'custom', customProfessionLabel: '숲해설가' })
 })
 
+// 지시서(프로필 작성 폼 확장: 직업 이력 및 근무지 상세 등록 기능
+// 추가): 상호명/업종/경력 시작일/공개 범위를 입력하고 시작하면, 이
+// 화면 자체는 아무것도 저장하지 않고(기존 이름/생일/거주지역과 같은
+// 원칙) 호출부(GrowPage)가 로컬 스토리지에만 저장한다 — 서버 DB에는
+// 아직 쓰지 않는다(Preview/Production DB 분리가 검증되지 않은 상태에서
+// 새 컬럼을 추가하지 않기로 한 기존 방침, useMockWallet.ts 참고).
+test('entering job history (workplace/industry/career start/visibility) in the opening profile screen saves it to local storage, not the server', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let patchCalled = false
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    if (method === 'PATCH') {
+      // 직업(profession)을 비워뒀으므로 이 테스트에서는 PATCH가 전혀
+      // 호출되지 않아야 한다 — 호출되면 직업 이력 입력이 기존 직업
+      // 저장 경로와 잘못 뒤섞인 것이다.
+      patchCalled = true
+      return false
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await expect(page.getByTestId('opening-profile-screen')).toBeVisible()
+
+  await page.getByTestId('opening-profile-workplace-name-input').fill('자양청년치킨')
+  await page.getByTestId('opening-profile-industry-input').fill('요식업')
+  await page.getByTestId('opening-profile-career-start-input').fill('2021-03')
+  // 기본값은 비공개이므로, 공개로 명시적으로 바꿔서 그 선택이 그대로
+  // 저장되는지까지 확인한다.
+  await page.getByTestId('opening-profile-visibility-public').check()
+  await page.getByTestId('opening-profile-start-button').click()
+
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+  expect(patchCalled).toBe(false)
+
+  const stored = await page.evaluate((userId) => window.localStorage.getItem(`nuri-ai:job-history:${userId}:nuri`), USER.id)
+  expect(stored).not.toBeNull()
+  expect(JSON.parse(stored as string)).toEqual({
+    workplaceName: '자양청년치킨',
+    industry: '요식업',
+    careerStartMonth: '2021-03',
+    visibility: 'public',
+  })
+})
+
+// 지시서(프로필 작성 폼 확장): 직업 이력을 전부 비워두면(완전히 선택
+// 입력) 빈 기록조차 로컬 스토리지에 남기지 않는다 — "아무것도 안 쓴
+// 사람"과 "빈 값으로 명시적으로 저장한 사람"을 구분하지 않아도 되는
+// 가장 단순한 규칙이다.
+test('leaving job history fields empty saves no local-storage record at all', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-start-button').click()
+
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+  const stored = await page.evaluate((userId) => window.localStorage.getItem(`nuri-ai:job-history:${userId}:nuri`), USER.id)
+  expect(stored).toBeNull()
+})
+
 // 지시서(성별 필드 제거): PR #97에서 추가했던 플레이버 전용 "성별" 필드가
 // — 아무리 문서화해도 "내가 고른 성별대로 캐릭터가 정해진다"는 오해를
 // 반복적으로 일으켜(실제 사용자 신고 다수) 완전히 제거했다. 어느 캐릭터
