@@ -133,6 +133,25 @@ export interface FinalExamResult {
   explanation: string
 }
 
+// 지시서(단계별 시험·합격·재도전): teen~veteran_40s가 그 단계의 목표
+// 문제 수를 모두 채우면 보는 "단계 평가 시험" — FinalExamQuestion과
+// 모양은 같지만(같은 finalExamToken.ts로 서명) toddler 전용
+// final-exam/final-exam-submit과는 별도 action(stage-exam/
+// stage-exam-submit)으로 호출된다.
+export interface StageExamQuestion {
+  id: string
+  text: string
+  choices: string[]
+}
+
+export interface StageExamResult {
+  questionId: string
+  text: string
+  correct: boolean
+  correctAnswer: string
+  explanation: string
+}
+
 export interface GrowthUpdate {
   expAwarded: number
   exp: number
@@ -323,6 +342,33 @@ interface GrowthContextValue {
   // 사용자 확인: 레벨/경험치/진행도만 리셋한다(직업 선택·기존 학습
   // 기록은 유지).
   resetCharacterProgress: (companionType: CompanionType) => Promise<{ character: Character | null; message: string }>
+  // 지시서(단계별 시험·합격·재도전): teen~veteran_40s가 그 단계의 목표
+  // 문제 수를 모두 채운 뒤 보는 단계 평가 시험 — toddler 전용
+  // getFinalExam/submitFinalExam과 달리 무한 재도전이라 재시험도 이
+  // 함수를 다시 호출해 새 문제 세트를 받는다(재시험 전용 토큰 없음,
+  // blocked 상태도 없음).
+  getStageExam: (companionType: CompanionType) => Promise<{
+    questions: StageExamQuestion[]
+    examToken: string
+    attemptNumber: number
+    passScore: number
+  }>
+  submitStageExam: (
+    companionType: CompanionType,
+    examToken: string,
+    answers: number[],
+  ) => Promise<
+    {
+      passed: boolean
+      score: number
+      results: StageExamResult[]
+      message: string
+      attemptNumber: number
+      expAwarded: number
+      missionProgress: MissionProgress | null
+      wrongQuestions: { id: string; text: string; choices: string[]; correctAnswer: string; explanation: string }[]
+    } & EvolutionUpdate
+  >
   getUsage: () => Promise<{ teachRemaining: number; teachLimit: number; studyRemaining: number; studyLimit: number }>
   submitExam: (
     companionType: CompanionType,
@@ -957,6 +1003,72 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     return { character: updated, message: data.message ?? '' }
   }, [])
 
+  // 지시서(단계별 시험·합격·재도전): teen~veteran_40s가 그 단계의 목표
+  // 문제 수를 모두 채운 뒤 보는 단계 평가 시험 — 매번 새 문제 세트를
+  // 받는다(재시험도 이 함수를 다시 호출, toddler의 getFinalExam과
+  // 같은 원칙).
+  const getStageExam = useCallback(async (companionType: CompanionType) => {
+    const res = await fetch(`/api/character?${new URLSearchParams({ action: 'stage-exam', companionType })}`)
+    const data = (await res.json().catch(() => ({}))) as {
+      questions?: StageExamQuestion[]
+      examToken?: string
+      attemptNumber?: number
+      passScore?: number
+      error?: string
+    }
+    if (!res.ok || !data.questions || data.questions.length === 0 || !data.examToken) {
+      throw new Error(data.error || '단계 평가 시험 문제를 불러오는 중 오류가 발생했어요.')
+    }
+    return {
+      questions: data.questions,
+      examToken: data.examToken,
+      attemptNumber: data.attemptNumber ?? 1,
+      passScore: data.passScore ?? 100,
+    }
+  }, [])
+
+  const submitStageExam = useCallback(
+    async (companionType: CompanionType, examToken: string, answers: number[]) => {
+      const res = await fetch('/api/character?action=stage-exam-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companionType, examToken, answers }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        passed?: boolean
+        score?: number
+        results?: StageExamResult[]
+        message?: string
+        attemptNumber?: number
+        expAwarded?: number
+        missionProgress?: MissionProgress | null
+        evolved?: boolean
+        newAgeTier?: AgeTier | null
+        newAgeTierLabel?: string | null
+        wrongQuestions?: { id: string; text: string; choices: string[]; correctAnswer: string; explanation: string }[]
+        error?: string
+      }
+      if (!res.ok || data.passed === undefined || data.score === undefined) {
+        throw new Error(data.error || '채점 중 오류가 발생했어요.')
+      }
+      if (data.newAgeTier) updateCharacterAgeTier(companionType, data.newAgeTier)
+      return {
+        passed: data.passed,
+        score: data.score,
+        results: data.results ?? [],
+        message: data.message ?? '',
+        attemptNumber: data.attemptNumber ?? 1,
+        expAwarded: data.expAwarded ?? 0,
+        missionProgress: data.missionProgress ?? null,
+        evolved: data.evolved ?? false,
+        newAgeTier: data.newAgeTier ?? null,
+        newAgeTierLabel: data.newAgeTierLabel ?? null,
+        wrongQuestions: data.wrongQuestions ?? [],
+      }
+    },
+    [updateCharacterAgeTier],
+  )
+
   const submitExam = useCallback(
     async (companionType: CompanionType, answers: { questionId: string; answerIndex: number }[]) => {
       const res = await fetch('/api/character?action=exam-submit', {
@@ -1103,6 +1215,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         submitObjectiveQuiz,
         getFinalExam,
         submitFinalExam,
+        getStageExam,
+        submitStageExam,
         purchaseFinalExamPass,
         resetCharacterProgress,
         getExam,

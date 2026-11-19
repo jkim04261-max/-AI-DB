@@ -4,6 +4,7 @@ import {
   ensureKnowledgeTable,
   ensureCharacterMessagesTable,
   ensureGrowthTables,
+  ensureStageExamHistoryTable,
   sql,
   type CharacterRow,
   type KnowledgeEntryRow,
@@ -38,12 +39,14 @@ import {
   buildExamResultMessage,
   buildObjectiveQuizResultMessage,
   buildFinalExamResultMessage,
+  buildStageExamResultMessage,
 } from './_lib/characterDialogue'
 import {
   KNOWLEDGE_SAVE_EXP,
   QUIZ_CORRECT_EXP,
   EXAM_PASS_EXP,
   EXAM_PASS_THRESHOLD,
+  STAGE_EXAM_PASS_EXP,
   levelForExp,
 } from './_lib/characterGrowth'
 import { getQuestionsForProfession, getQuestionById } from './_lib/examQuestions'
@@ -64,6 +67,7 @@ import {
   isFinalExamPassBlockedForTier,
   MISSIONS_REQUIRED_TOTAL_BY_TIER,
   MISSIONS_REQUIRED_PER_TYPE_BY_TIER,
+  nextAgeTier,
 } from './_lib/characterAge'
 import { effectiveAgeTier, getMissionProgress, maybeEvolveAgeTier } from './_lib/characterMissions'
 
@@ -262,6 +266,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetFinalExam(req, res, session.sub)
       return
     }
+    if (action === 'stage-exam') {
+      await handleGetStageExam(req, res, session.sub)
+      return
+    }
     if (action === 'exam') {
       await handleGetExam(req, res, session.sub)
       return
@@ -305,6 +313,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'final-exam-submit') {
       await handleSubmitFinalExam(req, res, session.sub)
+      return
+    }
+    if (action === 'stage-exam-submit') {
+      await handleSubmitStageExam(req, res, session.sub)
       return
     }
     if (action === 'purchase-final-exam-pass') {
@@ -1936,6 +1948,224 @@ async function handlePurchaseFinalExamPass(req: VercelRequest, res: VercelRespon
   } catch (err) {
     console.error('[api/character] unexpected error on purchase-final-exam-pass', err)
     res.status(500).json({ error: '패스권 구매를 처리하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(단계별 시험·합격·재도전): teen~veteran_40s가 그 연령대의 목표
+// 문제 수(MISSIONS_REQUIRED_TOTAL_BY_TIER)를 모두 채우면 보는 "단계
+// 평가 시험" — toddler 전용 handleGetFinalExam과 똑같이 그 단계에서
+// 실제로 저장한 학습 기록을 1:1로 복습하는 문제를 생성하지만(같은
+// generateFinalExamBatch/signFinalExamToken을 그대로 재사용), 두
+// 가지가 다르다: ① toddler는 재시험 2회 제한 + 차단 뒤 패스권 구매/
+// 처음부터 다시 키우기 분기가 있지만, 이 시험은 지시서가 명시한 대로
+// 무한 재도전이 가능하고 막히는 상태가 전혀 없다 — 재도전은 이 GET을
+// 다시 불러 완전히 새 문제 세트를 받는다("틀린 문제만" 재시험이
+// 아니다). ② 매 시도(합격/불합격 모두)를
+// character_stage_exam_history에 쌓아 성장 이력을 추적한다(toddler의
+// final_exam_attempts처럼 "최신 상태 1개"만 덮어쓰지 않는다). toddler
+// 자신의 종합 최종 시험과 master_50s의 "60대 최종 마스터 시험"(미션
+// 완료 자체가 통과 판정, InteractionPanel 참고)은 각자 기존 방식
+// 그대로 두고 건드리지 않는다 — 그래서 tier==='toddler'이거나
+// nextAgeTier(tier)가 없으면(=master_50s) 이 시험을 거절한다.
+async function handleGetStageExam(req: VercelRequest, res: VercelResponse, userId: number) {
+  const companionType = req.query.companionType
+
+  try {
+    await ensureCharacterTables()
+    await ensureKnowledgeTable()
+    await ensureStageExamHistoryTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (!character.profession) {
+      res.status(400).json({ error: '먼저 직업을 선택해주세요.' })
+      return
+    }
+
+    const tier = effectiveAgeTier(character)
+    if (tier === 'toddler' || !nextAgeTier(tier)) {
+      res.status(400).json({ error: '지금 단계에서는 단계 평가 시험을 볼 수 없어요.' })
+      return
+    }
+
+    const progress = await getMissionProgress(userId, character.id, tier, character.reset_at)
+    if (!progress.allConfirmed) {
+      res.status(400).json({ error: `${MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]}개 학습을 모두 끝내야 단계 평가 시험을 볼 수 있어요.` })
+      return
+    }
+
+    const entriesResult = await sql<{ title: string; final_content: string }>`
+      SELECT title, final_content FROM character_knowledge_entries
+      WHERE character_id = ${character.id} AND user_id = ${userId}
+        AND age_tier_at_save = ${tier}
+        AND (${character.reset_at}::timestamptz IS NULL OR created_at > ${character.reset_at}::timestamptz)
+      ORDER BY created_at ASC
+    `
+    if (entriesResult.rows.length === 0) {
+      res.status(400).json({ error: '복습할 학습 기록을 찾을 수 없어요.' })
+      return
+    }
+    const savedEntries = entriesResult.rows.slice(0, MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]).map((r) => ({ title: r.title, content: r.final_content }))
+
+    const questionCount = savedEntries.length
+    const choiceCount = objectiveQuizChoiceCountForTier(tier, ageNumberForTier(tier, character.level))
+
+    let generated
+    try {
+      generated = await generateFinalExamBatch(resolveProfessionLabel(character), tier, savedEntries, questionCount, choiceCount)
+    } catch (err) {
+      const { status, message } = resolveGeminiFailureMessage(err)
+      res.status(status).json({ error: message })
+      return
+    }
+
+    const questions = generated.map((g, idx) => ({
+      id: `se-${idx}`,
+      text: g.text,
+      choices: g.choices,
+      correctIndex: g.correctIndex,
+      explanation: g.explanation,
+    }))
+    const examToken = signFinalExamToken({
+      userId,
+      characterId: character.id,
+      companionType: String(companionType),
+      questions,
+    })
+
+    const attemptCountResult = await sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count FROM character_stage_exam_history
+      WHERE character_id = ${character.id} AND user_id = ${userId} AND age_tier = ${tier}
+    `
+
+    res.status(200).json({
+      questions: questions.map((q) => ({ id: q.id, text: q.text, choices: q.choices })),
+      examToken,
+      attemptNumber: (attemptCountResult.rows[0]?.count ?? 0) + 1,
+      passScore: FINAL_EXAM_PASS_SCORE,
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on stage-exam', err)
+    res.status(500).json({ error: '단계 평가 시험 문제를 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 위 handleGetStageExam과 쌍을 이루는 제출/채점 — 합격 기준은 toddler와
+// 똑같이 "전부 정답"(FINAL_EXAM_PASS_SCORE=100)이다. 불합격해도 막히지
+// 않고(무한 재도전) character_stage_exam_history에 매 시도(합격/불합격
+// 모두)를 남긴다 — 지시서 3번("시험 결과(합격 여부, 시도 횟수, 획득
+// XP, 진도)를 유저 DB에 저장")이 요구하는 성장 이력이다. 합격 시에만
+// STAGE_EXAM_PASS_EXP를 지급하고 maybeEvolveAgeTier로 다음 연령대로
+// 진화시킨다 — toddler→teen 전환에 쓰던 것과 똑같은 진화 함수를 그대로
+// 재사용한다(api/_lib/characterMissions.ts 참고, 이제 모든 연령대
+// 전환이 이 "시험 합격" 게이트를 공유한다).
+async function handleSubmitStageExam(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, examToken, answers } = (req.body ?? {}) as {
+    companionType?: unknown
+    examToken?: unknown
+    answers?: unknown
+  }
+
+  if (!Array.isArray(answers) || answers.length === 0 || answers.some((a) => typeof a !== 'number' || !Number.isInteger(a) || a < 0)) {
+    res.status(400).json({ error: '모든 문제의 답을 선택해주세요.' })
+    return
+  }
+
+  const tokenPayload = verifyFinalExamToken(examToken)
+  if (!tokenPayload) {
+    res.status(400).json({ error: '시험이 만료되었거나 올바르지 않아요. 다시 받아주세요.' })
+    return
+  }
+  if (answers.length !== tokenPayload.questions.length) {
+    res.status(400).json({ error: '모든 문제의 답을 선택해주세요.' })
+    return
+  }
+
+  try {
+    await ensureCharacterTables()
+    await ensureStageExamHistoryTable()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+    if (tokenPayload.userId !== userId || tokenPayload.characterId !== character.id || tokenPayload.companionType !== companionType) {
+      res.status(400).json({ error: '이 캐릭터에게 출제된 시험이 아니에요. 다시 받아주세요.' })
+      return
+    }
+
+    const tier = effectiveAgeTier(character)
+    if (tier === 'toddler' || !nextAgeTier(tier)) {
+      res.status(400).json({ error: '지금 단계에서는 단계 평가 시험을 볼 수 없어요.' })
+      return
+    }
+
+    const resolvedQuestions = tokenPayload.questions
+    const results = resolvedQuestions.map((q, idx) => ({
+      questionId: q.id,
+      text: q.text,
+      correct: answers[idx] === q.correctIndex,
+      correctAnswer: q.choices[q.correctIndex],
+      explanation: q.explanation,
+    }))
+    const correctCount = results.filter((r) => r.correct).length
+    const score = scoreFinalExam(correctCount, resolvedQuestions.length)
+    // 지시서: "전부 정답"이어야 합격 — toddler의 종합 최종 시험과 같은
+    // 기준(FINAL_EXAM_PASS_SCORE=100)을 그대로 재사용한다.
+    const passed = correctCount === resolvedQuestions.length
+
+    const attemptCountResult = await sql<{ count: number }>`
+      SELECT COUNT(*)::int AS count FROM character_stage_exam_history
+      WHERE character_id = ${character.id} AND user_id = ${userId} AND age_tier = ${tier}
+    `
+    const attemptNumber = (attemptCountResult.rows[0]?.count ?? 0) + 1
+    const expAwarded = passed ? STAGE_EXAM_PASS_EXP : 0
+
+    await sql`
+      INSERT INTO character_stage_exam_history (user_id, character_id, age_tier, attempt_number, passed, score, exp_awarded)
+      VALUES (${userId}, ${character.id}, ${tier}, ${attemptNumber}, ${passed}, ${score}, ${expAwarded})
+    `
+
+    if (passed) {
+      await sql`UPDATE characters SET final_exam_passed = true WHERE id = ${character.id} AND user_id = ${userId}`
+      const expResult = await applyExpGain(userId, character.id, character.level, STAGE_EXAM_PASS_EXP)
+      const evolveResult = await maybeEvolveAgeTier(userId, character.id, expResult.newLevel, character.mission_unlocked_tier, true, character.reset_at)
+      const message = buildStageExamResultMessage(true, score, evolveResult.newAgeTierStageLabel)
+
+      res.status(200).json({
+        passed: true,
+        score,
+        results,
+        message,
+        attemptNumber,
+        expAwarded: STAGE_EXAM_PASS_EXP,
+        missionProgress: evolveResult.missionProgress,
+        evolved: evolveResult.evolved,
+        newAgeTier: evolveResult.newAgeTier,
+        newAgeTierLabel: evolveResult.newAgeTierLabel,
+      })
+      return
+    }
+
+    const message = buildStageExamResultMessage(false, score, null)
+    res.status(200).json({
+      passed: false,
+      score,
+      results,
+      message,
+      attemptNumber,
+      expAwarded: 0,
+      wrongQuestions: resolvedQuestions
+        .filter((q, idx) => answers[idx] !== q.correctIndex)
+        .map((q) => ({ id: q.id, text: q.text, choices: q.choices, correctAnswer: q.choices[q.correctIndex], explanation: q.explanation })),
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on stage-exam-submit', err)
+    res.status(500).json({ error: '채점 중 오류가 발생했어요.' })
   }
 }
 

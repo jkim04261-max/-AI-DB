@@ -17,6 +17,7 @@ import type { AccountTierState } from '../../hooks/useAccountTier'
 import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
 import FinalExamModal from './FinalExamModal'
+import StageExamModal from './StageExamModal'
 import CardMatchGame from '../games/CardMatchGame'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
@@ -113,6 +114,24 @@ export default function InteractionPanel({
   // 항상 서버 응답(studyGenerate의 exampleCount/drafts)이 기준이고,
   // 이 값은 버튼을 누르기 전에 미리 몇 개가 나올지 보여주는 안내용이다.
   const exampleCountForThisCharacter = selfStudyDraftCountForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
+  // 지시서(단계별 시험·합격·재도전): teen~veteran_40s(마지막 단계
+  // master_50s는 다음 연령대가 없어 제외, toddler는 자신만의 기존
+  // 종합 최종 시험 흐름을 그대로 쓰므로 제외)만 이 "단계 평가 시험"
+  // 대상이다. teen은 아래 teenStep==='complete' 블록이 직접 진입
+  // 버튼을 보여주고, junior_20s/career_30s/veteran_40s는 전용 단계
+  // 흐름이 없어 missionProgress 카드 바로 아래에 공용 배너로 보여준다.
+  const isStageExamEligibleTier = characterAgeTier !== 'toddler' && characterAgeTier !== 'master_50s'
+  // 지시서(단계별 시험·합격·재도전): teen~veteran_40s가 그 단계의
+  // 목표 문제 수를 모두 채우면 연다(아래 effect가 자동으로 한 번 열고,
+  // 버튼으로도 다시 열 수 있다).
+  const [stageExamOpen, setStageExamOpen] = useState(false)
+  // allConfirmed가 true로 "막 바뀐" 순간에만 자동으로 한 번 열기 위한
+  // 가드 — missionProgress가 갱신될 때마다(저장 성공 등) effect가
+  // 다시 돌기 때문에, 이 ref 없이는 사용자가 모달을 닫아도 다음
+  // 리렌더에서 또 열려버린다. allConfirmed가 false로 돌아오면(다음
+  // 단계로 진화해 새 단계의 진행도가 다시 시작되면) 풀어서, 그 다음
+  // 단계에서도 다시 한 번 자동으로 열리게 한다.
+  const stageExamAutoOpenedRef = useRef(false)
   // PR #65: profession==='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가
   // 실제로 입력한 직업명을 보여준다 — 기존 49개 직업은 1바이트도 안 바뀜.
   const professionLabel = profession === 'custom' ? character.customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]
@@ -179,6 +198,23 @@ export default function InteractionPanel({
       cancelled = true
     }
   }, [character.companionType, getMissionProgress])
+
+  // 지시서(단계별 시험·합격·재도전) 1번: "학습 분량을 모두 완료하면,
+  // 자동으로 '최종 시험(단계 평가)' 모달을 띄우세요" — missionProgress가
+  // allConfirmed로 바뀌는 순간 StageExamModal을 한 번 자동으로 연다.
+  // toddler는 이 effect의 대상이 아니다(isStageExamEligibleTier가
+  // false) — 기존 "종합 최종 시험 보기" 버튼 흐름을 그대로 쓴다.
+  useEffect(() => {
+    if (!missionProgress) return
+    if (isStageExamEligibleTier && missionProgress.allConfirmed) {
+      if (!stageExamAutoOpenedRef.current) {
+        stageExamAutoOpenedRef.current = true
+        setStageExamOpen(true)
+      }
+    } else {
+      stageExamAutoOpenedRef.current = false
+    }
+  }, [isStageExamEligibleTier, missionProgress])
 
   // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): 8~9살
   // (toddler) 단계는 "① 직접입력 3문제 → ② 객관식 3문제(세트 전부
@@ -590,6 +626,26 @@ export default function InteractionPanel({
         </div>
       )}
 
+      {/* 지시서(단계별 시험·합격·재도전): junior_20s/career_30s/
+          veteran_40s는 toddler/teen 같은 전용 단계 흐름이 없는 자유
+          입력 화면이라, 이 공용 배너가 "단계 평가 시험 보기" 진입점
+          역할을 한다(teen은 아래 teenStep==='complete' 블록이 직접
+          보여주므로 여기서는 제외). */}
+      {isStageExamEligibleTier && !isTeenStagedFlow && missionProgress?.allConfirmed && (
+        <div data-testid="stage-exam-ready-banner" className="flex flex-col gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-3.5">
+          <p className="text-base font-bold text-emerald-300">이 단계 학습을 모두 마쳤어요! 🎉</p>
+          <p className="text-sm font-semibold text-emerald-200/70">단계 평가 시험에 합격하면 다음 연령대로 올라가요.</p>
+          <button
+            type="button"
+            data-testid="open-stage-exam-button"
+            onClick={() => setStageExamOpen(true)}
+            className="self-start rounded-xl border-2 border-emerald-300/60 bg-gradient-to-b from-emerald-400/40 to-emerald-600/30 px-5 py-3 text-base font-extrabold text-emerald-100 shadow-[0_3px_0_rgba(16,185,129,0.4)]"
+          >
+            📝 단계 평가 시험 보기
+          </button>
+        </div>
+      )}
+
       {historyLoading && <p className="text-base font-semibold text-cyan-200/60">대화 기록을 불러오는 중...</p>}
       {historyError && <p className="text-base font-semibold text-rose-300">{historyError}</p>}
 
@@ -878,9 +934,33 @@ export default function InteractionPanel({
         />
       )}
       {isTeenStagedFlow && teenStep === 'complete' && (
-        <p data-testid="teen-staged-flow-complete" className="text-base font-bold text-emerald-300">
-          오늘 학습을 모두 마쳤어요! 🎉
-        </p>
+        <div data-testid="teen-staged-flow-complete" className="flex flex-col gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-4">
+          <p className="text-base font-bold text-emerald-300">오늘 학습을 모두 마쳤어요! 🎉</p>
+          <p className="text-sm font-semibold text-emerald-200/70">단계 평가 시험에 합격하면 20대로 올라갈 수 있어요.</p>
+          <button
+            type="button"
+            data-testid="open-stage-exam-button"
+            onClick={() => setStageExamOpen(true)}
+            className="self-start rounded-xl border-2 border-emerald-300/60 bg-gradient-to-b from-emerald-400/40 to-emerald-600/30 px-5 py-3 text-base font-extrabold text-emerald-100 shadow-[0_3px_0_rgba(16,185,129,0.4)]"
+          >
+            📝 단계 평가 시험 보기
+          </button>
+        </div>
+      )}
+      {stageExamOpen && (
+        <StageExamModal
+          companionType={character.companionType}
+          onClose={() => setStageExamOpen(false)}
+          onPassed={(progress) => {
+            // 단계 평가 시험 자체는 지식 저장이 아니라(onKnowledgeSaved를
+            // 부르지 않는다) 식사/알바 로테이션 카운터를 건드리지
+            // 않는다 — 진화만 반영한다(toddler의 FinalExamModal.onPassed와
+            // 같은 원칙).
+            setMissionProgress(progress)
+            pushLine('character', '단계 평가 시험 합격! 다음 단계로 성장했어요. 🎉')
+            flashPose('happy', 2500)
+          }}
+        />
       )}
 
       {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력

@@ -131,15 +131,26 @@ export interface EvolveResult {
 // 진화는 항상 한 단계씩).
 //
 // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
-// toddler→teen 전환만은 6미션(allConfirmed)에 더해 finalExamPassed도
+// toddler→teen 전환은 6(→8)미션(allConfirmed)에 더해 finalExamPassed도
 // true여야 한다 — 종합 최종 시험 합격(api/character.ts의
 // handleSubmitFinalExam) 또는 패스권 구매(handlePurchaseFinalExamPass)
 // 둘 중 하나가 characters.final_exam_passed를 true로 바꾼 뒤 이 함수를
 // 다시 부르면, 그제서야 실제로 진화한다 — 두 경로가 완전히 같은 진화
 // 로직을 공유해서 "패스권=시험을 본 것으로 쳐준다"는 뜻이 코드로도
-// 그대로 드러난다. 6/6을 막 채웠지만 아직 시험을 안 봤다면 이 루프는
-// 여기서 멈추고(evolved:false) toddler에 머무른다 — 그 "멈춘" 상태를
-// InteractionPanel이 "종합 최종 시험 보기" 진입점으로 보여준다.
+// 그대로 드러난다. 미션을 막 채웠지만 아직 시험을 안 봤다면 이 루프는
+// 여기서 멈추고(evolved:false) 그 단계에 머무른다 — 그 "멈춘" 상태를
+// InteractionPanel이 "시험 보기" 진입점으로 보여준다.
+//
+// 지시서(단계별 시험·합격·재도전): 위 finalExamPassed 게이트가 이제
+// toddler→teen뿐 아니라 teen 이후 모든 전환(teen→junior_20s→
+// career_30s→veteran_40s→master_50s)에도 똑같이 적용된다(아래 루프
+// 본문 참고) — teen 이후 단계는 handleGetStageExam/handleSubmitStageExam
+// (toddler 전용 handleGetFinalExam/handleSubmitFinalExam과는 별도,
+// 재시험 횟수 제한이 없는 "무한 재도전" 버전)이 같은
+// characters.final_exam_passed 컬럼을 세팅한다. master_50s는 다음
+// 단계가 없어(nextAgeTier가 null) 이 게이트를 아예 타지 않는다 —
+// "60대 최종 마스터 시험"은 여전히 미션 완료 자체로 판정하는 기존
+// 방식(InteractionPanel의 master-exam-passed 배지) 그대로다.
 export async function maybeEvolveAgeTier(
   userId: number,
   characterId: number,
@@ -159,6 +170,18 @@ export async function maybeEvolveAgeTier(
 
   let evolved = false
   let newTier: AgeTier | null = null
+  // 지시서(단계별 시험·합격·재도전): toddler→teen 전환에만 걸려 있던
+  // "종합 최종 시험 합격" 게이트를 모든 연령대 전환에 적용한다 — teen
+  // 이후 단계도 이제 각자 자신의 "단계 평가 시험"(api/character.ts의
+  // handleGetStageExam/handleSubmitStageExam, toddler 전용
+  // handleGetFinalExam/handleSubmitFinalExam과는 별도)에 합격해야
+  // 다음 연령대로 진화한다. examPassed는 "지금 티어의 시험에 합격했는지"
+  // 만 나타내므로, 한 단계를 통과한 뒤에는 즉시 false로 되돌리고(아래
+  // UPDATE에서 DB의 final_exam_passed/final_exam_attempts도 함께
+  // 리셋) 다음 티어가 자기 자신의 시험을 다시 요구하게 한다 — 그러지
+  // 않으면 레벨이 한 번에 여러 단계를 건너뛸 때 뒤의 단계들이 시험
+  // 없이 통과해버린다.
+  let examPassed = finalExamPassed
   for (;;) {
     const next = nextAgeTier(tier)
     if (!next) break
@@ -167,14 +190,15 @@ export async function maybeEvolveAgeTier(
     if (!levelSatisfied) break
     const progress = await getMissionProgress(userId, characterId, tier, resetAt)
     if (!progress.allConfirmed) break
-    if (tier === 'toddler' && !finalExamPassed) break
+    if (!examPassed) break
     await sql`
-      UPDATE characters SET mission_unlocked_tier = ${next}
+      UPDATE characters SET mission_unlocked_tier = ${next}, final_exam_passed = false, final_exam_attempts = 0
       WHERE id = ${characterId} AND user_id = ${userId}
     `
     tier = next
     evolved = true
     newTier = next
+    examPassed = false
   }
 
   const missionProgress = await getMissionProgress(userId, characterId, tier, resetAt)

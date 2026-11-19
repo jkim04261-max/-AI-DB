@@ -27,6 +27,8 @@ const state = {
   nextExamAttemptId: 1,
   quizFirsts: new Set(), // `${characterId}|${questionId}`
   examFirsts: new Set(), // `${characterId}|${profession}`
+  stageExamHistory: [], // { id, user_id, character_id, age_tier, attempt_number, passed, score, exp_awarded }
+  nextStageExamHistoryId: 1,
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -74,6 +76,8 @@ function reset() {
   state.nextExamAttemptId = 1
   state.quizFirsts.clear()
   state.examFirsts.clear()
+  state.stageExamHistory = []
+  state.nextStageExamHistoryId = 1
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -497,11 +501,25 @@ function sql(strings, ...values) {
   // matcher below, since both start with "UPDATE characters" but have
   // completely different bound params. Same statement shape covers both
   // "hold at the current tier" (level outran missions) and "advance to the
-  // next tier" (both conditions met) — only the bound value differs. ---
+  // next tier" (both conditions met) — only the bound value differs.
+  //
+  // 지시서(단계별 시험·합격·재도전): 실제로 티어를 전진시키는 쪽의
+  // 문장은 이제 final_exam_passed/final_exam_attempts도 같은
+  // UPDATE에서 리터럴(false/0, 바인드 파라미터 아님)로 함께 리셋한다 —
+  // 다음 단계가 자기 자신의 단계 평가 시험을 다시 요구하게 하기
+  // 위해서다(api/_lib/characterMissions.ts 참고). 이 두 컬럼까지
+  // 쓰는 문장인지는 리터럴 텍스트로 구분한다(바인드 값이 아니라서
+  // values에는 안 들어있다). ---
   if (has(text, 'UPDATE characters', 'SET mission_unlocked_tier =')) {
     const [tier, characterId, userId] = values
     const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
-    if (row) row.mission_unlocked_tier = tier
+    if (row) {
+      row.mission_unlocked_tier = tier
+      if (has(text, 'final_exam_passed = false') && has(text, 'final_exam_attempts = 0')) {
+        row.final_exam_passed = false
+        row.final_exam_attempts = 0
+      }
+    }
     return Promise.resolve({ rows: [] })
   }
 
@@ -1082,6 +1100,34 @@ function sql(strings, ...values) {
       created_at: new Date().toISOString(),
     }
     state.examAttempts.push(entry)
+    return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // --- 지시서(단계별 시험·합격·재도전): api/character.ts의
+  // handleGetStageExam/handleSubmitStageExam 전용 성장 이력 테이블.
+  // SELECT COUNT 매처를 먼저 두어(이 테이블명을 공유하는 유일한 두
+  // 문장이라 순서 자체는 중요하지 않지만, INSERT 매처와의 혼동을
+  // 막기 위해 COUNT를 먼저 체크한다). ---
+  if (has(text, 'COUNT(*)', 'character_stage_exam_history')) {
+    const [characterId, userId, ageTier] = values
+    const count = state.stageExamHistory.filter((r) => r.character_id === characterId && r.user_id === userId && r.age_tier === ageTier).length
+    return Promise.resolve({ rows: [{ count }] })
+  }
+  if (has(text, 'INSERT INTO character_stage_exam_history')) {
+    const [userId, characterId, ageTier, attemptNumber, passed, score, expAwarded] = values
+    const id = state.nextStageExamHistoryId++
+    const entry = {
+      id,
+      user_id: userId,
+      character_id: characterId,
+      age_tier: ageTier,
+      attempt_number: attemptNumber,
+      passed,
+      score,
+      exp_awarded: expAwarded,
+      created_at: new Date().toISOString(),
+    }
+    state.stageExamHistory.push(entry)
     return Promise.resolve({ rows: [{ ...entry }] })
   }
 

@@ -581,6 +581,45 @@ export function ensureGrowthTables() {
   return growthTablesReady
 }
 
+let stageExamHistoryTableReady: Promise<unknown> | null = null
+
+// 지시서(단계별 시험·합격·재도전): teen~veteran_40s 각 연령대의 "단계
+// 평가 시험" 시도 이력 — toddler 전용 final_exam_attempts/
+// final_exam_passed(그때그때 "최신 상태만" 담는 컬럼)와는 별개로,
+// 합격/불합격 "매 시도"를 전부 남겨 유저의 성장 이력을 추적할 수
+// 있게 한다(지시서 3번: "시험 결과(합격 여부, 시도 횟수, 획득 XP,
+// 진도)를 유저 DB에 저장"). 위 ensureGrowthTables의
+// character_exam_attempts(회계사/가수 전용 "문제 풀기" 시스템)와는
+// 완전히 다른, 새로 추가하는 테이블이다.
+export function ensureStageExamHistoryTable() {
+  if (!stageExamHistoryTableReady) {
+    stageExamHistoryTableReady = (async () => {
+      await ensureCharacterTables()
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_stage_exam_history (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          age_tier TEXT NOT NULL CHECK (age_tier IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s')),
+          attempt_number SMALLINT NOT NULL,
+          passed BOOLEAN NOT NULL,
+          score INTEGER NOT NULL,
+          exp_awarded INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_stage_exam_history_character_tier_idx
+          ON character_stage_exam_history (character_id, age_tier, created_at DESC)
+      `
+    })().catch((err) => {
+      stageExamHistoryTableReady = null
+      throw err
+    })
+  }
+  return stageExamHistoryTableReady
+}
+
 export { sql }
 
 export interface UserRow {
