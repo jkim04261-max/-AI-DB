@@ -24,7 +24,6 @@ import ItemMarket from '../components/grow/ItemMarket'
 import UniversalMarket from '../components/grow/UniversalMarket'
 import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
-import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import JobEventModal from '../components/grow/JobEventModal'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
@@ -130,6 +129,39 @@ const PART_TIME_JOB_EARNING_WON = 20_000
 // 등으로 연동"이라고 범위를 토들러로 한정했다.
 const ERRAND_EARNING_WON = 10_000
 
+// 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지): "동일한 유저가
+// 하루에 여러 번 이벤트를 발생시켜 용돈을 중복으로 받지 못하도록" —
+// job-history/region(PR #132/#133)과 같은 이유(Preview/Production DB
+// 분리 미검증)로, 지시서가 준 선택지("DB 또는 로컬 스토리지") 중 더
+// 안전한 로컬 스토리지에 "오늘 이미 보상을 받았는지"만 날짜 문자열로
+// 기록한다. 서버 daily_teach_usage 등이 쓰는 Asia/Seoul 자정 기준과
+// 맞추기 위해 toLocaleDateString을 그 타임존으로 고정한다.
+const ERRAND_CLAIMED_STORAGE_PREFIX = 'nuri-ai:errand-claimed:'
+
+function todayKST(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' })
+}
+
+function hasClaimedErrandToday(userId: number, companionType: CompanionType): boolean {
+  try {
+    return window.localStorage.getItem(`${ERRAND_CLAIMED_STORAGE_PREFIX}${userId}:${companionType}`) === todayKST()
+  } catch {
+    // 저장소를 읽을 수 없으면(프라이빗 모드 등) 막지 않는 쪽을 택한다 —
+    // 이 기록은 "하루 중복 방지"라는 부가 안전장치일 뿐, 읽기 실패를
+    // "이미 받았다"로 잘못 해석해 이벤트 자체를 영영 못 띄우면 안 된다.
+    return false
+  }
+}
+
+function markErrandClaimedToday(userId: number, companionType: CompanionType) {
+  try {
+    window.localStorage.setItem(`${ERRAND_CLAIMED_STORAGE_PREFIX}${userId}:${companionType}`, todayKST())
+  } catch {
+    // 기록 실패해도 보상 지급 자체는 막지 않는다 — 다음 번에 중복
+    // 방지가 느슨해질 뿐, 정상적으로 받은 보상을 취소할 이유는 아니다.
+  }
+}
+
 // 지시서(10대 전용 알바 시스템): 위 toddler 전용 심부름과 같은 자리
 // ("알바" 슬롯)를 teen에서만 한 번 더 분기한다 — 동네 전경을 걸어가
 // 상점(설거지·서빙·편의점 중 무작위)에 도착해 관련 3문제를 풀고,
@@ -229,12 +261,13 @@ export default function GrowPage() {
   const [isHungry, setIsHungry] = useState(false)
   const [hungryQuizRemaining, setHungryQuizRemaining] = useState<number | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
-  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트):
-  // errandEventOpen=심부름 선택 모달 표시 중, homeworkQuizOpen=거절
-  // 후 숙제 퀴즈 모달 표시 중 — 둘이 동시에 열리지는 않는다(거절
-  // 클릭이 errandEventOpen을 닫고 그 즉시 homeworkQuizOpen을 연다).
+  // 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지): errandEventOpen=
+  // 심부름 선택 모달 표시 중. (PR #121이 "거절=숙제 퀴즈 페널티"를
+  // 넣었지만, 이번 지시서 7번이 "거절 시 어떠한 페널티도 없음"을
+  // 명시적으로 요구해 사용자 확인 후 그 페널티 연결을 제거했다 —
+  // HomeworkQuizModal.tsx 파일 자체는 BookstoreOutingOverlay.tsx와
+  // 같은 이유로 삭제하지 않았다, CLAUDE.md "기존 파일 삭제 금지".)
   const [errandEventOpen, setErrandEventOpen] = useState(false)
-  const [homeworkQuizOpen, setHomeworkQuizOpen] = useState(false)
   // 지시서(10대 전용 알바 시스템): jobEventOpen=알바(걷기→도착→퀴즈→결과)
   // 모달 표시 중 — teen 커리큘럼 안에서 두 번 별도로 열린다(카드 맞추기
   // 직후 1회, 기존 알바 슬롯에서 1회).
@@ -392,7 +425,6 @@ export default function GrowPage() {
     setHungryQuizRemaining(null)
     setFeedError(null)
     setErrandEventOpen(false)
-    setHomeworkQuizOpen(false)
     setJobEventOpen(false)
     let cancelled = false
     // PR #51(직업 선택 제한 해제): "문제 풀기"를 지원하지 않는 직업(48개)
@@ -726,24 +758,23 @@ export default function GrowPage() {
   const handleErrandAccept = () => {
     setErrandEventOpen(false)
     if (wallet.balanceWon !== null) reward(wallet, ERRAND_EARNING_WON, 'errand')
+    // 지시서(중복 보상 방지): 오늘 이미 받았다고 기록해, 같은 날 다시
+    // 이 이벤트가 뜨지 않게 한다(아래 handleKnowledgeSaved의 게이트).
+    if (user && character) markErrandClaimedToday(user.id, character.companionType)
     setMoneyPopup(ERRAND_EARNING_WON)
     const t = setTimeout(() => setMoneyPopup(null), 1800)
     outingTimeoutsRef.current.push(t)
-    showBubble(`심부름 성공! 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받았어요.`)
+    // 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지): 요구한
+    // 토스트 문구를 그대로 쓴다("심부름 완료!").
+    showBubble(`심부름 완료! 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받았어요.`)
   }
 
-  // "거절하기" 클릭 — 심부름 모달을 닫고 곧바로 숙제 퀴즈 모달을 연다.
+  // 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지): "거절 선택
+  // 시: 보상 없이 모달을 닫고 즉시 학습 화면으로 복귀합니다. (어떠한
+  // 페널티도 없음)" — 사용자 확인 후 PR #121의 숙제 퀴즈 페널티
+  // 연결을 제거했다(위 state 선언부 주석 참고).
   const handleErrandDecline = () => {
     setErrandEventOpen(false)
-    setHomeworkQuizOpen(true)
-  }
-
-  // 숙제 퀴즈 정답 — 모달을 닫고 기존 학습 화면으로 돌아간다. 보상은
-  // 없다(심부름을 거절한 데 대한 페널티일 뿐, 숙제 자체가 돈을 벌어다
-  // 주지는 않는다).
-  const handleHomeworkComplete = () => {
-    setHomeworkQuizOpen(false)
-    showBubble('휴, 숙제를 다 했어요!')
   }
 
   // 지시서(10대 전용 알바 시스템): 패널을 닫고 알바(걷기→도착→퀴즈→결과)
@@ -794,8 +825,16 @@ export default function GrowPage() {
         triggerHungryEvent()
       } else {
         outingCycleRef.current = 0
+        // 지시서(중복 보상 방지): "이미 보상을 받은 상태라면 이벤트가
+        // 다시 발생하지 않도록" — 오늘 이미 심부름 보상을 받았으면
+        // 이번 휴식 주기에는 아무 이벤트도 띄우지 않고 조용히 건너뛴다
+        // (알바/식사와 달리 심부름은 toddler 전용이라 대신 보여줄
+        // 다른 연령대 전용 이벤트가 없다 — 10대용 알바를 대신 띄우면
+        // 나이에 맞지 않는 내용이 섞인다).
         if (ageTier === 'toddler') {
-          triggerErrandEvent()
+          if (!user || !hasClaimedErrandToday(user.id, character.companionType)) {
+            triggerErrandEvent()
+          }
         } else if (ageTier === 'teen') {
           triggerJobEvent()
         } else {
@@ -1158,7 +1197,6 @@ export default function GrowPage() {
                       onDecline={handleErrandDecline}
                     />
                   )}
-                  {homeworkQuizOpen && <HomeworkQuizModal onComplete={handleHomeworkComplete} />}
                   {jobEventOpen && (
                     <JobEventModal
                       companionType={character.companionType}
