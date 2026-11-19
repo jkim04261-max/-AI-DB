@@ -33,6 +33,10 @@ const state = {
   nextPersonalKnowledgeLogAttachmentId: 1,
   auditLogs: [], // { id, user_id, action, resource_type, resource_id, created_at }
   nextAuditLogId: 1,
+  marketItems: [], // { id, seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility, created_at, updated_at }
+  nextMarketItemId: 1,
+  purchases: [], // { id, buyer_user_id, market_item_id, license_key, purchased_at }
+  nextPurchaseId: 1,
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -86,6 +90,10 @@ function reset() {
   state.nextPersonalKnowledgeLogAttachmentId = 1
   state.auditLogs = []
   state.nextAuditLogId = 1
+  state.marketItems = []
+  state.nextMarketItemId = 1
+  state.purchases = []
+  state.nextPurchaseId = 1
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -754,6 +762,20 @@ function sql(strings, ...values) {
     })
   }
 
+  // --- 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및
+  // 정책 설계): handleRegisterMarketItem이 등록 전 소유권+위험 키워드
+  // 검사를 위해 원본 학습 기록을 읽는 조회. 'SELECT k.final_content'로
+  // 시작해 아래의 다른 character_knowledge_entries 매처들(전부 ${}가
+  // 아니라 리터럴 컬럼 목록으로 시작)과 겹치지 않는다. 반드시 그
+  // 매처들보다 먼저 와야 한다. ---
+  if (has(text, 'SELECT k.final_content', 'character_knowledge_entries k')) {
+    const [sourceId, userId] = values
+    const entry = state.knowledgeEntries.find((e) => e.id === sourceId)
+    const character = entry ? state.characters.find((c) => c.id === entry.character_id) : null
+    if (!entry || !character || character.user_id !== userId) return Promise.resolve({ rows: [] })
+    return Promise.resolve({ rows: [{ final_content: entry.final_content }] })
+  }
+
   // --- api/character.ts: handleSaveKnowledge's idempotency lookup (checked
   // before the general list/count matchers below, since this one also
   // selects FROM character_knowledge_entries) ---
@@ -1087,6 +1109,16 @@ function sql(strings, ...values) {
     row.updated_at = new Date().toISOString()
     return Promise.resolve({ rows: [{ id: row.id }] })
   }
+  // --- 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및
+  // 정책 설계): handleRegisterMarketItem의 소유권 확인 조회
+  // ('SELECT content FROM personal_knowledge_logs WHERE id = ... AND
+  // user_id = ...') — 반드시 아래의 단일 행 조회 매처('WHERE id ='만
+  // 보고 user_id는 안 보는)보다 먼저 와야 한다. ---
+  if (has(text, 'SELECT content FROM personal_knowledge_logs', 'AND user_id')) {
+    const [id, userId] = values
+    const row = state.personalKnowledgeLogs.find((l) => l.id === id && l.user_id === userId)
+    return Promise.resolve({ rows: row ? [{ content: row.content }] : [] })
+  }
   if (has(text, 'DELETE FROM personal_knowledge_logs')) {
     const [id, userId] = values
     const idx = state.personalKnowledgeLogs.findIndex((l) => l.id === id && l.user_id === userId)
@@ -1146,6 +1178,74 @@ function sql(strings, ...values) {
       created_at: new Date().toISOString(),
     })
     return Promise.resolve({ rows: [{ id }] })
+  }
+
+  // --- 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및
+  // 정책 설계): market_items/purchases 매처. INSERT는 'RETURNING id,
+  // seller_user_id, ...'로 생성된 행 전체를 돌려주므로 INSERT 매처
+  // 자체가 그 행을 만들어 반환한다(위 personal_knowledge_logs처럼
+  // "INSERT 후 별도 SELECT로 되읽기" 방식이 아니다). ---
+  if (has(text, 'INSERT INTO market_items')) {
+    const [sellerUserId, sourceType, sourceId, title, description, priceWon, reviewStatus, flaggedKeywords, visibility] = values
+    const id = state.nextMarketItemId++
+    const now = new Date().toISOString()
+    const row = {
+      id,
+      seller_user_id: sellerUserId,
+      source_type: sourceType,
+      source_id: sourceId,
+      title,
+      description,
+      price_won: priceWon,
+      review_status: reviewStatus,
+      flagged_keywords: flaggedKeywords,
+      visibility,
+      created_at: now,
+      updated_at: now,
+    }
+    state.marketItems.push(row)
+    return Promise.resolve({ rows: [{ ...row }] })
+  }
+  // scope='mine' 목록: 판매자 본인의 상품을 상태 무관하게 전부.
+  if (has(text, 'FROM market_items', 'WHERE seller_user_id =', 'ORDER BY created_at DESC') && !has(text, "!=")) {
+    const [userId] = values
+    const rows = state.marketItems
+      .filter((m) => m.seller_user_id === userId)
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .map((m) => ({ ...m }))
+    return Promise.resolve({ rows })
+  }
+  // 공개 목록(기본값): 검수를 통과해(review_status='approved') 공개
+  // 설정(visibility='public')된, 남이 등록한 상품만. 'approved'/'public'은
+  // 리터럴이라 values에는 userId 하나만 들어온다.
+  if (has(text, 'FROM market_items', "seller_user_id !=")) {
+    const [userId] = values
+    const rows = state.marketItems
+      .filter((m) => m.review_status === 'approved' && m.visibility === 'public' && m.seller_user_id !== userId)
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .map((m) => ({ ...m }))
+    return Promise.resolve({ rows })
+  }
+  // 구매 시 상품 단건 조회 — WHERE id = 만 있고 seller_user_id 조건은
+  // 없다(위 두 목록 매처와 겹치지 않는다).
+  if (has(text, 'FROM market_items', 'WHERE id =')) {
+    const [id] = values
+    const row = state.marketItems.find((m) => m.id === id)
+    return Promise.resolve({ rows: row ? [{ ...row }] : [] })
+  }
+  if (has(text, 'SELECT id FROM purchases')) {
+    const [buyerUserId, marketItemId] = values
+    const row = state.purchases.find((p) => p.buyer_user_id === buyerUserId && p.market_item_id === marketItemId)
+    return Promise.resolve({ rows: row ? [{ id: row.id }] : [] })
+  }
+  if (has(text, 'INSERT INTO purchases')) {
+    const [buyerUserId, marketItemId, licenseKey] = values
+    const id = state.nextPurchaseId++
+    const purchasedAt = new Date().toISOString()
+    state.purchases.push({ id, buyer_user_id: buyerUserId, market_item_id: marketItemId, license_key: licenseKey, purchased_at: purchasedAt })
+    return Promise.resolve({ rows: [{ id, purchased_at: purchasedAt }] })
   }
 
   // --- api/admin/stats.ts: 집계 전용 COUNT 쿼리 4개(users/conversations/

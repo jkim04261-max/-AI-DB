@@ -1,4 +1,4 @@
-import { FileSearch, Image, MessageCircle, Sprout, type LucideIcon } from 'lucide-react'
+import { FileSearch, Image, MessageCircle, Share2, ShoppingBag, Sprout, type LucideIcon } from 'lucide-react'
 
 // 지시서(메인 대시보드 전면 개편): 예전엔 이 4개(원래 6개 — "비서·직원
 // 만들기" 제거, "동영상 만들기"+"음악 만들기"를 "미디어 만들기" 하나로
@@ -69,4 +69,27 @@ export const homeFeatures: HomeFeature[] = [
   // 없앴을 뿐, CardMatchGame 컴포넌트와 /card-match 라우트의 페이지 파일
   // 자체는 "기존 파일 삭제 금지" 규칙에 따라 그대로 둔다 — App.tsx에서
   // 라우트 등록만 빼서 더 이상 그 경로로 들어갈 수 없게 막았다.
+  {
+    id: 'market',
+    icon: ShoppingBag,
+    title: '지식 마켓',
+    description: '나만의 노하우를 나누고 거래해보세요',
+    // 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+    // 설계) 4번: 사이드바에 "준비 중" 안내만 뜨는 입구를 둔다. 이미
+    // 출시된 "만능마켓"(GameMenu.tsx action='universalMarket',
+    // UniversalMarket.tsx, PR #88 — AI 키우기 화면 안에서 가상용돈으로
+    // 옷/배경을 사는 완전히 다른 기능)과 이름이 겹치면 사용자가
+    // 혼동하므로, 여기서는 지시서 1~3번이 실제로 다루는 개념인 "유저
+    // 간 지식/마스터 패키지 거래"를 그대로 드러내는 이름(지식 마켓)을
+    // 썼다 — CLAUDE.md 절대 규칙 4("기존 마켓과 상태를 섞지 말 것")를
+    // 지키기 위한 선택이다.
+    action: { kind: 'comingSoon' },
+  },
+  {
+    id: 'share',
+    icon: Share2,
+    title: '공유',
+    description: '기록과 성장을 다른 사람과 나눠보세요',
+    action: { kind: 'comingSoon' },
+  },
 ]
