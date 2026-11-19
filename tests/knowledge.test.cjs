@@ -1098,10 +1098,12 @@ async function run() {
     t.assert(tenthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'teen', '미션은 끝났지만 레벨이 부족해 teen에 고정된 채다')
 
-    // 6) 미션은 이미 다 끝났는데 레벨만 모자란 경우 — 순수 XP 액션만으로도
-    // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
-    // 판정을 공유한다는 뜻). teen의 10회로 당일 하루 제한을 이미 다
-    // 썼으므로, 다시 날짜를 넘긴다.
+    // 6) 미션은 이미 다 끝났는데 레벨만 모자란 경우 — 레벨만 채워지면
+    // (퀴즈든 지식 저장이든 같은 판정을 공유한다는 뜻) "그 즉시" 진화하던
+    // 것은 toddler→teen 전환에만 걸려 있던 옛 동작이다. 지시서(단계별
+    // 시험·합격·재도전) 이후로는 teen→junior_20s 전환도 미션+레벨을 모두
+    // 채웠어도 "단계 평가 시험"에 합격해야만 실제로 진화한다. teen의
+    // 10회로 당일 하루 제한을 이미 다 썼으므로, 다시 날짜를 넘긴다.
     mock.setFakeDate('2026-03-03')
     kateNuri.level = 10
     kateNuri.exp = 4500
@@ -1127,9 +1129,31 @@ async function run() {
       }),
       levelOnlySave,
     )
-    t.assert(levelOnlySave.body.evolved === true, '미션은 이미 끝나 있었으므로 레벨만 채워지면(퀴즈든 지식 저장이든) 그 즉시 진화한다')
-    t.assert(levelOnlySave.body.newAgeTier === 'junior_20s', '다음 연령대는 junior_20s다')
-    t.assert(levelOnlySave.body.savedReply?.includes('청년 단계로 성장했어요'), 'junior_20s 진화 문구에는 그 단계의 스테이지 라벨("청년")이 쓰인다')
+    t.assert(
+      levelOnlySave.body.evolved === false,
+      '미션과 레벨을 모두 채웠어도, 단계 평가 시험에 합격하기 전까지는 진화하지 않는다(지시서: 단계별 시험·합격·재도전)',
+    )
+    t.assert(kateNuri.mission_unlocked_tier === 'teen', '시험 합격 전까지는 teen에 그대로 머문다')
+
+    // teen의 단계 평가 시험에 합격하면 그제서야 junior_20s로 진화한다.
+    geminiBehavior = { kind: 'json', result: buildFinalExamMock(10, 5) }
+    const kateStageExam = mockRes()
+    await characterHandler(kateReq({ method: 'GET', query: { action: 'stage-exam', companionType: 'nuri' } }), kateStageExam)
+    t.assert(kateStageExam.statusCode === 200, '미션+레벨을 모두 채우면 단계 평가 시험을 받을 수 있다')
+    const kateStageSubmit = mockRes()
+    await characterHandler(
+      kateReq({
+        method: 'POST',
+        query: { action: 'stage-exam-submit' },
+        body: { companionType: 'nuri', examToken: kateStageExam.body.examToken, answers: kateStageExam.body.questions.map(() => 0) },
+      }),
+      kateStageSubmit,
+    )
+    t.assert(kateStageSubmit.body.passed === true, '모두 맞히면 합격한다')
+    t.assert(kateStageSubmit.body.evolved === true, '단계 평가 시험에 합격하면 그 즉시 진화한다')
+    t.assert(kateStageSubmit.body.newAgeTier === 'junior_20s', '다음 연령대는 junior_20s다')
+    t.assert(kateStageSubmit.body.message.includes('청년 단계로 성장했어요'), 'junior_20s 진화 문구에는 그 단계의 스테이지 라벨("청년")이 쓰인다')
+    t.assert(kateNuri.mission_unlocked_tier === 'junior_20s', 'DB에도 junior_20s로 기록된다')
   }
 
   // --- PR #65: 자유 직업 입력("숲해설가") + 지식 카드 10종 분류 +
@@ -2161,6 +2185,181 @@ async function run() {
     const oneGood = mockRes()
     await characterHandler(focusReq2({ method: 'POST', query: { action: 'study-generate' }, body: { companionType: 'nuri' } }), oneGood)
     t.assert(oneGood.body.focusPercent === 90, '3개 중 1개라도 적합하면 집중력은 떨어지지 않는다')
+  }
+
+  // --- 지시서(단계별 시험·합격·재도전): teen 이후 단계의 "단계 평가
+  // 시험"(stage-exam/stage-exam-submit) — teen→junior_20s 전환으로
+  // 대표 확인한다. toddler 전용 종합 최종 시험(final-exam)과 달리
+  // 재시험 횟수 제한·차단이 없고(무한 재도전), 매 시도(합격/불합격
+  // 모두)가 character_stage_exam_history에 남는다. ---
+  {
+    mock.seedUser(25, { email: 'ren@test.com' })
+    const renCookie = cookieHeaderFor(auth, 25, 0, 'ren@test.com')
+    const renReq = (overrides = {}) => ({ headers: { cookie: renCookie }, query: {}, ...overrides })
+    await characterHandler(renReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+    await characterHandler(renReq({ method: 'PATCH', body: { companionType: 'nuri', profession: 'accountant' } }), mockRes())
+    const renNuri = mock.state.characters.find((c) => c.user_id === 25 && c.companion_type === 'nuri')
+    // toddler 단계(8문제+종합 최종 시험)를 건너뛰고 바로 teen
+    // 커리큘럼부터 시작하도록 직접 고정한다 — 이 테스트는 teen 이후
+    // 단계의 일반화된 게이트만 확인한다. 레벨은 미리 junior_20s 기준
+    // (AGE_TIER_MIN_LEVEL.junior_20s=10)을 채워둬, "레벨 조건"이 아니라
+    // "단계 평가 시험 합격" 게이트 하나만을 테스트한다(레벨 조건 자체는
+    // 위 kate 테스트가 이미 확인한다). exp도 레벨 10에 해당하는 누적값
+    // (4500 = 100×(1+...+9), kate 테스트와 동일한 계산)으로 같이
+    // 맞춰둔다 — 그러지 않으면 뒤이은 지식 저장의 XP 지급(applyExpGain)
+    // 이 exp만으로 레벨을 다시 계산해(levelForExp) 이 레벨을 조용히
+    // 덮어써버린다.
+    renNuri.level = 10
+    renNuri.exp = 4500
+    renNuri.mission_unlocked_tier = 'teen'
+
+    // teen은 toddler 전용 종합 최종 시험(final-exam)을 볼 수 없다.
+    const toddlerOnlyExam = mockRes()
+    await characterHandler(renReq({ method: 'GET', query: { action: 'final-exam', companionType: 'nuri' } }), toddlerOnlyExam)
+    t.assert(toddlerOnlyExam.statusCode === 400, 'teen은 toddler 전용 종합 최종 시험(final-exam)을 볼 수 없다(400)')
+
+    // teen의 단계 평가 시험도 10문제를 다 채우기 전에는 받을 수 없다.
+    const tooEarlyStage = mockRes()
+    await characterHandler(renReq({ method: 'GET', query: { action: 'stage-exam', companionType: 'nuri' } }), tooEarlyStage)
+    t.assert(tooEarlyStage.statusCode === 400, '10문제를 다 채우기 전에는 단계 평가 시험을 받을 수 없다(400)')
+
+    const teachOnceRen = async (n, missionType) => {
+      geminiBehavior = {
+        kind: 'json',
+        result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'teen' },
+      }
+      const verifyRes = mockRes()
+      await characterHandler(
+        renReq({ method: 'POST', query: { action: 'verify-knowledge' }, body: { companionType: 'nuri', title: `렌 지식 ${n}`, content: `10대도 알 수 있는 내용 ${n}` } }),
+        verifyRes,
+      )
+      const saveRes = mockRes()
+      await characterHandler(
+        renReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: `렌 지식 ${n}`,
+            originalContent: `10대도 알 수 있는 내용 ${n}`,
+            finalContent: `10대도 알 수 있는 내용 ${n}`,
+            verificationToken: verifyRes.body.verificationToken,
+            requestId: `req-ren-${n}`,
+            missionType,
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+    const teachCardGameRen = async (n) => {
+      const completeRes = mockRes()
+      await characterHandler(renReq({ method: 'POST', query: { action: 'complete-card-game' }, body: { companionType: 'nuri' } }), completeRes)
+      const saveRes = mockRes()
+      await characterHandler(
+        renReq({
+          method: 'POST',
+          query: { action: 'save-knowledge' },
+          body: {
+            companionType: 'nuri',
+            title: completeRes.body.knowledge.title,
+            originalContent: completeRes.body.knowledge.content,
+            finalContent: completeRes.body.knowledge.content,
+            verificationToken: completeRes.body.verificationToken,
+            requestId: `req-ren-card-${n}`,
+            missionType: 'card_game',
+          },
+        }),
+        saveRes,
+      )
+      return saveRes
+    }
+
+    // teen 요구치(characterAge.ts의 MISSIONS_REQUIRED_PER_TYPE_OVERRIDE.teen):
+    // knowhow 6 + objective 3 + card_game 1 = 10.
+    await teachOnceRen(1, 'knowhow')
+    await teachOnceRen(2, 'knowhow')
+    await teachOnceRen(3, 'knowhow')
+    await teachOnceRen(4, 'knowhow')
+    await teachOnceRen(5, 'knowhow')
+    await teachOnceRen(6, 'knowhow')
+    await teachOnceRen(7, 'objective')
+    await teachOnceRen(8, 'objective')
+    await teachOnceRen(9, 'objective')
+    const lastSave = await teachCardGameRen(10)
+    t.assert(lastSave.body.missionProgress.allConfirmed === true, '10문제를 모두 채우면 allConfirmed가 true다')
+    t.assert(!lastSave.body.evolved, '미션만 다 채운 것만으로는 아직 진화하지 않는다(시험 게이트) — teen→junior_20s 전환에도 이제 시험이 걸려있다')
+    t.assert(renNuri.mission_unlocked_tier === 'teen', '단계 평가 시험을 보기 전까지는 teen에 그대로 고정된다(진짜 게이트)')
+
+    // 단계 평가 시험을 받으면 teen 요구치(10문제)만큼 문제가 나온다.
+    geminiBehavior = { kind: 'json', result: buildFinalExamMock(10, 5) }
+    const stageExam1 = mockRes()
+    await characterHandler(renReq({ method: 'GET', query: { action: 'stage-exam', companionType: 'nuri' } }), stageExam1)
+    t.assert(stageExam1.statusCode === 200, '10문제를 모두 채우면 단계 평가 시험을 받을 수 있다')
+    t.assert(stageExam1.body.questions.length === 10, '시험 문제는 정확히 10문제다(teen 요구치와 동일)')
+    t.assert(stageExam1.body.attemptNumber === 1, '첫 시험은 1차 시도다')
+
+    // 1문제라도 틀리면 불합격이다(부분 점수 없음) — toddler와 달리
+    // 차단되지 않고(무한 재도전), 매 시도가 이력에 남는다.
+    const answersOneWrong = stageExam1.body.questions.map((_, i) => (i === 0 ? 1 : 0))
+    const stageSubmit1 = mockRes()
+    await characterHandler(
+      renReq({
+        method: 'POST',
+        query: { action: 'stage-exam-submit' },
+        body: { companionType: 'nuri', examToken: stageExam1.body.examToken, answers: answersOneWrong },
+      }),
+      stageSubmit1,
+    )
+    t.assert(stageSubmit1.body.passed === false, '1문제라도 틀리면 불합격이다(부분 점수 없음)')
+    t.assert(stageSubmit1.body.blocked === undefined, 'teen 이후 단계 평가 시험은 toddler의 차단(blocked) 개념이 없다')
+    t.assert(stageSubmit1.body.message.includes('아쉽습니다'), '지시서가 준 불합격 문구("아쉽습니다. 다시 도전해 볼까요?")를 그대로 쓴다')
+    t.assert(renNuri.mission_unlocked_tier === 'teen', '불합격해도 teen에 그대로 머문다')
+    t.assert(
+      mock.state.stageExamHistory.filter((r) => r.character_id === renNuri.id && r.age_tier === 'teen').length === 1,
+      '불합격 시도도 성장 이력(character_stage_exam_history)에 1건 남는다',
+    )
+
+    // 차단 없이 곧바로 재도전(= 새 GET)할 수 있다("틀린 문제만" 재시험
+    // 토큰 재사용이 아니라 매번 새로 생성·서명한다 — examToken 자체의
+    // 바이트 동일성은 질문 내용·만료시각이 우연히 같은 밀리초에 겹치면
+    // 달라지지 않을 수 있어 단언하지 않는다. 새로 생성된다는 사실은
+    // attemptNumber 증가와 Gemini 재호출로 충분히 확인된다).
+    const callCountBeforeRetake = geminiCallCount
+    const stageExam2 = mockRes()
+    await characterHandler(renReq({ method: 'GET', query: { action: 'stage-exam', companionType: 'nuri' } }), stageExam2)
+    t.assert(stageExam2.statusCode === 200, '불합격해도 바로 재도전(새 GET)할 수 있다(무한 재도전)')
+    t.assert(stageExam2.body.attemptNumber === 2, '두 번째 시도로 집계된다')
+    t.assert(geminiCallCount === callCountBeforeRetake + 1, '재도전은 toddler의 재시험(틀린 문제만, Gemini 재호출 없음)과 달리 매번 새로 Gemini를 호출해 문제를 다시 받는다')
+
+    const allCorrect = stageExam2.body.questions.map(() => 0)
+    const stageSubmit2 = mockRes()
+    await characterHandler(
+      renReq({
+        method: 'POST',
+        query: { action: 'stage-exam-submit' },
+        body: { companionType: 'nuri', examToken: stageExam2.body.examToken, answers: allCorrect },
+      }),
+      stageSubmit2,
+    )
+    t.assert(stageSubmit2.body.passed === true, '모두 맞히면 합격한다')
+    t.assert(stageSubmit2.body.evolved === true && stageSubmit2.body.newAgeTier === 'junior_20s', '합격하면 그 즉시 junior_20s로 진화한다')
+    t.assert(stageSubmit2.body.expAwarded > 0, '합격 보너스 XP가 함께 지급된다(지시서 3번: "획득 XP")')
+    t.assert(renNuri.mission_unlocked_tier === 'junior_20s', 'DB에도 junior_20s로 기록된다')
+    t.assert(
+      renNuri.final_exam_passed === false,
+      '진화하면서 final_exam_passed가 다음 단계(junior_20s)를 위해 다시 false로 리셋된다 — 그러지 않으면 다음 전환이 시험 없이 통과해버린다',
+    )
+    t.assert(
+      mock.state.stageExamHistory.filter((r) => r.character_id === renNuri.id && r.age_tier === 'teen').length === 2,
+      '합격 시도까지 포함해 teen 단계 시도 이력이 총 2건 쌓인다(지시서 3번: "성장 이력을 추적")',
+    )
+
+    // junior_20s로 갓 진화한 캐릭터는 아직 그 단계 미션을 하나도 안
+    // 채웠으므로, junior_20s의 단계 평가 시험도 아직 받을 수 없다.
+    const juniorTooEarly = mockRes()
+    await characterHandler(renReq({ method: 'GET', query: { action: 'stage-exam', companionType: 'nuri' } }), juniorTooEarly)
+    t.assert(juniorTooEarly.statusCode === 400, 'junior_20s로 진화해도 그 단계 미션을 채우기 전에는 단계 평가 시험을 볼 수 없다(400)')
   }
 
   return t.summary()

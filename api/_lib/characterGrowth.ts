@@ -11,6 +11,13 @@ export const EXAM_PASS_EXP = 50
 // 시험 합격 기준 — 전체 문항 중 이 비율 이상 정답이면 합격.
 export const EXAM_PASS_THRESHOLD = 0.6
 
+// 지시서(단계별 시험·합격·재도전): teen~veteran_40s 각 연령대의 "단계
+// 평가 시험" 합격 보너스 — 그 단계 미션(KNOWLEDGE_SAVE_EXP×N)으로 이미
+// 레벨을 채웠을 캐릭터에게 얹는 추가 보너스일 뿐, 진화 여부를 좌우하는
+// 수치는 아니다. 위 EXAM_PASS_EXP(완전히 다른 "직업 시험" 시스템,
+// character_exam_attempts)와는 별개 상수다.
+export const STAGE_EXAM_PASS_EXP = 20
+
 // 레벨 L에서 L+1로 올라가는 데 필요한 XP(그 레벨 "안에서" 쌓아야 하는 양).
 export function expThresholdForLevel(level: number): number {
   return level * 100

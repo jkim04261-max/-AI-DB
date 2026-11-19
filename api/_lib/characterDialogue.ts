@@ -113,5 +113,19 @@ export function buildFinalExamResultMessage(passed: boolean, score: number, atte
   return `아쉽지만 ${score}점으로 틀린 문제가 있었어요(모두 정답이어야 합격). 틀린 문제만 다시 복습하고 재시험을 봐요!`
 }
 
+// 지시서(단계별 시험·합격·재도전): teen~veteran_40s의 "단계 평가 시험"
+// 결과 문구 — toddler 전용 buildFinalExamResultMessage와 달리 재시험
+// 횟수 제한·차단 상태가 없다(무한 재도전, 재도전은 항상 새 문제
+// 세트를 통째로 다시 받는다 — "틀린 문제만" 재시험이 아니다). 그래서
+// 그쪽의 attemptNumber 분기 문구를 그대로 쓰지 않고, 지시서가 준
+// 불합격 문구("아쉽습니다. 다시 도전해 볼까요?")를 그대로 쓴다.
+export function buildStageExamResultMessage(passed: boolean, score: number, evolvedStageLabel: string | null): string {
+  if (passed) {
+    const evolvedText = evolvedStageLabel ? ` 🎉 ${evolvedStageLabel} 단계로 성장했어요!` : ''
+    return `단계 평가 시험 합격이에요! ${score}점(모두 정답)을 받았어요. 정말 대단해요!${evolvedText}`
+  }
+  return `아쉽습니다. 다시 도전해 볼까요? (${score}점, 모두 정답이어야 합격이에요)`
+}
+
 export const KNOWLEDGE_VS_MODEL_DISCLAIMER =
   '레벨·XP는 게임 속 성장 지표예요. 실제 Gemini AI 모델의 성능이 바뀌는 것은 아니에요.'

@@ -63,6 +63,13 @@ async function mockCharacterApi(
     // 않는 테스트를 위한 기본값, 다른 onXxx들과 같은 패턴).
     onFinalExam?: (route: Route) => Promise<void>
     onFinalExamSubmit?: (route: Route) => Promise<void>
+    // 지시서(단계별 시험·합격·재도전): teen~veteran_40s의 "단계 평가
+    // 시험" 전용 — 지정하지 않으면 2문제(둘 다 정답은 0번)짜리 기본
+    // 시험을 내려주고, 제출은 모두 0번을 골랐을 때만 합격(즉시 다음
+    // 연령대로 진화) 처리한다. toddler 전용 onFinalExam/onFinalExamSubmit
+    // 과 달리 blocked/retakeExamToken 개념이 없다(무한 재도전).
+    onStageExam?: (route: Route) => Promise<void>
+    onStageExamSubmit?: (route: Route) => Promise<void>
     onPurchaseFinalExamPass?: (route: Route) => Promise<void>
     onResetCharacterProgress?: (route: Route) => Promise<void>
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
@@ -324,6 +331,57 @@ async function mockCharacterApi(
           evolved: passed,
           newAgeTier: passed ? 'teen' : null,
           newAgeTierLabel: passed ? '10대' : null,
+        }),
+      })
+      return
+    }
+    if (method === 'GET' && action === 'stage-exam') {
+      if (options.onStageExam) {
+        await options.onStageExam(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: [
+            { id: 'mock-se-1', text: '단계 평가 문제 1', choices: ['정답', '오답1', '오답2'] },
+            { id: 'mock-se-2', text: '단계 평가 문제 2', choices: ['정답', '오답1', '오답2'] },
+          ],
+          examToken: 'mock-stage-exam-token',
+          attemptNumber: 1,
+          passScore: 100,
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'stage-exam-submit') {
+      if (options.onStageExamSubmit) {
+        await options.onStageExamSubmit(route)
+        return
+      }
+      // 기본값은 이 단계 자체를 다루지 않는 테스트를 위한 것이라, 어느
+      // 연령대든 안전하게 "아직 다음 단계로 넘어가지 않음"으로 채점한다
+      // (toddler 전용 final-exam-submit과 달리, 다음 연령대가
+      // teen으로 고정돼 있지 않아 기본값만으로는 알 수 없다 — 실제
+      // 진화를 확인하는 테스트는 onStageExamSubmit을 직접 지정한다).
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const passed = (body.answers ?? []).every((a) => a === 0)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed,
+          score: passed ? 100 : 0,
+          results: [],
+          message: passed ? '단계 평가 시험 합격이에요! 100점(모두 정답)을 받았어요. 정말 대단해요!' : '아쉽습니다. 다시 도전해 볼까요?',
+          attemptNumber: 1,
+          expAwarded: passed ? 20 : 0,
+          wrongQuestions: [],
+          missionProgress: null,
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
         }),
       })
       return
@@ -2995,13 +3053,55 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
         contentType: 'application/json',
         body: JSON.stringify({
           entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
-          savedReply: progress.allConfirmed ? '청년 단계로 성장했어요!' : '배웠어요!',
+          // 지시서(단계별 시험·합격·재도전): 10문제를 모두 채워도 이제
+          // 더 이상 그 즉시 진화하지 않는다 — teen→junior_20s 전환도
+          // 단계 평가 시험(stage-exam)에 합격해야만 진화한다(아래
+          // onStageExam/onStageExamSubmit 참고).
+          savedReply: '배웠어요!',
           expAwarded: 10,
           exp: saveCount * 10,
           level: 5,
           leveledUp: false,
           missionProgress: progress,
-          ...(progress.allConfirmed ? { evolved: true, newAgeTier: 'junior_20s', newAgeTierLabel: '20대' } : {}),
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
+        }),
+      })
+    },
+    // 지시서(단계별 시험·합격·재도전): teen의 10문제를 모두 채우면
+    // InteractionPanel이 이 시험을 자동으로 띄운다 — teen 요구치(10)와
+    // 같은 개수의 문제를 내려준다.
+    onStageExam: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: Array.from({ length: 10 }, (_, i) => ({ id: `se-${i}`, text: `단계 평가 문제 ${i + 1}`, choices: ['정답', '오답1', '오답2'] })),
+          examToken: 'tok-stage-exam',
+          attemptNumber: 1,
+          passScore: 100,
+        }),
+      })
+    },
+    onStageExamSubmit: async (route) => {
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const passed = (body.answers ?? []).every((a) => a === 0)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed,
+          score: passed ? 100 : 0,
+          results: [],
+          message: passed ? '단계 평가 시험 합격이에요! 100점(모두 정답)을 받았어요. 정말 대단해요! 🎉 청년 단계로 성장했어요!' : '아쉽습니다. 다시 도전해 볼까요?',
+          attemptNumber: 1,
+          expAwarded: passed ? 20 : 0,
+          wrongQuestions: [],
+          missionProgress: passed ? junior20sMissionProgress : missionProgressFor(),
+          evolved: passed,
+          newAgeTier: passed ? 'junior_20s' : null,
+          newAgeTierLabel: passed ? '20대' : null,
         }),
       })
     },
@@ -3144,7 +3244,18 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await expect(page.getByTestId('teen-direct-step-label')).toContainText('⑤단계')
   await teachKnowhow(6)
 
-  // 10문제를 모두 마치면 20대(junior_20s)로 진화한다.
+  // 지시서(단계별 시험·합격·재도전): 10문제를 모두 마치면 그 즉시
+  // 진화하지 않고, "단계 평가 시험"이 자동으로 뜬다 — 10문제를 모두
+  // 맞혀야 합격한다(부분 점수 없음).
+  await expect(page.getByTestId('stage-exam-step')).toBeVisible()
+  for (let i = 0; i < 10; i++) {
+    await page.getByTestId(`stage-exam-choice-${i}-0`).click()
+  }
+  await page.getByTestId('stage-exam-submit-button').click()
+  await expect(page.getByTestId('stage-exam-passed')).toBeVisible()
+  await page.getByRole('button', { name: '확인' }).click()
+
+  // 합격하면 20대(junior_20s)로 진화한다.
   await expect(page.getByTestId('evolution-banner')).toBeVisible()
   await expect(page.getByTestId('evolution-banner')).toContainText('청년')
 
@@ -3155,6 +3266,115 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await page.getByRole('button', { name: '닫기' }).click()
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('mission-progress-summary')).toContainText('20대 성장 미션 (0/20)')
+})
+
+// 지시서(단계별 시험·합격·재도전) 2번: "불합격 시: '아쉽습니다. 다시
+// 도전해 볼까요?' 메시지와 함께 재도전 버튼을 제공하세요. (무한 재도전
+// 가능)" — toddler 전용 종합 최종 시험과 달리 재시험 횟수 제한·차단이
+// 없다는 것을, teen의 단계 평가 시험으로 직접 확인한다(1차 불합격 →
+// 재도전(새 문제 세트) → 합격 → junior_20s로 진화).
+test('failing the teen stage exam shows the retry message and button, and retrying with a fresh question set can still pass and evolve', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  const teenAllConfirmed = {
+    ageTier: 'teen',
+    ageTierLabel: '10대',
+    byType: {
+      objective: { type: 'objective', confirmed: 3, required: 3, complete: true },
+      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+      knowhow: { type: 'knowhow', confirmed: 6, required: 6, complete: true },
+      card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
+    },
+    confirmedTotal: 10,
+    requiredTotal: 10,
+    allConfirmed: true,
+    nextAgeTier: 'junior_20s',
+    nextAgeTierLabel: '20대',
+  }
+  let stageExamCallCount = 0
+
+  await mockCharacterApi(page, {
+    characters: [{ ...NURI_ACCOUNTANT, age_tier: 'teen', level: 5 }],
+    onMissions: async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ missionProgress: teenAllConfirmed }) })
+    },
+    onStageExam: async (route) => {
+      stageExamCallCount += 1
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          // 재도전이 실제로 "새 문제 세트"를 받는지 토큰으로 구분한다.
+          questions: Array.from({ length: 10 }, (_, i) => ({ id: `se-${stageExamCallCount}-${i}`, text: `단계 평가 문제 ${i + 1}`, choices: ['정답', '오답1', '오답2'] })),
+          examToken: `tok-stage-exam-${stageExamCallCount}`,
+          attemptNumber: stageExamCallCount,
+          passScore: 100,
+        }),
+      })
+    },
+    onStageExamSubmit: async (route) => {
+      const body = route.request().postDataJSON() as { answers?: number[] }
+      const passed = (body.answers ?? []).every((a) => a === 0)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed,
+          score: passed ? 100 : 0,
+          results: [],
+          message: passed
+            ? '단계 평가 시험 합격이에요! 100점(모두 정답)을 받았어요. 정말 대단해요! 🎉 청년 단계로 성장했어요!'
+            : '아쉽습니다. 다시 도전해 볼까요? (0점, 모두 정답이어야 합격이에요)',
+          attemptNumber: stageExamCallCount,
+          expAwarded: passed ? 20 : 0,
+          wrongQuestions: passed ? [] : [{ id: 'se-wrong', text: '단계 평가 문제 1', choices: ['정답', '오답1', '오답2'], correctAnswer: '정답', explanation: '정답은 첫 번째예요.' }],
+          missionProgress: teenAllConfirmed,
+          evolved: passed,
+          newAgeTier: passed ? 'junior_20s' : null,
+          newAgeTierLabel: passed ? '20대' : null,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  // 10문제를 이미 다 채운 상태라 패널이 열리는 즉시 단계 평가 시험이
+  // 자동으로 뜬다(지시서 1번: "자동으로 ... 모달을 띄우세요").
+  await expect(page.getByTestId('stage-exam-step')).toBeVisible()
+  for (let i = 0; i < 10; i++) {
+    await page.getByTestId(`stage-exam-choice-${i}-1`).click() // 일부러 오답(1번)을 고른다
+  }
+  await page.getByTestId('stage-exam-submit-button').click()
+
+  await expect(page.getByTestId('stage-exam-failed-retry')).toBeVisible()
+  await expect(page.getByTestId('stage-exam-failed-retry')).toContainText('아쉽습니다. 다시 도전해 볼까요?')
+  await expect(page.getByTestId('stage-exam-retry-button')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).not.toBeVisible()
+
+  // 재도전 — 차단 없이 곧바로 새 문제 세트를 받는다(토큰이 바뀐다).
+  await page.getByTestId('stage-exam-retry-button').click()
+  await expect(page.getByTestId('stage-exam-step')).toBeVisible()
+  await expect(page.getByTestId('stage-exam-question-0')).toContainText('단계 평가 문제 1')
+  for (let i = 0; i < 10; i++) {
+    await page.getByTestId(`stage-exam-choice-${i}-0`).click() // 이번엔 전부 정답(0번)을 고른다
+  }
+  await page.getByTestId('stage-exam-submit-button').click()
+
+  await expect(page.getByTestId('stage-exam-passed')).toBeVisible()
+  await page.getByRole('button', { name: '확인' }).click()
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청년')
+  // 재도전이 실제로 새 GET(= Gemini 재호출과 동등한 서버 왕복)을
+  // 거쳤는지 — "틀린 문제만" 재시험 토큰 재사용이 아니라는 확인. 정확히
+  // 2회가 아니라 "최소 2회"만 확인하는 이유는 React StrictMode가 개발
+  // 서버에서 마운트 effect를 의도적으로 한 번 더 실행해(다른 모달들의
+  // loadExam 패턴도 전부 같다) 호출 수가 늘어날 수 있어서다 — 이
+  // 테스트가 실제로 확인하려는 것은 "재도전이 새 토큰/새 문제로 이어지는
+  // 새 GET"이라는 사실 자체다.
+  expect(stageExamCallCount).toBeGreaterThanOrEqual(2)
 })
 
 // 지시서(학습 플로우 전면 개편) 요청 3번: 2단계 객관식 2문제는 "세트"
