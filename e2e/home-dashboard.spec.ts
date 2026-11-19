@@ -96,9 +96,35 @@ test('sidebar no longer shows 비서·직원 만들기, and 동영상/음악 are
 
   const media = sidebar.getByText('미디어 만들기', { exact: true })
   await expect(media).toBeVisible()
-  await expect(sidebar.getByText('준비 중')).toBeVisible()
+  // 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+  // 설계) 이후로 사이드바에 "지식 마켓"/"공유"도 같은 "준비 중" 배지를
+  // 쓰므로, 더 이상 사이드바 전체에서 하나만 찾을 수 없다 — 미디어
+  // 만들기 버튼 하나로 좁혀서 확인한다.
+  const mediaButton = sidebar.locator('button', { hasText: '미디어 만들기' })
+  await expect(mediaButton.getByText('준비 중')).toBeVisible()
 
   await media.click()
+  await expect(page.getByText('현재 준비 중인 기능입니다.')).toBeVisible()
+})
+
+// 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+// 설계) 4번: 사이드바에 "지식 마켓"/"공유" 입구를 두고, 클릭하면
+// "준비 중" 안내만 뜬다(실제 마켓 화면은 후속 개발). 이미 출시된
+// "만능마켓"(AI 키우기 화면 안의 아이템 상점, GameMenu.tsx)과는 이름이
+// 다르다 — src/data/homeFeatures.ts의 주석 참고.
+test('sidebar shows 지식 마켓/공유 placeholder entries that only show a 준비 중 notice', async ({ page }) => {
+  await setup(page)
+
+  const sidebar = page.locator('aside')
+
+  const market = sidebar.getByText('지식 마켓', { exact: true })
+  await expect(market).toBeVisible()
+  await market.click()
+  await expect(page.getByText('현재 준비 중인 기능입니다.')).toBeVisible()
+
+  const share = sidebar.getByText('공유', { exact: true })
+  await expect(share).toBeVisible()
+  await share.click()
   await expect(page.getByText('현재 준비 중인 기능입니다.')).toBeVisible()
 })
 

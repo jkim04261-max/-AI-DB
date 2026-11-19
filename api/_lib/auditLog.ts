@@ -8,7 +8,11 @@ import { ensureAuditLogTable, sql } from './db'
 // 진행도처럼 "콘텐츠"가 아닌 조회는 대상이 아니다 — 로그 자체가
 // 소음이 되지 않도록, 실제 개인 기록 콘텐츠에 대한 접근만 남긴다.
 export type AuditAction = 'view' | 'create' | 'update' | 'delete'
-export type AuditResourceType = 'character_knowledge' | 'character_messages' | 'personal_knowledge_log'
+// 'market_item': 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터
+// 구조 및 정책 설계) — 지식/마스터 패키지를 마켓에 등록하는 것도 개인
+// 콘텐츠(personal_knowledge_log/character_knowledge)를 바탕으로 새
+// 레코드를 만드는 행위라 같은 감사 로그 대상으로 묶는다.
+export type AuditResourceType = 'character_knowledge' | 'character_messages' | 'personal_knowledge_log' | 'market_item'
 
 // 감사 로그 기록 실패가 실제 기능을 막으면 안 된다 — 로그는 보안
 // 점검을 위한 보조 수단이지, 서비스 이용을 차단하는 조건이 아니다.

@@ -685,6 +685,98 @@ export interface AuditLogRow {
   created_at: string
 }
 
+let marketTablesReady: Promise<unknown> | null = null
+
+// 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+// 설계): 마켓/공유/거래 자체는 "후속 개발"이지만, 나중에 화면을 붙일 때
+// DB 구조를 다시 바꾸지 않도록 미리 설계해 둔다.
+//  - market_items: 유저가 자신의 personal_knowledge_logs(지식 기록장,
+//    지시서 11번) 또는 character_knowledge_entries(누리·두리에게 가르친
+//    지식) 중 하나를 "상품"으로 등록한 것. source_id는 두 테이블 중
+//    어느 쪽을 가리키는지 source_type으로만 구분하는 폴리모픽
+//    참조라 FK를 걸지 않는다(걸면 둘 중 하나만 가리킬 수 있는 CHECK
+//    제약을 Postgres에서 표현하기 번거롭고, 삭제 시 처리도 더
+//    복잡해진다) — 애플리케이션 코드(api/character.ts)가 저장 전에
+//    소유권을 직접 검증한다.
+//  - [비밀번호 판매 금지] market_items 자체는 원본 콘텐츠를 담지
+//    않는다(제목/설명/가격만). 구매자는 purchases.license_key라는
+//    별도 발급 키로 "열람 권한"만 받고, 판매자의 원본 비밀번호나
+//    콘텐츠 원문은 어떤 API 응답에도 담지 않는다(api/character.ts의
+//    handleMarketPurchase 참고).
+//  - review_status: 검수 시스템이 없는 지금, 의료/위험 제조 기술·
+//    영업비밀·개인정보·저작권/특허 키워드가 감지되면 'under_review'로
+//    강제하고 visibility도 'private'로 강제한다(지시서 2번) — 검수
+//    시스템이 생기기 전까지 그런 자료는 절대 공개 구매 목록에 뜨지
+//    않는다.
+export function ensureMarketTables() {
+  if (!marketTablesReady) {
+    marketTablesReady = (async () => {
+      await ensureUsersTable()
+      await sql`
+        CREATE TABLE IF NOT EXISTS market_items (
+          id SERIAL PRIMARY KEY,
+          seller_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          source_type TEXT NOT NULL CHECK (source_type IN ('personal_knowledge_log', 'character_knowledge')),
+          source_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          price_won INTEGER NOT NULL DEFAULT 0 CHECK (price_won >= 0),
+          review_status TEXT NOT NULL DEFAULT 'approved' CHECK (review_status IN ('approved', 'under_review', 'rejected')),
+          flagged_keywords TEXT,
+          visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'partial', 'public')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS market_items_seller_user_id_idx
+          ON market_items (seller_user_id, created_at DESC)
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS purchases (
+          id SERIAL PRIMARY KEY,
+          buyer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          market_item_id INTEGER NOT NULL REFERENCES market_items(id) ON DELETE CASCADE,
+          license_key TEXT NOT NULL UNIQUE,
+          purchased_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (buyer_user_id, market_item_id)
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS purchases_buyer_user_id_idx
+          ON purchases (buyer_user_id, purchased_at DESC)
+      `
+    })().catch((err) => {
+      marketTablesReady = null
+      throw err
+    })
+  }
+  return marketTablesReady
+}
+
+export interface MarketItemRow {
+  id: number
+  seller_user_id: number
+  source_type: 'personal_knowledge_log' | 'character_knowledge'
+  source_id: number
+  title: string
+  description: string | null
+  price_won: number
+  review_status: 'approved' | 'under_review' | 'rejected'
+  flagged_keywords: string | null
+  visibility: 'private' | 'partial' | 'public'
+  created_at: string
+  updated_at: string
+}
+
+export interface PurchaseRow {
+  id: number
+  buyer_user_id: number
+  market_item_id: number
+  license_key: string
+  purchased_at: string
+}
+
 export { sql }
 
 export interface UserRow {

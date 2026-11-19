@@ -5,15 +5,19 @@ import {
   ensureCharacterMessagesTable,
   ensureGrowthTables,
   ensurePersonalKnowledgeLogTables,
+  ensureMarketTables,
   sql,
   type CharacterRow,
   type KnowledgeEntryRow,
   type CharacterMessageRow,
   type PersonalKnowledgeLogRow,
   type PersonalKnowledgeLogAttachmentRow,
+  type MarketItemRow,
 } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
 import { recordDataAccess } from './_lib/auditLog'
+import { detectRiskyKeywords } from './_lib/marketContentReview'
+import { randomBytes } from 'node:crypto'
 import {
   GeminiApiError,
   GeminiConfigError,
@@ -274,6 +278,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleListKnowledgeLog(req, res, session.sub)
       return
     }
+    // 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+    // 설계): 마켓 화면 자체는 후속 개발이라 아직 없지만, 등록·구매
+    // 정책을 미리 테스트할 수 있도록 API만 먼저 둔다 — 역시
+    // companionType/character와 무관해 이 파일에 얹었을 뿐이다.
+    if (action === 'market-items') {
+      await handleListMarketItems(req, res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -321,6 +333,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'knowledge-log-delete') {
       await handleDeleteKnowledgeLog(req, res, session.sub)
+      return
+    }
+    if (action === 'market-item-register') {
+      await handleRegisterMarketItem(req, res, session.sub)
+      return
+    }
+    if (action === 'market-purchase') {
+      await handleMarketPurchase(req, res, session.sub)
       return
     }
     await handlePost(req, res, session.sub)
@@ -2127,5 +2147,219 @@ async function handleDeleteKnowledgeLog(req: VercelRequest, res: VercelResponse,
   } catch (err) {
     console.error('[api/character] unexpected error on knowledge-log-delete', err)
     res.status(500).json({ error: '지식 기록을 삭제하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+// 설계): 아래 세 핸들러는 화면(마켓 UI) 없이 데이터 구조·정책만 미리
+// 만들어 둔 것 — 사이드바의 "지식 마켓"/"공유" 항목은 지금은 안내
+// 모달만 띄운다(src/data/homeFeatures.ts). 기존에 이미 출시된
+// "만능마켓"(아이템 마켓, PR #88 — src/components/grow/UniversalMarket.tsx,
+// GameMenu.tsx의 action='universalMarket')은 성장 게임 안에서 가상용돈
+// 으로 옷/배경을 사는 완전히 다른, 이미 동작하는 기능이라 전혀 건드리지
+// 않는다 — 여기서 다루는 "마켓"은 유저 간 지식/마스터 패키지 거래라는
+// 별개의 개념이다(CLAUDE.md 절대 규칙 4: "기존 마켓과 상태를 섞지
+// 말 것").
+function toMarketItemJson(row: MarketItemRow) {
+  // 원본 지식/마스터 지식의 본문(content)은 절대 포함하지 않는다 —
+  // 마켓에는 제목/설명/가격/검수 상태만 노출된다.
+  return {
+    id: row.id,
+    sellerUserId: row.seller_user_id,
+    sourceType: row.source_type,
+    title: row.title,
+    description: row.description,
+    priceWon: row.price_won,
+    reviewStatus: row.review_status,
+    visibility: row.visibility,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+const MARKET_SOURCE_TYPES = new Set(['personal_knowledge_log', 'character_knowledge'])
+const MARKET_VISIBILITIES = new Set(['private', 'partial', 'public'])
+const MAX_MARKET_TITLE_LENGTH = 100
+const MAX_MARKET_DESCRIPTION_LENGTH = 1000
+
+// 목록 조회 — scope='mine'이면 내가 등록한 상품을 상태 무관하게 전부,
+// 그 외(기본값)에는 검수를 통과해 공개된(review_status='approved' AND
+// visibility='public') 다른 사람의 상품만 보여준다. 거래 화면은 후속
+// 개발이지만, 정책(검수 대기는 안 보인다)이 실제로 지켜지는지는 지금
+// API 레벨에서 바로 테스트할 수 있다.
+async function handleListMarketItems(req: VercelRequest, res: VercelResponse, userId: number) {
+  try {
+    await ensureMarketTables()
+    const scope = typeof req.query?.scope === 'string' ? req.query.scope : undefined
+
+    const result =
+      scope === 'mine'
+        ? await sql<MarketItemRow>`
+            SELECT id, seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility, created_at, updated_at
+            FROM market_items
+            WHERE seller_user_id = ${userId}
+            ORDER BY created_at DESC
+          `
+        : await sql<MarketItemRow>`
+            SELECT id, seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility, created_at, updated_at
+            FROM market_items
+            WHERE review_status = 'approved' AND visibility = 'public' AND seller_user_id != ${userId}
+            ORDER BY created_at DESC
+          `
+
+    res.status(200).json({ items: result.rows.map(toMarketItemJson) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on market-items', err)
+    res.status(500).json({ error: '마켓 상품을 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 등록 — 판매자가 가진 personal_knowledge_log 또는 character_knowledge
+// 중 하나를 "상품"으로 만든다. 위험 키워드([의료/위험 제조 기술,
+// 영업비밀, 개인정보, 저작권/특허])가 제목·설명·원본 내용 중 하나에서
+// 발견되면 review_status를 'under_review'로, visibility를 'private'로
+// 강제한다(지시서 2번: "등록 불가 또는 비공개 처리") — 요청에 담긴
+// visibility 값은 이 경우 무시된다.
+async function handleRegisterMarketItem(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { sourceType, sourceId, title, description, priceWon, visibility } = (req.body ?? {}) as {
+    sourceType?: unknown
+    sourceId?: unknown
+    title?: unknown
+    description?: unknown
+    priceWon?: unknown
+    visibility?: unknown
+  }
+
+  if (typeof sourceType !== 'string' || !MARKET_SOURCE_TYPES.has(sourceType)) {
+    res.status(400).json({ error: '어떤 지식을 등록할지 선택해주세요.' })
+    return
+  }
+  if (typeof sourceId !== 'number') {
+    res.status(400).json({ error: '등록할 지식을 찾을 수 없어요.' })
+    return
+  }
+  if (typeof title !== 'string' || !title.trim() || title.trim().length > MAX_MARKET_TITLE_LENGTH) {
+    res.status(400).json({ error: `상품 제목을 ${MAX_MARKET_TITLE_LENGTH}자 이내로 입력해주세요.` })
+    return
+  }
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string' || description.length > MAX_MARKET_DESCRIPTION_LENGTH) {
+      res.status(400).json({ error: `상품 설명은 ${MAX_MARKET_DESCRIPTION_LENGTH}자 이내로 입력해주세요.` })
+      return
+    }
+  }
+  if (typeof priceWon !== 'number' || !Number.isInteger(priceWon) || priceWon < 0) {
+    res.status(400).json({ error: '가격을 올바르게 입력해주세요.' })
+    return
+  }
+  const requestedVisibility = typeof visibility === 'string' && MARKET_VISIBILITIES.has(visibility) ? visibility : 'private'
+
+  try {
+    await ensureMarketTables()
+
+    // 소유권 확인 — 자기 것이 아닌 지식 기록/학습 기록은 상품으로 등록할
+    // 수 없다(personal_knowledge_log는 11번 지시서, character_knowledge는
+    // 캐릭터를 통해 user_id로 간다). 원본 본문(content/final_content)도
+    // 이 조회에서 함께 가져와 위험 키워드 검사에 쓴다 — 응답에는 절대
+    // 포함하지 않는다.
+    let sourceContent: string
+    if (sourceType === 'personal_knowledge_log') {
+      await ensurePersonalKnowledgeLogTables()
+      const owned = await sql<{ content: string }>`
+        SELECT content FROM personal_knowledge_logs WHERE id = ${sourceId} AND user_id = ${userId}
+      `
+      if (!owned.rows[0]) {
+        res.status(404).json({ error: '등록할 지식 기록을 찾을 수 없어요.' })
+        return
+      }
+      sourceContent = owned.rows[0].content
+    } else {
+      const owned = await sql<{ final_content: string }>`
+        SELECT k.final_content
+        FROM character_knowledge_entries k
+        JOIN characters c ON c.id = k.character_id
+        WHERE k.id = ${sourceId} AND c.user_id = ${userId}
+      `
+      if (!owned.rows[0]) {
+        res.status(404).json({ error: '등록할 학습 기록을 찾을 수 없어요.' })
+        return
+      }
+      sourceContent = owned.rows[0].final_content
+    }
+
+    const flagged = detectRiskyKeywords(`${title}\n${description ?? ''}\n${sourceContent}`)
+    const reviewStatus = flagged.length > 0 ? 'under_review' : 'approved'
+    const resolvedVisibility = flagged.length > 0 ? 'private' : requestedVisibility
+
+    const inserted = await sql<MarketItemRow>`
+      INSERT INTO market_items (seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility)
+      VALUES (${userId}, ${sourceType}, ${sourceId}, ${title.trim()}, ${description ?? null}, ${priceWon}, ${reviewStatus}, ${flagged.length > 0 ? flagged.join(', ') : null}, ${resolvedVisibility})
+      RETURNING id, seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility, created_at, updated_at
+    `
+
+    await recordDataAccess(userId, 'create', 'market_item', inserted.rows[0].id)
+
+    res.status(200).json({ item: toMarketItemJson(inserted.rows[0]) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on market-item-register', err)
+    res.status(500).json({ error: '마켓 상품을 등록하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 구매 — [비밀번호 판매 금지] 원칙: 구매에 성공해도 판매자의 원본
+// 지식 내용이나 비밀번호는 응답에 전혀 담지 않는다. 대신 이 구매
+// 건에만 유효한 license_key를 새로 발급해, 나중에 "열람" 화면이
+// 생기면 이 키로 접근 권한만 확인하는 구조로 확장할 수 있게 한다.
+async function handleMarketPurchase(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { marketItemId } = (req.body ?? {}) as { marketItemId?: unknown }
+  if (typeof marketItemId !== 'number') {
+    res.status(400).json({ error: '구매할 상품을 찾을 수 없어요.' })
+    return
+  }
+
+  try {
+    await ensureMarketTables()
+
+    const itemResult = await sql<MarketItemRow>`
+      SELECT id, seller_user_id, source_type, source_id, title, description, price_won, review_status, flagged_keywords, visibility, created_at, updated_at
+      FROM market_items
+      WHERE id = ${marketItemId}
+    `
+    const item = itemResult.rows[0]
+    if (!item || item.review_status !== 'approved' || item.visibility !== 'public') {
+      res.status(404).json({ error: '구매할 수 없는 상품이에요.' })
+      return
+    }
+    if (item.seller_user_id === userId) {
+      res.status(400).json({ error: '내가 등록한 상품은 구매할 수 없어요.' })
+      return
+    }
+
+    const existing = await sql<{ id: number }>`
+      SELECT id FROM purchases WHERE buyer_user_id = ${userId} AND market_item_id = ${marketItemId}
+    `
+    if (existing.rows[0]) {
+      res.status(409).json({ error: '이미 구매한 상품이에요.' })
+      return
+    }
+
+    const licenseKey = randomBytes(24).toString('hex')
+    const inserted = await sql<{ id: number; purchased_at: string }>`
+      INSERT INTO purchases (buyer_user_id, market_item_id, license_key)
+      VALUES (${userId}, ${marketItemId}, ${licenseKey})
+      RETURNING id, purchased_at
+    `
+
+    res.status(200).json({
+      purchase: {
+        id: inserted.rows[0].id,
+        marketItemId,
+        licenseKey,
+        purchasedAt: inserted.rows[0].purchased_at,
+      },
+    })
+  } catch (err) {
+    console.error('[api/character] unexpected error on market-purchase', err)
+    res.status(500).json({ error: '상품을 구매하는 중 오류가 발생했어요.' })
   }
 }

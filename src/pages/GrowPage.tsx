@@ -36,6 +36,8 @@ import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
 import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
+import { useComingSoonNotice } from '../lib/comingSoon'
+import ComingSoonToast from '../components/ComingSoonToast'
 import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
 
@@ -253,6 +255,12 @@ export default function GrowPage() {
   // 않은 상태라, 이번 단계에서는 새 DB 쓰기를 하나도 추가하지 않기로
   // 했다.
   const wallet = useMockWallet()
+  // 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+  // 설계) 3번: "포인트를 현금으로 전환하는 기능은 법률·세무 검토
+  // 전까지 비활성화 상태로 두고, UI에서도 '준비 중'으로 표시"하라는
+  // 지시 — 그런 전환 기능 자체가 지금 어디에도 없어 새로 만들진 않고,
+  // 가상 용돈 배지 옆에 "준비 중" 표시만 추가해 정책이 보이게 한다.
+  const { notice: cashConversionNotice, showComingSoon: showCashConversionComingSoon } = useComingSoonNotice()
   // 지시서(한도 소진 시 구매 유도 UI + 향후 구독 확장 설계): userTier/
   // isUnlimited...(구독 등급 placeholder)만 담는 상태 — 자세한 설계
   // 의도는 useAccountTier.ts 참고. 충전권 보너스는 더 이상 여기 없다
@@ -1042,8 +1050,17 @@ export default function GrowPage() {
             >
               <span>💰 가상 용돈 {wallet.balanceWon.toLocaleString('ko-KR')}원</span>
               <span className="text-[10px] font-normal text-amber-400">(체험판)</span>
+              <button
+                type="button"
+                data-testid="cash-conversion-coming-soon"
+                onClick={showCashConversionComingSoon}
+                className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-normal text-amber-500"
+              >
+                현금 전환 준비 중
+              </button>
             </div>
           )}
+          <ComingSoonToast message={cashConversionNotice} />
 
           {/* 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에
               먹기"를 고른 뒤 문제 풀기를 HUNGRY_QUIZ_PENALTY_COUNT번

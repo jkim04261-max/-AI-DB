@@ -120,6 +120,40 @@ test('creating 누리 shows its card and removes only its own button', async ({ 
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 })
 
+// 지시서(만능마켓·공유·거래 후속 개발을 위한 데이터 구조 및 정책
+// 설계) 3번: "포인트를 현금으로 전환하는 기능은... UI에서도 '준비
+// 중'으로 표시" — 그런 전환 기능 자체가 없어 가상 용돈 배지 옆에
+// "준비 중" 표시만 추가했다(src/pages/GrowPage.tsx).
+test('the virtual-wallet badge shows a disabled "현금 전환 준비 중" button that only opens a coming-soon notice', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST') {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-start-button').click()
+
+  const cashConversionButton = page.getByTestId('cash-conversion-coming-soon')
+  await expect(cashConversionButton).toBeVisible()
+  await expect(cashConversionButton).toHaveText('현금 전환 준비 중')
+
+  await cashConversionButton.click()
+  await expect(page.getByText('현재 준비 중인 기능입니다.')).toBeVisible()
+})
+
 // Stage 1(오프닝 프로필): 취소하면 캐릭터가 생성되지 않고 그대로
 // 생성 버튼 화면으로 돌아간다.
 test('cancelling the opening profile screen creates no character', async ({ page }) => {
