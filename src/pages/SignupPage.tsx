@@ -36,7 +36,7 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      await signup(email, password)
+      await signup(email, password, agreedTerms, agreedPrivacy)
       navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : '회원가입 중 오류가 발생했어요.')

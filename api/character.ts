@@ -13,6 +13,7 @@ import {
   type PersonalKnowledgeLogAttachmentRow,
 } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
+import { recordDataAccess } from './_lib/auditLog'
 import {
   GeminiApiError,
   GeminiConfigError,
@@ -1229,6 +1230,13 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
       `,
     ])
 
+    // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번: 본인이라도
+    // AI 캐릭터의 학습 기록(마스터 아카이브)을 조회할 때마다 감사 로그를
+    // 남긴다. 응답을 막지 않도록(실패해도 조회 자체는 그대로 성공) 먼저
+    // await하되 try/catch 밖(이 함수는 내부에서 이미 에러를 삼킨다)에
+    // 둔다.
+    await recordDataAccess(userId, 'view', 'character_knowledge', character.id)
+
     res.status(200).json({ entries: entries.rows, total: countResult.rows[0].count })
   } catch (err) {
     console.error('[api/character] unexpected error on list knowledge', err)
@@ -1275,6 +1283,11 @@ async function handleListMessages(req: VercelRequest, res: VercelResponse, userI
         WHERE character_id = ${character.id} AND user_id = ${userId}
       `,
     ])
+
+    // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번: 대화 기록도
+    // "가르치기" 과정에서 유저가 실제로 입력한 내용을 담고 있어 접근
+    // 기록을 남긴다(위 handleListKnowledge와 같은 원칙).
+    await recordDataAccess(userId, 'view', 'character_messages', character.id)
 
     res.status(200).json({ messages: messages.rows, total: countResult.rows[0].count })
   } catch (err) {
@@ -1965,6 +1978,11 @@ async function handleListKnowledgeLog(req: VercelRequest, res: VercelResponse, u
       }
     }
 
+    // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번: 지식
+    // 기록장(개인 업무일지)을 조회할 때마다 감사 로그를 남긴다.
+    // resourceId는 null(목록 전체 조회라 특정 한 건이 아님).
+    await recordDataAccess(userId, 'view', 'personal_knowledge_log', null)
+
     res.status(200).json({ entries: orderedIds.map((id) => entriesById.get(id)) })
   } catch (err) {
     console.error('[api/character] unexpected error on knowledge-log', err)
@@ -2072,6 +2090,12 @@ async function handleSaveKnowledgeLog(req: VercelRequest, res: VercelResponse, u
       ORDER BY position
     `
 
+    // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번: 생성/수정도
+    // "접근"이므로 감사 로그를 남긴다 — typeof id === 'number'였는지로
+    // create/update를 구분한다(위에서 이미 그 분기로 UPDATE/INSERT를
+    // 선택했다).
+    await recordDataAccess(userId, typeof id === 'number' ? 'update' : 'create', 'personal_knowledge_log', logId)
+
     res.status(200).json({ entry: toKnowledgeLogJson(savedResult.rows[0], attachmentsResult.rows) })
   } catch (err) {
     console.error('[api/character] unexpected error on knowledge-log-save', err)
@@ -2098,6 +2122,7 @@ async function handleDeleteKnowledgeLog(req: VercelRequest, res: VercelResponse,
       res.status(404).json({ error: '지식 기록을 찾을 수 없어요.' })
       return
     }
+    await recordDataAccess(userId, 'delete', 'personal_knowledge_log', id)
     res.status(200).json({ ok: true })
   } catch (err) {
     console.error('[api/character] unexpected error on knowledge-log-delete', err)

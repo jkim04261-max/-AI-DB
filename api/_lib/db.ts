@@ -28,6 +28,15 @@ export function ensureUsersTable() {
       // 다른 캐릭터에서 못 쓰는 불일치가 생긴다).
       await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_recommend_tickets INTEGER NOT NULL DEFAULT 0`
       await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS knowledge_validation_tickets INTEGER NOT NULL DEFAULT 0`
+      // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 4번: "동의해야만
+      // 서비스를 이용할 수 있도록 동의 절차를 추가하세요" — 가입 시점에
+      // 실제로 동의한 시각을 남겨, 나중에(법적 분쟁·감사 대응 등) "이
+      // 유저가 언제 약관/개인정보처리방침에 동의했는지"를 증명할 수 있게
+      // 한다. NULL이면(이 컬럼이 생기기 전 가입한 기존 계정) 동의 기록이
+      // 없다는 뜻 — 기존 계정의 로그인/이용 자체를 막지는 않는다(소급
+      // 적용하지 않음).
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_agreed_at TIMESTAMPTZ`
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_agreed_at TIMESTAMPTZ`
     })().catch((err) => {
       usersTableReady = null
       throw err
@@ -628,6 +637,51 @@ export interface PersonalKnowledgeLogAttachmentRow {
   url: string
   mime_type: string
   name: string | null
+  created_at: string
+}
+
+let auditLogTableReady: Promise<unknown> | null = null
+
+// 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번: "본인이라도
+// 데이터에 접근할 때마다 '누가, 언제, 어떤 데이터를 조회했는지' 감사
+// 로그를 기록하세요" — api/_lib/auditLog.ts의 recordDataAccess가 쓰는
+// 저장소. 조회 대상(personal_knowledge_logs/character_knowledge_entries
+// 등)과는 별도 테이블이라, 감사 로그 자체가 지워져도 원본 데이터에는
+// 영향이 없고, 원본 데이터가 지워져도(회원탈퇴 등) 감사 로그는
+// ON DELETE CASCADE로 함께 지워진다(탈퇴한 유저의 흔적을 남기지 않음 —
+// "개인정보 삭제" 처리방침과 일치).
+export function ensureAuditLogTable() {
+  if (!auditLogTableReady) {
+    auditLogTableReady = (async () => {
+      await ensureUsersTable()
+      await sql`
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          action TEXT NOT NULL CHECK (action IN ('view', 'create', 'update', 'delete')),
+          resource_type TEXT NOT NULL,
+          resource_id INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS audit_logs_user_id_created_idx
+          ON audit_logs (user_id, created_at DESC)
+      `
+    })().catch((err) => {
+      auditLogTableReady = null
+      throw err
+    })
+  }
+  return auditLogTableReady
+}
+
+export interface AuditLogRow {
+  id: number
+  user_id: number
+  action: 'view' | 'create' | 'update' | 'delete'
+  resource_type: string
+  resource_id: number | null
   created_at: string
 }
 

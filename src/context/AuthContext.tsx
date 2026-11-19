@@ -14,7 +14,10 @@ interface AuthContextValue {
   dailyQuestionLimit: number | null
   remainingQuestions: number | null
   setRemainingQuestions: (value: number) => void
-  signup: (email: string, password: string) => Promise<void>
+  // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 4번: 서버가
+  // agreedTerms/agreedPrivacy 둘 다 true여야만 가입을 허용하므로(
+  // api/auth/signup.ts), 이 두 값을 함께 보낸다.
+  signup: (email: string, password: string, agreedTerms: boolean, agreedPrivacy: boolean) => Promise<void>
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   deleteAccount: () => Promise<void>
@@ -55,11 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [applyMeResponse])
 
-  const signup = useCallback(async (email: string, password: string) => {
+  const signup = useCallback(async (email: string, password: string, agreedTerms: boolean, agreedPrivacy: boolean) => {
     const res = await fetch('/api/auth/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, agreedTerms, agreedPrivacy }),
     })
     const data = await parseJsonResponse(res)
     setUser(data.user ?? null)

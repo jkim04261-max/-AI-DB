@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe, mockLogin, mockEmptyCharacters } from './fixtures/mock-api'
 
 // Every scenario here is mocked — no real /api/auth/* call reaches a
@@ -88,6 +88,39 @@ test.describe('signup', () => {
 
     await page.locator('label').filter({ hasText: '개인정보처리방침' }).getByRole('checkbox').check()
     await expect(submit).toBeEnabled()
+  })
+
+  // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 4번: 체크박스가
+  // 버튼을 활성화만 시키는 게 아니라, 실제로 서버에 동의 여부를
+  // 보낸다는 것까지 확인한다(api/auth/signup.ts가 이제 서버에서도
+  // 다시 검증한다 — tests/core-regression.test.cjs 참고).
+  test('submitting the signup form sends the agreement checkboxes to the server, and navigates home on success', async ({ page }) => {
+    await failUnmockedApiCalls(page)
+    await mockMe(page, { user: null })
+
+    let sentBody: Record<string, unknown> | null = null
+    await page.route('**/api/auth/signup', async (route: Route) => {
+      sentBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ user: { id: 1, email: 'new@test.com' } }) })
+    })
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: { id: 1, email: 'new@test.com' } }) })
+    })
+    await page.route('**/api/conversations', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversations: [] }) })
+    })
+    await mockEmptyCharacters(page)
+
+    await page.goto('/signup')
+    await page.getByPlaceholder('이메일').fill('new@test.com')
+    await page.getByPlaceholder('비밀번호 (8자 이상)').fill('longenough1')
+    await page.getByPlaceholder('비밀번호 확인').fill('longenough1')
+    await page.locator('label').filter({ hasText: '이용약관' }).getByRole('checkbox').check()
+    await page.locator('label').filter({ hasText: '개인정보처리방침' }).getByRole('checkbox').check()
+    await page.getByRole('button', { name: '회원가입' }).click()
+
+    await expect(page).toHaveURL('/')
+    expect(sentBody).toMatchObject({ email: 'new@test.com', agreedTerms: true, agreedPrivacy: true })
   })
 
   test('rejects a mismatched password confirmation client-side, without calling the API', async ({ page }) => {

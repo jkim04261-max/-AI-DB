@@ -9,10 +9,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { email, password } = (req.body ?? {}) as { email?: unknown; password?: unknown }
+  const { email, password, agreedTerms, agreedPrivacy } = (req.body ?? {}) as {
+    email?: unknown
+    password?: unknown
+    agreedTerms?: unknown
+    agreedPrivacy?: unknown
+  }
 
   if (typeof email !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: '이메일과 비밀번호를 입력해주세요.' })
+    return
+  }
+
+  // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 4번: "동의해야만
+  // 서비스를 이용할 수 있도록 동의 절차를 추가하세요" — SignupPage.tsx의
+  // 체크박스는 지금까지 제출 버튼을 disabled로 막는 클라이언트 쪽
+  // 게이트뿐이었다 — 체크박스를 거치지 않고 이 API를 직접 호출하면
+  // 동의 없이도 가입이 됐다. 서버가 다시 한번 강제해야 실제로 "동의해야
+  // 서비스를 이용할 수 있다"가 보장된다.
+  if (agreedTerms !== true || agreedPrivacy !== true) {
+    res.status(400).json({ error: '이용약관과 개인정보처리방침에 동의해야 가입할 수 있어요.' })
     return
   }
 
@@ -40,8 +56,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const passwordHash = await bcrypt.hash(password, 10)
 
     const inserted = await sql<{ id: number; email: string; token_version: number }>`
-      INSERT INTO users (email, password_hash)
-      VALUES (${normalizedEmail}, ${passwordHash})
+      INSERT INTO users (email, password_hash, terms_agreed_at, privacy_agreed_at)
+      VALUES (${normalizedEmail}, ${passwordHash}, now(), now())
       RETURNING id, email, token_version
     `
     const user = inserted.rows[0]
