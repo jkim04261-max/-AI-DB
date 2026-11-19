@@ -37,7 +37,6 @@ interface AiUsageError {
   occurredAt: string
   model: string
   kind: string
-  message: string
 }
 
 interface AiUsage {
@@ -285,16 +284,11 @@ export default function AdminPage() {
               ) : (
                 <ul className="flex flex-col divide-y divide-slate-100">
                   {aiUsageState.usage.recentErrors.map((err) => (
-                    <li key={err.id} className="flex flex-col gap-1 py-3 text-sm first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                        <span>{formatDateTime(err.occurredAt)}</span>
-                        <span className="text-slate-300">·</span>
-                        <span>{err.model}</span>
-                        <span className="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-500">
-                          {err.kind}
-                        </span>
-                      </div>
-                      <p className="text-slate-600">{err.message}</p>
+                    <li key={err.id} className="flex flex-wrap items-center gap-2 py-3 text-xs text-slate-400 first:pt-0 last:pb-0">
+                      <span>{formatDateTime(err.occurredAt)}</span>
+                      <span className="text-slate-300">·</span>
+                      <span>{err.model}</span>
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-500">{err.kind}</span>
                     </li>
                   ))}
                 </ul>

@@ -52,26 +52,54 @@ async function run() {
   }
 
   // --- signup ---
+  // 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 4번: "동의해야만
+  // 서비스를 이용할 수 있도록 동의 절차를 추가하세요" — 그동안
+  // SignupPage.tsx의 체크박스는 순수 클라이언트 쪽 게이트였고(버튼을
+  // disabled로만 막음), 서버는 이용약관/개인정보처리방침 동의 여부를
+  // 전혀 확인하지 않았다(그 둘 없이도 API를 직접 호출하면 가입이 됐다).
+  // 이제 서버도 두 동의가 모두 true여야만 계정을 만든다.
   mock.reset()
   {
     const res = mockRes()
-    await signupHandler({ method: 'POST', body: { email: 'new@test.com', password: 'longenough1' } }, res)
-    t.assert(res.statusCode === 201, 'signup with a fresh email succeeds (201)')
+    await signupHandler({ method: 'POST', body: { email: 'new@test.com', password: 'longenough1', agreedTerms: true, agreedPrivacy: true } }, res)
+    t.assert(res.statusCode === 201, 'signup with a fresh email + both agreements succeeds (201)')
   }
   {
     const res = mockRes()
-    await signupHandler({ method: 'POST', body: { email: 'new@test.com', password: 'longenough1' } }, res)
+    await signupHandler({ method: 'POST', body: { email: 'new@test.com', password: 'longenough1', agreedTerms: true, agreedPrivacy: true } }, res)
     t.assert(res.statusCode === 409, 'signup with an already-used email is rejected (409)')
   }
   {
     const res = mockRes()
-    await signupHandler({ method: 'POST', body: { email: 'bad-email', password: 'longenough1' } }, res)
+    await signupHandler({ method: 'POST', body: { email: 'bad-email', password: 'longenough1', agreedTerms: true, agreedPrivacy: true } }, res)
     t.assert(res.statusCode === 400, 'signup with an invalid email format is rejected (400)')
   }
   {
     const res = mockRes()
-    await signupHandler({ method: 'POST', body: { email: 'short@test.com', password: 'short' } }, res)
+    await signupHandler({ method: 'POST', body: { email: 'short@test.com', password: 'short', agreedTerms: true, agreedPrivacy: true } }, res)
     t.assert(res.statusCode === 400, 'signup with a too-short password is rejected (400)')
+  }
+  {
+    const res = mockRes()
+    await signupHandler({ method: 'POST', body: { email: 'noconsent@test.com', password: 'longenough1' } }, res)
+    t.assert(res.statusCode === 400, '약관/개인정보처리방침 동의 없이는 가입할 수 없다(400) — 클라이언트 체크박스를 거치지 않고 API를 직접 호출해도 서버가 막는다')
+  }
+  {
+    const res = mockRes()
+    await signupHandler({ method: 'POST', body: { email: 'halfconsent@test.com', password: 'longenough1', agreedTerms: true, agreedPrivacy: false } }, res)
+    t.assert(res.statusCode === 400, '둘 중 하나만 동의해도(개인정보처리방침 미동의) 가입할 수 없다(400)')
+  }
+  {
+    const res = mockRes()
+    await signupHandler(
+      { method: 'POST', body: { email: 'consented@test.com', password: 'longenough1', agreedTerms: true, agreedPrivacy: true } },
+      res,
+    )
+    t.assert(res.statusCode === 201, '둘 다 동의하면 가입된다(201)')
+    t.assert(
+      mock.state.users.get(res.body.user.id)?.terms_agreed_at != null && mock.state.users.get(res.body.user.id)?.privacy_agreed_at != null,
+      '동의 시각이 DB에 기록되어, 나중에 "언제 동의했는지" 추적할 수 있다',
+    )
   }
 
   // --- session / token_version invalidation ---

@@ -31,6 +31,8 @@ const state = {
   nextPersonalKnowledgeLogId: 1,
   personalKnowledgeLogAttachments: [], // { id, log_id, position, url, mime_type, name, created_at }
   nextPersonalKnowledgeLogAttachmentId: 1,
+  auditLogs: [], // { id, user_id, action, resource_type, resource_id, created_at }
+  nextAuditLogId: 1,
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -82,6 +84,8 @@ function reset() {
   state.nextPersonalKnowledgeLogId = 1
   state.personalKnowledgeLogAttachments = []
   state.nextPersonalKnowledgeLogAttachmentId = 1
+  state.auditLogs = []
+  state.nextAuditLogId = 1
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -123,11 +127,24 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: id != null ? [{ id }] : [] })
   }
 
-  // --- signup.ts: insert ---
+  // --- signup.ts: insert — terms_agreed_at/privacy_agreed_at are bound
+  // to literal now() in the real query (not a ${} placeholder), so they
+  // never appear in `values`; the mock just sets them to "now" directly
+  // to simulate that. ---
   if (has(text, 'INSERT INTO users')) {
     const [email, passwordHash] = values
     const id = state.nextUserId++
-    const user = { id, email, password_hash: passwordHash, token_version: 0, ai_recommend_tickets: 0, knowledge_validation_tickets: 0 }
+    const now = new Date().toISOString()
+    const user = {
+      id,
+      email,
+      password_hash: passwordHash,
+      token_version: 0,
+      ai_recommend_tickets: 0,
+      knowledge_validation_tickets: 0,
+      terms_agreed_at: now,
+      privacy_agreed_at: now,
+    }
     state.users.set(id, user)
     state.usersByEmail.set(email, id)
     return Promise.resolve({ rows: [{ id, email, token_version: 0 }] })
@@ -1112,6 +1129,61 @@ function sql(strings, ...values) {
       .slice()
       .sort((a, b) => a.position - b.position)
       .map((a) => ({ ...a }))
+    return Promise.resolve({ rows })
+  }
+
+  // --- 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 3번:
+  // api/_lib/auditLog.ts의 recordDataAccess가 쓰는 감사 로그. ---
+  if (has(text, 'INSERT INTO audit_logs')) {
+    const [userId, action, resourceType, resourceId] = values
+    const id = state.nextAuditLogId++
+    state.auditLogs.push({
+      id,
+      user_id: userId,
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      created_at: new Date().toISOString(),
+    })
+    return Promise.resolve({ rows: [{ id }] })
+  }
+
+  // --- api/admin/stats.ts: 집계 전용 COUNT 쿼리 4개(users/conversations/
+  // messages/message_attachments) — 지금까지 이 admin 엔드포인트를
+  // 다루는 테스트가 없어서 매처가 없었다. 각 테이블의 "COUNT(*)::int AS
+  // count FROM <table>" 형태를 그대로 구분한다. ---
+  if (has(text, 'COUNT(*)::int AS count', 'FROM users')) {
+    return Promise.resolve({ rows: [{ count: state.users.size }] })
+  }
+  if (has(text, 'COUNT(*)::int AS count', 'FROM conversations')) {
+    return Promise.resolve({ rows: [{ count: state.conversations.size }] })
+  }
+  if (has(text, 'COUNT(*)::int AS count', 'FROM message_attachments')) {
+    return Promise.resolve({ rows: [{ count: state.attachments.length }] })
+  }
+  if (has(text, 'COUNT(*)::int AS count', 'FROM messages')) {
+    return Promise.resolve({ rows: [{ count: state.messages.length }] })
+  }
+
+  // --- api/admin/ai-usage.ts: role='ai' 메시지 집계 + 최근 오류 목록.
+  // 오늘(today) 경계는 state.fakeDateKST(이미 다른 테스트들이 날짜를
+  // 바꿔 쓰는 바로 그 "가짜 오늘")를 기준으로 판정한다. ---
+  if (has(text, "COUNT(*) FILTER (WHERE NOT is_error)", 'FROM messages')) {
+    const aiMessages = state.messages.filter((m) => m.role === 'ai')
+    const total = aiMessages.length
+    const success = aiMessages.filter((m) => !m.is_error).length
+    const failed = aiMessages.filter((m) => m.is_error).length
+    const today = aiMessages.filter((m) => (m.created_at ?? '').slice(0, 10) === state.fakeDateKST).length
+    return Promise.resolve({ rows: [{ total, success, failed, today }] })
+  }
+  if (has(text, 'SELECT id, created_at, ai_provider, content', 'FROM messages')) {
+    const [limit] = values
+    const rows = state.messages
+      .filter((m) => m.role === 'ai' && m.is_error)
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .slice(0, limit)
+      .map((m) => ({ id: m.id, created_at: m.created_at, ai_provider: m.ai_provider, content: m.content }))
     return Promise.resolve({ rows })
   }
 

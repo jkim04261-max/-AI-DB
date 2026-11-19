@@ -20,11 +20,18 @@ function isAdminEmail(email: string): boolean {
 // TRANSIENT_FAILURE_MESSAGE already store in messages.content for a failed
 // AI turn — duplicated here (not imported) so this admin-only file carries
 // no dependency on, and makes no change to, the protected Gemini call path.
-// Every string content can hold here was already shown to the end user in
-// the chat UI, so none of this classification touches secrets.
+//
+// 지시서(개인 마스터 DB 소유자 통제 및 보안 시스템) 2번: "관리자 계정
+// 이라도 유저의 개인 데이터는 열람할 수 없도록 하세요" — 예전에는 이
+// 분류 결과뿐 아니라 raw content(최대 200자)까지 그대로 관리자 응답에
+// 실어보냈다. 지금까지는 is_error 메시지가 항상 이 두 고정 문자열
+// 중 하나였을 뿐이라 사실상 개인정보가 샐 일이 없었지만, 그건 "이
+// 엔드포인트가 보장"하는 게 아니라 "다른 코드가 우연히 그렇게 동작
+// 해서" 안전했던 것이다 — 앞으로 is_error 메시지에 다른 내용이 들어갈
+// 경로가 생기면 그 즉시 관리자에게 새어 나간다. 그래서 이 분류
+// (kind)만 내려주고 raw content는 애초에 응답에 담지 않도록 바꾼다.
 const GEMINI_API_KEY_MISSING_MESSAGE = '서버에 GEMINI_API_KEY가 설정되지 않았어요.'
 const TRANSIENT_FAILURE_MESSAGE = '일시적으로 응답이 지연되고 있어요. 잠시 후 다시 시도해주세요.'
-const MAX_ERROR_MESSAGE_LENGTH = 200
 const RECENT_ERRORS_LIMIT = 20
 
 function classifyErrorKind(content: string): string {
@@ -104,7 +111,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         occurredAt: row.created_at,
         model: row.ai_provider ?? 'Gemini',
         kind: classifyErrorKind(row.content),
-        message: row.content.slice(0, MAX_ERROR_MESSAGE_LENGTH),
       })),
     })
   } catch (err) {
