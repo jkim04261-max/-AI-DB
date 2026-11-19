@@ -5,7 +5,6 @@ import { eatingPortraitSrc } from '../../data/characterEating'
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { walkingPortraitSrc } from '../../data/characterWalking'
 import { useImageFallback } from '../../hooks/useImageFallback'
-import { TOWN_SQUARE_BG_SRC, RESTAURANT_INTERIOR_SRC } from '../../data/lifeEventAssets'
 
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 기존 triggerMealBreak는
 // 사용자 선택 없이 자동으로 식사비를 차감하는 연출이었다 — 이 모달이
@@ -20,14 +19,17 @@ import { TOWN_SQUARE_BG_SRC, RESTAURANT_INTERIOR_SRC } from '../../data/lifeEven
 // COMPANION_LABEL(누리/두리)만 쓰는 것과 같은 이유로, 여기서도 그
 // 라벨을 쓴다.
 //
-// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
-// 연출 구현): 사용자가 이번에 실제 배경 이미지 파일을 제공해, 이전
-// placeholder(CSS 그라디언트 동네 배경)를 실제 이미지로 교체한다.
-// "밥 먹이기"를 누르면(= 식당으로 걸어 들어가면) 기존 확대(zoom)
-// 애니메이션은 그대로 두고, 그 위에 식당 내부 이미지를 페이드인시켜
-// "문을 열고 들어간" 느낌을 낸다 — 버튼 클릭 한 번으로 바로
-// 먹이기까지 끝나는 기존 흐름(및 그걸 전제한 기존 e2e 테스트들)은
-// 그대로 유지한다.
+// 지시서(배고픔 이벤트 시 2.5D 동네 배경 걷기 애니메이션 구현): 사용자가
+// 준비한 실제 동네 배경 이미지를 이 세션에서 끝내 받지 못했다 — 채팅에
+// 붙여넣은 이미지는 이 환경에서 파일로 내려받을 방법이 없고(업로드
+// 디렉터리에도 남지 않음), 사용자도 더 기다리지 않고 "추천으로 자동
+// 실행"을 지시했다. 그래서 TOWN_BG_IMAGE_SRC가 비어 있는 동안은 CSS
+// 그라디언트로 그린 임시(placeholder) 배경을 쓴다 — 실제 배경 이미지
+// 파일이 생기면(예: public/assets/town_bg.png) 이 상수 하나만 그
+// 경로로 채우면 아래 패럴랙스/확대 애니메이션 레이어가 그 이미지를
+// 그대로 감싸 쓰도록 구조를 짰다.
+const TOWN_BG_IMAGE_SRC: string | null = null
+
 const MEAL_COST_WON = 10_000
 // "밥 먹이기" 클릭 후 배경 확대 + 음식 아이콘 연출을 보여주는 시간 —
 // 이 시간이 지나야 실제 onFeed(부모의 handleFeedCharacter)를 불러
@@ -97,9 +99,7 @@ export default function HungryEventModal({
       aria-label="배고픔 이벤트"
       className="absolute inset-0 z-30 overflow-hidden rounded-2xl"
     >
-      {/* 동네 배경(평상시) — 밥 먹이기를 누르면(feeding) 확대 애니메이션
-          위로 식당 내부 이미지가 페이드인되어 "식당에 들어감"을
-          보여준다. */}
+      {/* 동네 배경 — 패럴랙스(평상시) / 확대(밥 먹이기 연출 중) */}
       <div
         aria-hidden
         className={`absolute inset-0 overflow-hidden ${
@@ -108,24 +108,14 @@ export default function HungryEventModal({
             : 'motion-safe:animate-[grow-hungry-bg-parallax_5s_ease-in-out_infinite]'
         }`}
       >
-        {/* 배경 2장은 <img>가 아니라 CSS background-image로 깐다 — 이
-            모달 안의 유일한 <img>를 캐릭터 전신 그림으로 유지해야,
-            "hungry-event-modal 안의 img" 하나만 찾는 기존 e2e
-            테스트(초상화 교체·폴백 확인)가 그대로 통한다. */}
-        <div
-          aria-hidden
-          data-testid="hungry-event-town-bg"
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${TOWN_SQUARE_BG_SRC})` }}
-        />
-        <div
-          aria-hidden
-          data-testid="hungry-event-restaurant-bg"
-          className={`absolute inset-0 bg-cover bg-center transition-opacity duration-700 ${
-            feeding ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{ backgroundImage: `url(${RESTAURANT_INTERIOR_SRC})` }}
-        />
+        {TOWN_BG_IMAGE_SRC ? (
+          <img src={TOWN_BG_IMAGE_SRC} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <>
+            <div className="grow-hungry-town-bg absolute inset-0" />
+            <div className="grow-hungry-town-skyline absolute inset-x-0 bottom-[30%] h-[14%] opacity-70" />
+          </>
+        )}
       </div>
       {/* 어두운 오버레이 — 캐릭터·문구 가독성 확보 */}
       <div aria-hidden className="absolute inset-0 bg-black/45" />
