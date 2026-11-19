@@ -12,6 +12,7 @@ import TemplatesPage from './pages/TemplatesPage'
 import FavoritesPage from './pages/FavoritesPage'
 import SettingsPage from './pages/SettingsPage'
 import MyPage from './pages/MyPage'
+import KnowledgeLogPage from './pages/KnowledgeLogPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
@@ -46,6 +47,12 @@ export default function App() {
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/mypage" element={<MyPage />} />
+            {/* 지시서(실제 업무·연구·비법·노하우 기록 시스템): "지식
+                기록장" 전용 화면 — 사이드바에는 추가하지 않는다
+                (src/data/nav.ts가 이미 의도적으로 최소화돼 있다,
+                "템플릿/즐겨찾기도 더 이상 사이드바에 없음" 주석 참고).
+                마이페이지의 카드로만 진입한다. */}
+            <Route path="/knowledge-log" element={<KnowledgeLogPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

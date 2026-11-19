@@ -27,6 +27,10 @@ const state = {
   nextExamAttemptId: 1,
   quizFirsts: new Set(), // `${characterId}|${questionId}`
   examFirsts: new Set(), // `${characterId}|${profession}`
+  personalKnowledgeLogs: [], // { id, user_id, entry_date, business_name, category, tags, content, visibility, created_at, updated_at }
+  nextPersonalKnowledgeLogId: 1,
+  personalKnowledgeLogAttachments: [], // { id, log_id, position, url, mime_type, name, created_at }
+  nextPersonalKnowledgeLogAttachmentId: 1,
   nextKnowledgeEntryId: 1,
   nextCharacterId: 1,
   nextUserId: 1,
@@ -74,6 +78,10 @@ function reset() {
   state.nextExamAttemptId = 1
   state.quizFirsts.clear()
   state.examFirsts.clear()
+  state.personalKnowledgeLogs = []
+  state.nextPersonalKnowledgeLogId = 1
+  state.personalKnowledgeLogAttachments = []
+  state.nextPersonalKnowledgeLogAttachmentId = 1
   state.nextKnowledgeEntryId = 1
   state.nextCharacterId = 1
   state.nextUserId = 1
@@ -976,6 +984,135 @@ function sql(strings, ...values) {
     }
     state.examAttempts.push(entry)
     return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+  // --- 지시서(실제 업무·연구·비법·노하우 기록 시스템): "지식 기록장"
+  // (personal_knowledge_logs/personal_knowledge_log_attachments) 전용
+  // 매처. LEFT JOIN 목록 조회를 먼저 체크한다 — 단일 행 조회(아래)와
+  // 'FROM personal_knowledge_logs' 접두사를 공유하지만 'LEFT JOIN
+  // personal_knowledge_log_attachments'는 그쪽에만 있다. ---
+  if (has(text, 'FROM personal_knowledge_logs l', 'LEFT JOIN personal_knowledge_log_attachments')) {
+    const [userId] = values
+    const logs = state.personalKnowledgeLogs
+      .filter((l) => l.user_id === userId)
+      .slice()
+      .sort((a, b) => (a.entry_date < b.entry_date ? 1 : a.entry_date > b.entry_date ? -1 : b.id - a.id))
+    const rows = []
+    for (const log of logs) {
+      const attachments = state.personalKnowledgeLogAttachments
+        .filter((a) => a.log_id === log.id)
+        .slice()
+        .sort((a, b) => a.position - b.position)
+      if (attachments.length === 0) {
+        rows.push({
+          log_id: log.id,
+          entry_date: log.entry_date,
+          business_name: log.business_name,
+          category: log.category,
+          tags: log.tags,
+          content: log.content,
+          visibility: log.visibility,
+          created_at: log.created_at,
+          updated_at: log.updated_at,
+          attachment_url: null,
+          attachment_mime_type: null,
+          attachment_name: null,
+        })
+      } else {
+        for (const a of attachments) {
+          rows.push({
+            log_id: log.id,
+            entry_date: log.entry_date,
+            business_name: log.business_name,
+            category: log.category,
+            tags: log.tags,
+            content: log.content,
+            visibility: log.visibility,
+            created_at: log.created_at,
+            updated_at: log.updated_at,
+            attachment_url: a.url,
+            attachment_mime_type: a.mime_type,
+            attachment_name: a.name,
+          })
+        }
+      }
+    }
+    return Promise.resolve({ rows })
+  }
+  if (has(text, 'INSERT INTO personal_knowledge_logs')) {
+    const [userId, entryDate, businessName, category, tags, content, visibility] = values
+    const id = state.nextPersonalKnowledgeLogId++
+    const now = new Date().toISOString()
+    state.personalKnowledgeLogs.push({
+      id,
+      user_id: userId,
+      entry_date: entryDate,
+      business_name: businessName,
+      category,
+      tags,
+      content,
+      visibility,
+      created_at: now,
+      updated_at: now,
+    })
+    return Promise.resolve({ rows: [{ id }] })
+  }
+  if (has(text, 'UPDATE personal_knowledge_logs')) {
+    const [entryDate, businessName, category, tags, content, visibility, id, userId] = values
+    const row = state.personalKnowledgeLogs.find((l) => l.id === id && l.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.entry_date = entryDate
+    row.business_name = businessName
+    row.category = category
+    row.tags = tags
+    row.content = content
+    row.visibility = visibility
+    row.updated_at = new Date().toISOString()
+    return Promise.resolve({ rows: [{ id: row.id }] })
+  }
+  if (has(text, 'DELETE FROM personal_knowledge_logs')) {
+    const [id, userId] = values
+    const idx = state.personalKnowledgeLogs.findIndex((l) => l.id === id && l.user_id === userId)
+    if (idx === -1) return Promise.resolve({ rows: [] })
+    const [removed] = state.personalKnowledgeLogs.splice(idx, 1)
+    state.personalKnowledgeLogAttachments = state.personalKnowledgeLogAttachments.filter((a) => a.log_id !== removed.id)
+    return Promise.resolve({ rows: [{ id: removed.id }] })
+  }
+  // 단일 행 조회(저장 핸들러가 INSERT/UPDATE 직후 최신 상태를 되읽는
+  // 용도) — 위 두 매처(LEFT JOIN 목록, UPDATE/DELETE)에서 전부 걸러지지
+  // 않은, user_id 조건 없는 "WHERE id = " 단독 조회만 여기로 온다.
+  if (has(text, 'FROM personal_knowledge_logs', 'WHERE id =')) {
+    const [id] = values
+    const row = state.personalKnowledgeLogs.find((l) => l.id === id)
+    return Promise.resolve({ rows: row ? [{ ...row }] : [] })
+  }
+  if (has(text, 'DELETE FROM personal_knowledge_log_attachments')) {
+    const [logId] = values
+    state.personalKnowledgeLogAttachments = state.personalKnowledgeLogAttachments.filter((a) => a.log_id !== logId)
+    return Promise.resolve({ rows: [] })
+  }
+  if (has(text, 'INSERT INTO personal_knowledge_log_attachments')) {
+    const [logId, position, url, mimeType, name] = values
+    const id = state.nextPersonalKnowledgeLogAttachmentId++
+    state.personalKnowledgeLogAttachments.push({
+      id,
+      log_id: logId,
+      position,
+      url,
+      mime_type: mimeType,
+      name,
+      created_at: new Date().toISOString(),
+    })
+    return Promise.resolve({ rows: [{ id }] })
+  }
+  if (has(text, 'FROM personal_knowledge_log_attachments')) {
+    const [logId] = values
+    const rows = state.personalKnowledgeLogAttachments
+      .filter((a) => a.log_id === logId)
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((a) => ({ ...a }))
+    return Promise.resolve({ rows })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)
