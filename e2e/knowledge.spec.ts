@@ -1403,8 +1403,8 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
   // 금액 표기 없이 바로 먹는다.
   await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기')
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 걷기(2.5초) → 식사 연출(3.5초) 뒤 자동으로 모달이 닫힌다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 })
 
 // 지시서(밥 먹는 캐릭터 에셋 깨짐 방지): 식사 그림(eating) 로드가
@@ -1469,10 +1469,15 @@ test('a failed-to-load eating image falls back to the idle portrait instead of a
   // 없어야 한다.
   await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-walking)/)
 
-  // "밥 먹이기"를 누르면 "식사" 그림으로 바뀌는데, 이 역시 같은 이유로
-  // 평상시 전신 그림으로 대체돼야 한다 — src에 "-eating"도 없어야 한다.
+  // "밥 먹이기"를 누르면 걷기(2.5초) 뒤 "식사" 그림으로 바뀌는데, 이
+  // 역시 같은 이유로 평상시 전신 그림으로 대체돼야 한다 — src에
+  // "-eating"도 없어야 한다.
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-eating)/)
+  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute(
+    'src',
+    /nuri-toddler(?!-eating)/,
+    { timeout: 4000 },
+  )
 })
 
 // 위 테스트와 같은 식사 이벤트지만, Stage 1 온보딩으로 체험판 가상
@@ -1562,8 +1567,8 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파해요. 밥 먹으러 갑니다!')
   await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기 (-10,000원)')
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 걷기(2.5초) → 식사 연출(3.5초) 뒤 자동으로 모달이 닫히고 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
@@ -1675,10 +1680,12 @@ test('insufficient balance blocks feeding and shows an inline warning, without c
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('5,000원')
 })
 
-// 지시서(배고픔 이벤트 시 2.5D 동네 배경 걷기 애니메이션 구현): "밥
-// 먹이기"를 누르면 음식 아이콘 연출이 잠깐 나타난 뒤에야 모달이
-// 닫히는지 확인한다(즉시 닫히지 않는다).
-test('feeding plays a brief food-icon animation before the modal closes', async ({ page }) => {
+// 지시서(밥 먹기 이벤트 연출 수정): "밥 먹이기"를 누르면 곧바로
+// 닫히지 않고 걷기(2.5초) → 식사 연출(음식 아이콘 + "냠냠! 잘
+// 먹었습니다!" 문구, 3.5초)을 거친 뒤에야 모달이 닫히는지 확인한다.
+test('feeding walks to the restaurant, then shows the eating scene for a few seconds before the modal closes', async ({
+  page,
+}) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1727,10 +1734,14 @@ test('feeding plays a brief food-icon animation before the modal closes', async 
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible()
+  // 걷는 동안(2.5초)엔 아직 식사 연출이 나오지 않는다.
+  await expect(page.getByTestId('hungry-event-food-icon')).toHaveCount(0)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 식당에 도착하면(eating 단계) 음식 아이콘 + 안내 문구가 뜨고,
+  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible({ timeout: 4000 })
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('냠냠! 잘 먹었습니다!')
+  // 그 뒤(3.5초) 모달이 자동으로 닫힌다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 5000 })
   await expect(page.getByTestId('hungry-warning-banner')).toHaveCount(0)
 })
 
@@ -1791,7 +1802,8 @@ test('the hungry event fades the background from the town square to the restaura
   await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-0\b/)
 
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-100/)
+  // 분수대 → 식당 걷기(2.5초)가 끝나고 도착해야 식당 내부로 전환된다.
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-100/, { timeout: 4000 })
 })
 
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
@@ -2244,11 +2256,15 @@ test('when the daily 지식 검증(teach) limit is exhausted, buying 지식 검�
   await expect(page.getByTestId('buy-validation-uses-button')).toBeVisible()
 })
 
-// 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가
-// 'eating'이 되면 기존 🍙 이모지 오버레이 대신 연령대별 전신 식사
-// 일러스트가 뜨고, 식사가 끝나 pose가 'idle'로 돌아가면 원래의 평상시
-// 전신 일러스트로 되돌아온다.
-test('the meal event swaps the illustrated portrait to the age-tier eating image, then back to idle', async ({ page }) => {
+// 지시서(밥 먹기 이벤트 연출 수정: 홈 화면 식사 장면 제거): 식사
+// 연출(식사 포즈 전신 일러스트·"냠냠! 잘 먹었습니다!" 문구)은 이제
+// HungryEventModal 안에서만 나온다 — 모달이 자동으로 닫힌 뒤에도 홈
+// 화면(GameStage)의 평상시 전신 일러스트는 그대로 유지되고, 홈 화면
+// 말풍선에 "냠냠" 문구가 뜨지 않아야 한다(예전엔 여기서도 같은 장면이
+// 중복으로 나오는 버그가 있었다).
+test('feeding the meal event does not swap the home-screen portrait to the eating pose or show a home speech bubble', async ({
+  page,
+}) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -2334,12 +2350,11 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
-  await expect(portrait).toHaveAttribute('src', /nuri-toddler-eating/)
-
-  // 2600ms 후 식사가 끝나 pose가 다시 idle로 돌아간다 — 평상시 전신
-  // 일러스트로 되돌아왔는지 확인한다.
-  await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 4000 })
+  // 모달이 걷기 → 식사 연출을 거쳐 자동으로 닫힐 때까지(최대 8초),
+  // 홈 화면의 전신 일러스트는 'eating' 포즈로 바뀌지 않는다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
+  await expect(portrait).not.toHaveAttribute('src', /-eating/)
+  await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 })
 
 // 지시서(서점 팝업 흐름 수정): 자동으로 뜨던 서점 외출 팝업을 완전히
@@ -2436,7 +2451,8 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await teachThreeTimes('round0') // 배고픔 이벤트: 밥 먹이기 -10,000원
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
@@ -2640,7 +2656,8 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await teachThreeTimes('round0') // 배고픔 이벤트
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   await teachThreeTimes('round1') // 심부름 이벤트 — 이번엔 거절한다.
@@ -2801,7 +2818,9 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
   await teachKnowhow(3)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출 뒤 모달이 자동으로 닫힌다 — 다음 "가르치기"
+  // 클릭이 그 닫힘을 기다려준다(actionability 자동 대기).
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
   // 2단계: 객관식 2문제(세트 전부 정답) — 둘 다 "정답"(선택지 0번)을
   // 고르고 제출하면 통과한다.
@@ -3003,7 +3022,7 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await teachKnowhow(3)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
   // ②단계: 직업 카드 맞추기 — 사이드바 게임이 그대로 학습 모달 안에
   // 임베드되어 있다. 6쌍을 모두 맞추면 onCleared가 자동으로
@@ -3062,7 +3081,7 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await teachKnowhow(5)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('teen-direct-step-label')).toContainText('⑤단계')

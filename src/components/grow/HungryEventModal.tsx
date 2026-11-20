@@ -22,17 +22,32 @@ import { TOWN_SQUARE_BG_SRC, RESTAURANT_INTERIOR_SRC } from '../../data/lifeEven
 //
 // 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
 // 연출 구현): 사용자가 이번에 실제 배경 이미지 파일을 제공해, 이전
-// placeholder(CSS 그라디언트 동네 배경)를 실제 이미지로 교체한다.
-// "밥 먹이기"를 누르면(= 식당으로 걸어 들어가면) 기존 확대(zoom)
-// 애니메이션은 그대로 두고, 그 위에 식당 내부 이미지를 페이드인시켜
-// "문을 열고 들어간" 느낌을 낸다 — 버튼 클릭 한 번으로 바로
-// 먹이기까지 끝나는 기존 흐름(및 그걸 전제한 기존 e2e 테스트들)은
-// 그대로 유지한다.
+// placeholder(CSS 그라디언트 동네 배경)를 실제 이미지로 교체했다.
+//
+// 지시서(밥 먹기 이벤트 연출 수정: 동네 걷기 → 식당 입장 → 식사
+// 연출(3~4초) → 자동 종료): 그 위에, "밥 먹이기"를 누르면 분수대 앞
+// (동네 전경 기준 화면 왼쪽)에서 식당 건물(화면 오른쪽) 쪽으로 실제
+// 가로 이동(걷기, 2.5초)하고, 도착하면 배경이 식당 내부로 전환되며
+// "냠냠! 잘 먹었습니다!" 문구가 3.5초간 보인 뒤 모달이 자동으로
+// 닫히도록 했다 — choosing(고르는 중) → walking(걷는 중) →
+// eating(식사 중) 3단계 상태 머신. 이번에도 "앉아서 밥 먹는" 전용
+// 이미지가 따로 오지 않아, 이미 있는 식당 내부 배경(RESTAURANT_INTERIOR_SRC)
+// + 식사 포즈 전신 그림(eatingSrc)을 그대로 조합해 식사 장면을
+// 구성한다.
 const MEAL_COST_WON = 10_000
-// "밥 먹이기" 클릭 후 배경 확대 + 음식 아이콘 연출을 보여주는 시간 —
-// 이 시간이 지나야 실제 onFeed(부모의 handleFeedCharacter)를 불러
-// 모달을 닫는다(지시서 "애니메이션 시간 및 전환").
-const FEED_ANIMATION_MS = 900
+// 분수대 → 식당 가로 이동 시간(지시서: "약 2~3초").
+const WALK_DURATION_MS = 2500
+// 식당 도착 후 "냠냠! 잘 먹었습니다!" 문구를 보여주는 시간(지시서:
+// "3~4초") — 이 시간이 지나야 onFeed(부모의 handleFeedCharacter)를
+// 불러 모달을 닫는다.
+const EAT_DURATION_MS = 3500
+// 분수대 앞(시작)과 식당 건물 앞(도착)의 화면 가로 위치 — 동네 전경
+// 이미지(TOWN_SQUARE_BG_SRC)에서 분수대는 중앙보다 약간 왼쪽, 식당은
+// 오른쪽 가장자리 근처에 있다.
+const WALK_START_LEFT_PERCENT = 42
+const WALK_END_LEFT_PERCENT = 80
+
+type HungryEventPhase = 'choosing' | 'walking' | 'eating'
 
 export default function HungryEventModal({
   companionType,
@@ -65,17 +80,17 @@ export default function HungryEventModal({
     fullBodyPortraitSrc(companionType, ageTier, ageNumber),
   )
 
-  const [feeding, setFeeding] = useState(false)
-  const feedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [phase, setPhase] = useState<HungryEventPhase>('choosing')
+  const phaseTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
   useEffect(() => {
     return () => {
-      if (feedTimeoutRef.current) clearTimeout(feedTimeoutRef.current)
+      phaseTimeoutsRef.current.forEach(clearTimeout)
     }
   }, [])
 
   const handleFeedClick = () => {
-    if (feeding) return
+    if (phase !== 'choosing') return
     // 잔액이 모자라면 연출 없이 바로 onFeed를 불러 안내만 보여준다 —
     // handleFeedCharacter가 이 경우 모달을 닫지 않고 errorMessage만
     // 채우도록 이미 되어 있다(기존 로직 그대로 재사용).
@@ -83,12 +98,17 @@ export default function HungryEventModal({
       onFeed()
       return
     }
-    setFeeding(true)
-    feedTimeoutRef.current = setTimeout(onFeed, FEED_ANIMATION_MS)
+    setPhase('walking')
+    phaseTimeoutsRef.current.push(
+      setTimeout(() => setPhase('eating'), WALK_DURATION_MS),
+      setTimeout(onFeed, WALK_DURATION_MS + EAT_DURATION_MS),
+    )
   }
 
-  const portraitSrc = feeding ? eatingSrc : walkingSrc
-  const handlePortraitError = feeding ? handleEatingPortraitError : handleWalkingPortraitError
+  const feeding = phase !== 'choosing'
+  const eating = phase === 'eating'
+  const portraitSrc = eating ? eatingSrc : walkingSrc
+  const handlePortraitError = eating ? handleEatingPortraitError : handleWalkingPortraitError
 
   return (
     <div
@@ -97,13 +117,12 @@ export default function HungryEventModal({
       aria-label="배고픔 이벤트"
       className="absolute inset-0 z-30 overflow-hidden rounded-2xl"
     >
-      {/* 동네 배경(평상시) — 밥 먹이기를 누르면(feeding) 확대 애니메이션
-          위로 식당 내부 이미지가 페이드인되어 "식당에 들어감"을
-          보여준다. */}
+      {/* 동네 배경(choosing/walking 단계) — 식당에 도착하면(eating)
+          식당 내부 이미지가 페이드인되어 "식당에 들어감"을 보여준다. */}
       <div
         aria-hidden
         className={`absolute inset-0 overflow-hidden ${
-          feeding
+          eating
             ? 'motion-safe:animate-[grow-hungry-feed-zoom_0.9s_ease-out_forwards]'
             : 'motion-safe:animate-[grow-hungry-bg-parallax_5s_ease-in-out_infinite]'
         }`}
@@ -122,7 +141,7 @@ export default function HungryEventModal({
           aria-hidden
           data-testid="hungry-event-restaurant-bg"
           className={`absolute inset-0 bg-cover bg-center transition-opacity duration-700 ${
-            feeding ? 'opacity-100' : 'opacity-0'
+            eating ? 'opacity-100' : 'opacity-0'
           }`}
           style={{ backgroundImage: `url(${RESTAURANT_INTERIOR_SRC})` }}
         />
@@ -142,29 +161,45 @@ export default function HungryEventModal({
 
       <div className="absolute inset-0 z-10 flex flex-col items-center justify-between gap-3 p-4">
         <p className="text-center text-sm font-bold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.85)] sm:text-base">
-          앗! {companionName}님이 배고파해요. 밥 먹으러 갑니다!
+          {eating ? '냠냠! 잘 먹었습니다!' : `앗! ${companionName}님이 배고파해요. 밥 먹으러 갑니다!`}
         </p>
 
-        <div className="relative flex flex-1 items-end justify-center pb-2">
+        <div className="relative flex flex-1 items-end pb-2">
+          {/* 걷기 연출(지시서: "분수대 → 식당 2.5D 이동"): choosing/
+              walking 단계에선 캐릭터를 분수대 앞(왼쪽)에서 식당 앞
+              (오른쪽)까지 절대 위치(left)를 transition으로 2.5초간
+              이동시킨다. eating 단계에서는 더 이상 거리 위의 캐릭터가
+              아니므로 가운데로 되돌려 식사 장면으로 보여준다. */}
           <div
-            className={!feeding ? 'motion-safe:animate-[grow-hungry-walk-bounce_0.6s_ease-in-out_infinite]' : undefined}
+            className="absolute bottom-2 transition-[left] ease-in-out"
+            style={{
+              left: eating ? '50%' : phase === 'walking' ? `${WALK_END_LEFT_PERCENT}%` : `${WALK_START_LEFT_PERCENT}%`,
+              transitionDuration: eating ? '0ms' : `${WALK_DURATION_MS}ms`,
+              transform: 'translateX(-50%)',
+            }}
           >
-            <img
-              src={portraitSrc}
-              onError={handlePortraitError}
-              alt=""
-              className="h-28 w-28 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]"
-            />
-          </div>
-          {feeding && (
-            <span
-              aria-hidden
-              data-testid="hungry-event-food-icon"
-              className="motion-safe:animate-[grow-hungry-food-pop_0.9s_ease-out_forwards] absolute top-0 text-4xl"
+            <div
+              className={
+                !eating ? 'motion-safe:animate-[grow-hungry-walk-bounce_0.6s_ease-in-out_infinite]' : undefined
+              }
             >
-              🍚
-            </span>
-          )}
+              <img
+                src={portraitSrc}
+                onError={handlePortraitError}
+                alt=""
+                className="h-28 w-28 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]"
+              />
+            </div>
+            {eating && (
+              <span
+                aria-hidden
+                data-testid="hungry-event-food-icon"
+                className="motion-safe:animate-[grow-hungry-food-pop_0.9s_ease-out_forwards] absolute -top-2 left-1/2 -translate-x-1/2 text-4xl"
+              >
+                🍚
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex w-full max-w-xs flex-col gap-2">
