@@ -2765,7 +2765,8 @@ test('accepting the errand event once blocks it from firing again the same day (
   await teachThreeTimes('round0') // 배고픔 이벤트
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원', { timeout: 8000 })
 
   await teachThreeTimes('round1') // 심부름 이벤트 1회차 — 수락해서 오늘치를 받는다.
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
@@ -2775,7 +2776,8 @@ test('accepting the errand event once blocks it from firing again the same day (
   await teachThreeTimes('round2') // 배고픔 이벤트가 다시 번갈아 뜬다.
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원', { timeout: 8000 })
 
   // 심부름 차례가 다시 와도, 오늘 이미 받았으므로 모달 자체가 뜨지
   // 않는다(용돈도 그대로) — "이미 보상을 받은 상태라면 이벤트가 다시
