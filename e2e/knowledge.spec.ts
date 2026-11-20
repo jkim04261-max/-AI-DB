@@ -1745,6 +1745,79 @@ test('feeding walks to the restaurant, then shows the eating scene for a few sec
   await expect(page.getByTestId('hungry-warning-banner')).toHaveCount(0)
 })
 
+// 지시서(밥 먹기 이벤트: 캐릭터 걷기 이동 및 식당 내부 식사 모습 강제
+// 적용) 버그 회귀 방지: 캐릭터를 걷게 하려고 전신 그림 래퍼를
+// position:absolute로 뺐더니, 그 부모(.relative 래퍼)가 내용 없는
+// absolute 자식만으로는 폭을 가늠할 수 없어 items-center 때문에
+// 너비 0으로 쪼그라들었고, 그 결과 "왼쪽 42%" 같은 가로 위치가
+// "폭 0의 42%" = 0px가 되어 캐릭터가 화면에 전혀 보이지 않았다(식당
+// 내부 배경만 보임). 매 단계(고르는 중/걷는 중/식사 중)마다 전신
+// 그림이 실제로 화면에 보이는 크기를 갖는지 확인해 이 회귀를 막는다.
+test('the character portrait stays visible (non-zero size) through every phase of the meal event', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-visibility',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  const portrait = page.getByTestId('hungry-event-modal').locator('img')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  const choosingBox = await portrait.boundingBox()
+  expect(choosingBox?.width).toBeGreaterThan(0)
+  expect(choosingBox?.height).toBeGreaterThan(0)
+
+  await page.getByTestId('hungry-event-feed-button').click()
+  await page.waitForTimeout(500) // walking 단계 중
+  const walkingBox = await portrait.boundingBox()
+  expect(walkingBox?.width).toBeGreaterThan(0)
+  expect(walkingBox?.height).toBeGreaterThan(0)
+
+  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible({ timeout: 4000 }) // eating 단계 진입
+  const eatingBox = await portrait.boundingBox()
+  expect(eatingBox?.width).toBeGreaterThan(0)
+  expect(eatingBox?.height).toBeGreaterThan(0)
+})
+
 // 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
 // 연출 구현): 평소에는 동네 전경이 보이고, "밥 먹이기"를 누르면(식당에
 // 들어가면) 식당 내부 배경이 페이드인(opacity-100)되는지 확인한다.
