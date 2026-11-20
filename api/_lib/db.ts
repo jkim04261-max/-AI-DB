@@ -455,9 +455,13 @@ export function ensureKnowledgeTable() {
       // (이름 없는 CHECK의 기본 이름에 의존)으로 그 제약을 지우고
       // 'card_game'을 포함한 4종으로 다시 건다.
       await sql`ALTER TABLE character_knowledge_entries DROP CONSTRAINT IF EXISTS character_knowledge_entries_mission_type_check`
+      // 지시서(8세 학습 시스템: 8문제 커리큘럼): toddler(8~9살)용 신유형
+      // 미니게임 2종(순서 맞추기/분류하기)을 card_game과 같은 "완료
+      // 확인형" 미션으로 추가한다 — 같은 이유(이미 배포된 DB의 기존
+      // CHECK를 덮어써야 함)로 또 한 번 drop 후 6종으로 다시 건다.
       await sql`
         ALTER TABLE character_knowledge_entries ADD CONSTRAINT character_knowledge_entries_mission_type_check
-          CHECK (mission_type IN ('objective', 'subjective', 'knowhow', 'card_game'))
+          CHECK (mission_type IN ('objective', 'subjective', 'knowhow', 'card_game', 'sequence_order', 'categorize'))
       `
       await sql`
         ALTER TABLE character_knowledge_entries ADD COLUMN IF NOT EXISTS age_tier_at_save TEXT

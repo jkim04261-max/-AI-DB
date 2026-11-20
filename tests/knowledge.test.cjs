@@ -788,6 +788,20 @@ async function run() {
     )
     t.assert(blockedSave.statusCode === 400, '연령 제한에 걸린 토큰으로 저장을 시도하면 400으로 거부된다(우회 방지)')
 
+    // 버그 수정(8세 학습 시 "이해하기 힘들어요" 거절 무한 반복): 이
+    // 검증 호출에 보낸 systemInstruction이 더 이상 toddler/teen을 한
+    // 줄로 묶지 않는지 확인한다 — 묶여 있으면 Gemini가 8~9살도 이해할
+    // 쉬운 내용을 'teen'으로 잘못 판정해, toddler 캐릭터가 영원히
+    // 막히는 원인이 된다.
+    t.assert(
+      typeof lastSystemInstruction === 'string' && !lastSystemInstruction.includes('toddler(8~9살)/teen(10대)'),
+      'toddler와 teen을 한 줄로 묶어 설명하지 않는다(8세 학습 "이해하기 힘들어요" 무한 반복의 원인이었다)',
+    )
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('toddler(8~9살)') && lastSystemInstruction.includes('teen(10대)'),
+      'toddler(8~9살)와 teen(10대)을 각각 별도 줄로 설명한다',
+    )
+
     // 레벨이 15(junior_20s 구간: Lv.10~19)가 되면 같은 지식도 정상적으로
     // 배울 수 있다 — DB에 새 컬럼을 만들지 않고 character.level만으로
     // 판정하므로, 레벨만 바꿔도 연령대가 그대로 따라온다.
@@ -974,7 +988,7 @@ async function run() {
     // 당연히 toddler로 고정된다).
     const firstSave = await teachOnce(1, 'objective')
     t.assert(firstSave.statusCode === 201, '첫 지식 저장이 성공한다')
-    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/6뿐이라 아직 진화하지 않는다')
+    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/8뿐이라 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '첫 평가에서 toddler로 고정된다')
 
     // 레벨이 이미 teen 기준(Lv.5)을 넘어도(퀴즈·시험 등으로 다른 곳에서
@@ -985,7 +999,7 @@ async function run() {
     kateNuri.exp = 1000
     const noMissionSave = await teachOnce(2, 'objective')
     t.assert(noMissionSave.statusCode === 201, '레벨만 충분한 상태에서도 저장 자체는 성공한다')
-    t.assert(noMissionSave.body.evolved === false, '미션이 2/6뿐이면 레벨이 충분해도 진화하지 않는다')
+    t.assert(noMissionSave.body.evolved === false, '미션이 2/8뿐이면 레벨이 충분해도 진화하지 않는다')
     t.assert(noMissionSave.body.missionProgress.confirmedTotal === 2, '지금까지 저장한 2건이 objective 2개로 집계된다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '레벨은 넘었지만 미션이 안 끝나서 toddler에 그대로 고정된다(진짜 게이트)')
 
@@ -994,11 +1008,12 @@ async function run() {
     const kateNuriJson = getRes.body.characters.find((c) => c.companion_type === 'nuri')
     t.assert(kateNuriJson.level === 5 && kateNuriJson.age_tier === 'toddler', '캐릭터 목록 응답도 레벨(5)과 무관하게 age_tier는 toddler로 고정되어 내려온다')
 
-    // 2) 유형 구성이 4(knowhow)+3(objective)+1(card_game)이 아니면
-    // (객관식만 계속 쌓여도) 진화하지 않는다 — 지시서(8세 학습 총
-    // 8문제 제한 및 10대 강제 레벨업 로직 수정)로 toddler가 3:2:1(총
-    // 6개)에서 이 비율(총 8개)로 바뀌었다 — "총 개수"가 아니라
-    // "유형별로 정해진 개수"가 조건인 것은 그대로다.
+    // 2) 유형 구성이 3(knowhow)+2(objective)+1(card_game)+1(sequence_order)
+    // +1(categorize)가 아니면(객관식만 계속 쌓여도) 진화하지 않는다 —
+    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성)로 toddler의 3단계가
+    // "주관식 1개"에서 "card_game 1 + sequence_order 1 + categorize 1"
+    // 로 바뀌었다 — "총 8개"가 아니라 "유형별로 정해진 개수"가 조건인
+    // 것은 그대로다.
     for (let n = 3; n <= 6; n++) {
       const res = await teachOnce(n, 'objective')
       t.assert(res.body.evolved === false, `${n}번째(여전히 objective만)까지는 진화하지 않는다`)
@@ -1006,25 +1021,45 @@ async function run() {
     const missionsRes = mockRes()
     await characterHandler(kateReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), missionsRes)
     t.assert(
-      missionsRes.body.missionProgress.byType.objective.confirmed === 3 && missionsRes.body.missionProgress.byType.objective.complete === true,
-      'objective는 3개에서 더 이상 늘지 않고(유형별 상한 3) 완료 표시된다',
+      missionsRes.body.missionProgress.byType.objective.confirmed === 2 && missionsRes.body.missionProgress.byType.objective.complete === true,
+      'objective는 2개에서 더 이상 늘지 않고(유형별 상한 2) 완료 표시된다',
     )
-    t.assert(missionsRes.body.missionProgress.byType.card_game.required === 1 && missionsRes.body.missionProgress.byType.knowhow.required === 4, 'toddler의 유형별 필요 개수는 card_game 1개/knowhow 4개(직접입력3+노하우1)다')
-    t.assert(missionsRes.body.missionProgress.byType.card_game.confirmed === 0 && missionsRes.body.missionProgress.byType.knowhow.confirmed === 0, 'card_game/knowhow는 아직 0개다')
+    t.assert(
+      missionsRes.body.missionProgress.byType.card_game.required === 1 &&
+        missionsRes.body.missionProgress.byType.sequence_order.required === 1 &&
+        missionsRes.body.missionProgress.byType.categorize.required === 1 &&
+        missionsRes.body.missionProgress.byType.knowhow.required === 3,
+      'toddler의 유형별 필요 개수는 card_game/sequence_order/categorize 각 1개, knowhow 3개다',
+    )
+    t.assert(
+      missionsRes.body.missionProgress.byType.card_game.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.sequence_order.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.categorize.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.knowhow.confirmed === 0,
+      'card_game/sequence_order/categorize/knowhow는 아직 0개다',
+    )
     t.assert(missionsRes.body.missionProgress.allConfirmed === false, '유형이 한쪽으로 쏠려 있으면 총 개수가 충분해도 allConfirmed는 false다')
 
-    // 3) card_game 1개 + knowhow 4개까지 채우면(= 3+1+4=8) 8문제가 모두
-    // 끝나지만, 종합 최종 시험에 합격하기 전까지는(final_exam_passed)
-    // 레벨이 충분해도 진화하지 않는다(사용자 확인: "8문제 모두 풀고
-    // 최종시험 8개 모두 합격해야 10살로 넘어감").
-    const cardGame1 = await teachCardGame(7)
-    t.assert(cardGame1.body.evolved === false, 'card_game까지 채웠어도 knowhow가 아직 0개라 진화하지 않는다')
-    await teachOnce(8, 'knowhow')
-    await teachOnce(9, 'knowhow')
-    await teachOnce(10, 'knowhow')
-    const allEightFilled = await teachOnce(11, 'knowhow')
+    // 3) card_game 1 + sequence_order 1 + categorize 1 + knowhow 3까지
+    // 채우면(= 2+1+1+1+3=8) 8문제가 모두 끝나지만, 종합 최종 시험에
+    // 합격하기 전까지는(final_exam_passed) 레벨이 충분해도 진화하지
+    // 않는다(사용자 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야
+    // 10살로 넘어감"). 8문제(기존 6문제보다 2번 더 verify-knowledge를
+    // 호출함)라 여기서 하루 지식 검증 10회 한도를 넘기므로, 진화 판정
+    // 자체와는 무관한 그 제한에 걸리지 않도록 먼저 날짜를 넘긴다(위
+    // 2)까지 총 6회 소비).
+    mock.setFakeDate('2026-03-02')
+    const cardGame1 = await teachOnce(107, 'card_game')
+    t.assert(cardGame1.body.evolved === false, 'card_game이 1개로 꽉 찼어도 나머지 신유형 미니게임·knowhow가 남아 진화하지 않는다')
+    const seq1 = await teachOnce(108, 'sequence_order')
+    t.assert(seq1.body.evolved === false, 'sequence_order까지 채워도 categorize·knowhow가 남아 진화하지 않는다')
+    const cat1 = await teachOnce(109, 'categorize')
+    t.assert(cat1.body.evolved === false, 'categorize까지 채워도 knowhow가 아직 0개라 진화하지 않는다')
+    await teachOnce(110, 'knowhow')
+    await teachOnce(111, 'knowhow')
+    const allEightFilled = await teachOnce(112, 'knowhow')
     t.assert(allEightFilled.statusCode === 201, '8번째(마지막) 지식 저장이 성공한다')
-    t.assert(allEightFilled.body.missionProgress.allConfirmed === true, '8문제(직접입력3+노하우1=knowhow4, 객관식3, 카드맞추기1)를 모두 채웠다')
+    t.assert(allEightFilled.body.missionProgress.allConfirmed === true, '8문제(직접입력3, 객관식2, 카드맞추기1, 순서맞추기1, 분류하기1)를 모두 채웠다')
     t.assert(allEightFilled.body.evolved === false, '8문제를 다 채워도 아직 종합 최종 시험에 합격하지 않아 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '미션은 끝났지만 최종 시험 전까지는 toddler에 그대로 고정된다(진짜 게이트)')
 
@@ -1073,17 +1108,17 @@ async function run() {
     // 5) 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen은 고정
     // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
     // ④객관식=objective3, subjective는 0)으로 10개를 요구한다. 지금까지
-    // 이미 지식 검증을 10회 썼으므로(하루 10회 제한), 이 구간에서 더
-    // 쓰기 전에 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
+    // 이미 지식 검증을 여러 번 썼으므로(하루 10회 제한, toddler 8문제
+    // 완료로 2026-03-02도 이미 6회 소비), 이 구간에서 더 쓰기 전에 또
+    // 한 번 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
     // 아니라 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의
     // 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
-    mock.setFakeDate('2026-03-02')
-    // teachCardGame은 위(①단계 바로 뒤)에서 이미 정의했다 — toddler
-    // card_game과 모양이 완전히 같아 재사용한다. 지시서(8세 학습 총
-    // 8문제 제한 및 10대 강제 레벨업 로직 수정)로 toddler 구간이 n=11
-    // (knowhow 4번째)까지 requestId를 썼으므로, 여기서는 n=12부터 다시
-    // 시작해 requestId가 겹쳐 idempotency로 조용히 무시되는 것을
-    // 막는다.
+    // teachCardGame은 위(toddler card_game 단계)에서 이미 정의했으므로
+    // 재사용한다. toddler 구간이 n=112(knowhow 3번째)까지, 종합 최종
+    // 시험 합격까지 requestId를 썼으므로, 여기서는 n=11부터 시작해도
+    // 겹치지 않는다.
+    mock.setFakeDate('2026-03-03')
+    await teachOnce(11, 'objective')
     await teachOnce(12, 'objective')
     await teachOnce(13, 'objective')
     await teachOnce(14, 'objective')
@@ -1102,7 +1137,7 @@ async function run() {
     // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
     // 판정을 공유한다는 뜻). teen의 10회로 당일 하루 제한을 이미 다
     // 썼으므로, 다시 날짜를 넘긴다.
-    mock.setFakeDate('2026-03-03')
+    mock.setFakeDate('2026-03-04')
     kateNuri.level = 10
     kateNuri.exp = 4500
     geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' } }
@@ -1279,8 +1314,9 @@ async function run() {
   // --- 지시서 #03(8~9살 시험 시스템 전면 개편), 지시서(8세 학습 총
   // 8문제 제한 및 10대 강제 레벨업 로직 수정)로 숫자 갱신: toddler
   // (8~9살)→teen(10대) 첫 진화는 "복잡한 레벨 조건 없이" 유형별로
-  // 정해진 개수 총 8개(knowhow 4+objective 3+card_game 1) 확정과 종합
-  // 최종 시험 합격만으로 진화해야 한다 — Lv.1(레벨 조건
+  // 정해진 개수 총 8개(knowhow 3+objective 2+card_game 1+
+  // sequence_order 1+categorize 1) 확정과 종합 최종 시험 합격만으로
+  // 진화해야 한다 — Lv.1(레벨 조건
   // AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)인 채로도 진화하는지
   // 전용으로 확인한다.
   {
@@ -1323,32 +1359,15 @@ async function run() {
 
     await teachOnceLeo(1, 'objective')
     await teachOnceLeo(2, 'objective')
-    await teachOnceLeo(3, 'objective')
-    const leoCardGameComplete = mockRes()
-    await characterHandler(leoReq({ method: 'POST', query: { action: 'complete-card-game' }, body: { companionType: 'nuri' } }), leoCardGameComplete)
-    await characterHandler(
-      leoReq({
-        method: 'POST',
-        query: { action: 'save-knowledge' },
-        body: {
-          companionType: 'nuri',
-          title: leoCardGameComplete.body.knowledge.title,
-          originalContent: leoCardGameComplete.body.knowledge.content,
-          finalContent: leoCardGameComplete.body.knowledge.content,
-          verificationToken: leoCardGameComplete.body.verificationToken,
-          requestId: 'req-leo-card-1',
-          missionType: 'card_game',
-        },
-      }),
-      mockRes(),
-    )
-    await teachOnceLeo(4, 'knowhow')
-    await teachOnceLeo(5, 'knowhow')
+    await teachOnceLeo(3, 'card_game')
+    await teachOnceLeo(4, 'sequence_order')
+    await teachOnceLeo(5, 'categorize')
     await teachOnceLeo(6, 'knowhow')
+    await teachOnceLeo(7, 'knowhow')
     t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
-    const leoEightFilled = await teachOnceLeo(7, 'knowhow')
+    const leoEightFilled = await teachOnceLeo(8, 'knowhow')
     t.assert(leoEightFilled.statusCode === 201, '8번째(마지막) 지식 저장이 성공한다')
-    t.assert(leoEightFilled.body.missionProgress.allConfirmed === true, '8개(knowhow4+objective3+card_game1)를 모두 채웠다')
+    t.assert(leoEightFilled.body.missionProgress.allConfirmed === true, '8개(knowhow3+objective2+card_game1+sequence_order1+categorize1)를 모두 채웠다')
     t.assert(leoEightFilled.body.evolved === false, '8개를 채워도 아직 종합 최종 시험에 합격하지 않아 진화하지 않는다')
     t.assert(leoNuri.mission_unlocked_tier === 'toddler', '미션은 끝났지만 최종 시험 전까지는 toddler에 그대로 고정된다')
 
@@ -1463,9 +1482,9 @@ async function run() {
 
     await teachOnceNora(1, 'objective')
     await teachOnceNora(2, 'objective')
-    await teachOnceNora(3, 'objective')
-    await teachCardGameNora(4)
-    await teachOnceNora(5, 'knowhow')
+    await teachCardGameNora(3)
+    await teachOnceNora(4, 'sequence_order')
+    await teachOnceNora(5, 'categorize')
     await teachOnceNora(6, 'knowhow')
     await teachOnceNora(7, 'knowhow')
     await teachOnceNora(8, 'knowhow')
@@ -1593,9 +1612,9 @@ async function run() {
 
     await teachOncePriya(1, 'objective')
     await teachOncePriya(2, 'objective')
-    await teachOncePriya(3, 'objective')
-    await teachCardGamePriya(4)
-    await teachOncePriya(5, 'knowhow')
+    await teachCardGamePriya(3)
+    await teachOncePriya(4, 'sequence_order')
+    await teachOncePriya(5, 'categorize')
     await teachOncePriya(6, 'knowhow')
     await teachOncePriya(7, 'knowhow')
     await teachOncePriya(8, 'knowhow')
@@ -1690,9 +1709,9 @@ async function run() {
     '이 직업의 주된 목적은 무엇인가요?',
     '이 직업에 필요한 핵심 역량은 무엇인가요?',
   ]
-  // toddler 기준 선택지 3개짜리 문제 3개를 만든다(지시서(8세 학습 총
+  // toddler 기준 선택지 3개짜리 문제 2개를 만든다(지시서(8세 학습 총
   // 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후 toddler의 objective
-  // 필요 개수가 2→3으로 늘면서, handleGetObjectiveQuiz도 한 세트에
+  // 필요 개수가 3→2로 줄면서, handleGetObjectiveQuiz도 한 세트에
   // 정확히 그 요구 개수만큼 내려주도록 바뀌었다 — characterAge.ts의
   // MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier].objective를 그대로 쓴다)
   // — correctIndex를 테스트가 직접 지정해 정답/오답 제출에 그대로 쓴다
@@ -1715,17 +1734,17 @@ async function run() {
     await characterHandler(minaReq({ method: 'POST', body: { companionType: 'duri' } }), mockRes())
     await characterHandler(minaReq({ method: 'PATCH', body: { companionType: 'duri', profession: 'doctor' } }), mockRes())
 
-    // 1) 문제 3개 + quizToken을 받고, 정답(correctIndex)은 전혀
+    // 1) 문제 2개 + quizToken을 받고, 정답(correctIndex)은 전혀
     // 포함되지 않으며, toddler 단계는 보기 3개씩 출제된다. Gemini는
     // 정확히 1번만 호출된다(비용 절감 — N개를 1번에 배치 생성).
-    const mockedSet1 = makeObjectiveQuizMock(3, 3, [1, 0, 2])
+    const mockedSet1 = makeObjectiveQuizMock(2, 3, [1, 0])
     geminiBehavior = { kind: 'json', result: mockedSet1 }
     const callCountBefore1 = geminiCallCount
     const quizRes1 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes1)
     t.assert(quizRes1.statusCode === 200, '의사 직업이어도 객관식 퀴즈를 바로 받을 수 있다(전문직 포함 전체 적용)')
-    t.assert(geminiCallCount === callCountBefore1 + 1, 'Gemini는 문제 3개를 1번의 배치 호출로 생성한다(비용 절감)')
-    t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 3, '문제 3개를 받는다(toddler의 objective 필요 개수와 같은 세트 크기)')
+    t.assert(geminiCallCount === callCountBefore1 + 1, 'Gemini는 문제 2개를 1번의 배치 호출로 생성한다(비용 절감)')
+    t.assert(Array.isArray(quizRes1.body.questions) && quizRes1.body.questions.length === 2, '문제 2개를 받는다(toddler의 objective 필요 개수와 같은 세트 크기)')
     t.assert(typeof quizRes1.body.quizToken === 'string' && quizRes1.body.quizToken.length > 0, '서명된 quizToken을 받는다')
     t.assert(quizRes1.body.questions.every((q) => q.correctIndex === undefined), '정답(correctIndex)은 클라이언트로 내려가지 않는다')
     t.assert(quizRes1.body.questions.every((q) => q.choices.length === 3), 'toddler(8~9살) 단계는 보기 3개가 출제된다(연령대별 선택지 개수)')
@@ -1745,16 +1764,16 @@ async function run() {
     )
     t.assert(wrongSubmit.statusCode === 200, '틀려도 200으로 응답한다(에러가 아니라 결과)')
     t.assert(wrongSubmit.body.allCorrect === false, '하나라도 틀리면 allCorrect:false다')
-    t.assert(wrongSubmit.body.results.length === 3, '세 문제 각각의 정오답이 내려온다')
+    t.assert(wrongSubmit.body.results.length === 2, '두 문제 각각의 정오답이 내려온다')
     t.assert(wrongSubmit.body.expAwarded === 0, '틀리면 XP가 지급되지 않는다')
     const afterWrongKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterWrongKnowledge)
     t.assert(afterWrongKnowledge.body.entries.length === 0, '틀리면 지식 항목이 전혀 저장되지 않는다')
 
-    // 3) 새 세트를 받아 셋 다 맞히면 세트 1개만으로 objective 요구치
-    // (3개)가 정확히 채워져 통과하고, 3건이 저장되며 XP가 30(지식 저장
-    // 10XP × 3) 지급된다.
-    const mockedSet2 = makeObjectiveQuizMock(3, 3, [2, 1, 0])
+    // 3) 새 세트를 받아 둘 다 맞히면 세트 1개만으로 objective 요구치
+    // (2개)가 정확히 채워져 통과하고, 2건이 저장되며 XP가 20(지식 저장
+    // 10XP × 2) 지급된다.
+    const mockedSet2 = makeObjectiveQuizMock(2, 3, [2, 1])
     geminiBehavior = { kind: 'json', result: mockedSet2 }
     const quizRes2 = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes2)
@@ -1768,15 +1787,15 @@ async function run() {
       }),
       correctSubmit,
     )
-    t.assert(correctSubmit.statusCode === 201, '셋 다 맞히면 201로 응답한다')
-    t.assert(correctSubmit.body.allCorrect === true, '셋 다 맞히면 allCorrect:true다')
-    t.assert(correctSubmit.body.expAwarded === 30, '지식 저장 XP(10) × 3건 = 30XP가 지급된다')
-    t.assert(correctSubmit.body.missionProgress.byType.objective.confirmed === 3 && correctSubmit.body.missionProgress.byType.objective.complete === true, 'objective 미션은 세트 크기(3)가 필요 개수(3)와 같아 한 세트만으로 3/3 완료된다')
-    t.assert(correctSubmit.body.evolved === false, 'objective는 완료됐어도 knowhow/card_game이 아직 안 채워져 있어 진화하지 않는다')
+    t.assert(correctSubmit.statusCode === 201, '둘 다 맞히면 201로 응답한다')
+    t.assert(correctSubmit.body.allCorrect === true, '둘 다 맞히면 allCorrect:true다')
+    t.assert(correctSubmit.body.expAwarded === 20, '지식 저장 XP(10) × 2건 = 20XP가 지급된다')
+    t.assert(correctSubmit.body.missionProgress.byType.objective.confirmed === 2 && correctSubmit.body.missionProgress.byType.objective.complete === true, 'objective 미션은 세트 크기(2)가 필요 개수(2)와 같아 한 세트만으로 2/2 완료된다')
+    t.assert(correctSubmit.body.evolved === false, 'objective는 완료됐어도 knowhow/card_game/신유형 미니게임이 아직 안 채워져 있어 진화하지 않는다')
     const afterCorrectKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterCorrectKnowledge)
-    t.assert(afterCorrectKnowledge.body.entries.length === 3, '통과한 3문제가 각각 지식 항목으로 저장된다')
-    t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '세 항목 모두 mission_type=objective로 저장된다')
+    t.assert(afterCorrectKnowledge.body.entries.length === 2, '통과한 2문제가 각각 지식 항목으로 저장된다')
+    t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '두 항목 모두 mission_type=objective로 저장된다')
 
     // 4) 같은 requestId로 재제출(네트워크 재시도 등)하면 중복 저장·중복
     // XP 지급 없이 현재 상태를 그대로 돌려준다.
@@ -1792,11 +1811,11 @@ async function run() {
     t.assert(replaySubmit.statusCode === 200 && replaySubmit.body.allCorrect === true && replaySubmit.body.expAwarded === 0, '같은 requestId의 재제출은 중복 지급 없이 현재 상태를 돌려준다')
     const afterReplayKnowledge = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterReplayKnowledge)
-    t.assert(afterReplayKnowledge.body.entries.length === 3, '재제출로 지식 항목이 중복 저장되지 않는다(여전히 3건)')
+    t.assert(afterReplayKnowledge.body.entries.length === 2, '재제출로 지식 항목이 중복 저장되지 않는다(여전히 2건)')
 
     // 5) 다른 캐릭터(두리)의 quizToken으로 누리 쪽을 제출하면 거부된다
     // (서명은 유효해도 이 캐릭터에게 출제된 문제가 아니므로).
-    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(3, 3, [0, 0, 0]) }
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 3, [0, 0]) }
     const quizResDuri = mockRes()
     await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'duri' } }), quizResDuri)
     const crossSubmit = mockRes()
@@ -1804,7 +1823,7 @@ async function run() {
       minaReq({
         method: 'POST',
         query: { action: 'objective-quiz-submit' },
-        body: { companionType: 'nuri', quizToken: quizResDuri.body.quizToken, answers: [0, 0, 0] },
+        body: { companionType: 'nuri', quizToken: quizResDuri.body.quizToken, answers: [0, 0] },
       }),
       crossSubmit,
     )
@@ -1818,24 +1837,23 @@ async function run() {
     await characterHandler({ headers: { cookie: npCookie }, query: { action: 'objective-quiz', companionType: 'nuri' }, method: 'GET' }, noProfessionQuiz)
     t.assert(noProfessionQuiz.statusCode === 400, '직업이 없으면 객관식 퀴즈를 받을 수 없다(400)')
 
-    // 7) 답 개수가 문제 수(3개)와 다르면 400.
+    // 7) 답 개수가 문제 수(2개)와 다르면 400.
     const malformedSubmit = mockRes()
     await characterHandler(
-      minaReq({ method: 'POST', query: { action: 'objective-quiz-submit' }, body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: [0, 0] } }),
+      minaReq({ method: 'POST', query: { action: 'objective-quiz-submit' }, body: { companionType: 'nuri', quizToken: quizRes2.body.quizToken, answers: [0, 0, 0] } }),
       malformedSubmit,
     )
-    t.assert(malformedSubmit.statusCode === 400, '답이 3개가 아니면 400으로 거부된다')
+    t.assert(malformedSubmit.statusCode === 400, '답이 2개가 아니면 400으로 거부된다')
 
     // 8) Gemini가 선택지 개수를 어기거나(choices 길이 불일치) JSON을
     // 해석할 수 없는 응답을 주면 502 — 틀린 응답을 그대로 신뢰해 보기
-    // 개수가 안 맞는 퀴즈를 내보내지 않는다. 문제 수(3개) 자체는
+    // 개수가 안 맞는 퀴즈를 내보내지 않는다. 문제 수(2개) 자체는
     // 맞췄지만, 그중 1개의 보기 개수(2개)가 요구치(3개)를 어긴다.
     geminiBehavior = {
       kind: 'json',
       result: [
         { text: '문제', choices: ['A', 'B'], correctIndex: 0, explanation: '해설' },
         { text: '문제2', choices: ['C', 'D', 'E'], correctIndex: 0, explanation: '해설2' },
-        { text: '문제3', choices: ['F', 'G', 'H'], correctIndex: 0, explanation: '해설3' },
       ],
     }
     const badChoiceCountQuiz = mockRes()
@@ -1976,33 +1994,49 @@ async function run() {
         `${tier} 단계의 필요 지식 총합은 ${expectedTotal}개다`,
       )
       const perType = characterAge.MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
-      const sum = perType.objective + perType.subjective + perType.knowhow + perType.card_game
+      const sum = perType.objective + perType.subjective + perType.knowhow + perType.card_game + perType.sequence_order + perType.categorize
       t.assert(
         sum === expectedTotal,
-        `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game})`,
+        `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game}+sequence_order${perType.sequence_order}+categorize${perType.categorize})`,
       )
       // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합/8세 학습 총 8문제
       // 제한 및 10대 강제 레벨업 로직 수정): teen과 toddler 둘 다 고정
       // 순서 커리큘럼(teen: ①③⑤직접입력=knowhow6, ②카드맞추기=
-      // card_game1, ④객관식=objective3; toddler: ①④직접입력/노하우=
-      // knowhow4, ②객관식=objective3, ③카드맞추기=card_game1)이라
-      // subjective가 의도적으로 0이고 다른 티어와 모양이 다르다 —
-      // junior_20s 이상은 이 변경의 영향을 받지 않았는지(card_game은
-      // 항상 0) 그대로 확인한다.
+      // card_game1, ④객관식=objective3; toddler: ①직접입력=knowhow3,
+      // ②객관식=objective2, ③카드맞추기=card_game1, ④신유형 미니게임=
+      // sequence_order1+categorize1)이라 subjective가 의도적으로 0이고
+      // 다른 티어와 모양이 다르다 — junior_20s 이상은 이 변경의
+      // 영향을 받지 않았는지(card_game/신유형 미니게임은 항상 0) 그대로
+      // 확인한다.
       if (tier === 'teen') {
         t.assert(
-          perType.knowhow === 6 && perType.objective === 3 && perType.subjective === 0 && perType.card_game === 1,
-          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective는 0)을 요구한다',
+          perType.knowhow === 6 &&
+            perType.objective === 3 &&
+            perType.subjective === 0 &&
+            perType.card_game === 1 &&
+            perType.sequence_order === 0 &&
+            perType.categorize === 0,
+          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective·신유형 미니게임은 0)을 요구한다',
         )
       } else if (tier === 'toddler') {
         t.assert(
-          perType.knowhow === 4 && perType.objective === 3 && perType.subjective === 0 && perType.card_game === 1,
-          'toddler 단계는 고정 커리큘럼(직접입력3+노하우1=knowhow4, 객관식3, 카드맞추기1, subjective는 0)을 요구한다',
+          perType.knowhow === 3 &&
+            perType.objective === 2 &&
+            perType.subjective === 0 &&
+            perType.card_game === 1 &&
+            perType.sequence_order === 1 &&
+            perType.categorize === 1,
+          'toddler 단계는 고정 커리큘럼(직접입력3+객관식2+카드맞추기1+순서맞추기1+분류하기1, subjective는 0)을 요구한다',
         )
       } else {
         t.assert(
-          perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0 && perType.card_game === 0,
-          `${tier} 단계는 세 유형(객관식/주관식/노하우) 모두 최소 1개 이상을 요구하고 card_game은 0이다(teen/toddler 전용 커리큘럼의 영향을 받지 않는다)`,
+          perType.objective > 0 &&
+            perType.subjective > 0 &&
+            perType.knowhow > 0 &&
+            perType.card_game === 0 &&
+            perType.sequence_order === 0 &&
+            perType.categorize === 0,
+          `${tier} 단계는 세 유형(객관식/주관식/노하우) 모두 최소 1개 이상을 요구하고 card_game/신유형 미니게임은 0이다(toddler/teen 전용 커리큘럼의 영향을 받지 않는다)`,
         )
       }
     }

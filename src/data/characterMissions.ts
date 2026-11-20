@@ -17,8 +17,12 @@ import type { AgeTier } from './characterAge'
 // 맞추기)을 네 번째 유형으로 추가했다 — api/_lib/characterAge.ts와
 // 반드시 같은 값이어야 한다. 10대에서만 1개 요구되고, 다른 연령대는
 // 전부 0이다(해당 파일의 override 참고).
-export type MissionType = 'objective' | 'subjective' | 'knowhow' | 'card_game'
-export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow', 'card_game']
+//
+// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 'sequence_order'(순서
+// 맞추기)/'categorize'(분류하기) 2종을 추가했다 — toddler(8~9살)에서만
+// 각 1개씩 요구되고, 다른 연령대는 전부 0이다.
+export type MissionType = 'objective' | 'subjective' | 'knowhow' | 'card_game' | 'sequence_order' | 'categorize'
+export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow', 'card_game', 'sequence_order', 'categorize']
 
 // PR #62의 3개 입력 카드(① 선택지 고르기 ② AI 추천 받기 ③ 직접
 // 입력하기)가 그대로 이 3개 미션 유형에 대응한다 — 새 입력 방식을
@@ -28,12 +32,16 @@ export const MISSION_TYPE_LABEL: Record<MissionType, string> = {
   subjective: 'AI 추천 받기',
   knowhow: '직접 입력하기',
   card_game: '직업 카드 맞추기',
+  sequence_order: '순서 맞추기',
+  categorize: '분류하기',
 }
 export const MISSION_TYPE_ICON: Record<MissionType, string> = {
   objective: '🎯',
   subjective: '✨',
   knowhow: '✏️',
   card_game: '🃏',
+  sequence_order: '🔢',
+  categorize: '🗂️',
 }
 
 export interface MissionTypeProgress {

@@ -56,6 +56,11 @@ async function mockCharacterApi(
     // 내려주는 기본값을 쓴다(이 단계 자체를 다루지 않는 테스트를 위한
     // 기본값, 다른 onXxx들과 같은 패턴).
     onCompleteCardGame?: (route: Route) => Promise<void>
+    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/
+    // 분류하기도 카드 맞추기와 완전히 같은 모의 패턴(기본 동작 있음,
+    // 필요하면 override).
+    onCompleteSequenceGame?: (route: Route) => Promise<void>
+    onCompleteCategorizeGame?: (route: Route) => Promise<void>
     // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
     // "종합 최종 시험" 전용 — 지정하지 않으면 2문제(둘 다 정답은
     // 0번)짜리 기본 시험을 내려주고, 제출은 모두 0번을 골랐을 때만
@@ -204,6 +209,40 @@ async function mockCharacterApi(
           verification: { status: 'appropriate', explanation: '모든 카드를 맞췄어요!', relevance: '', issues: '', suggestion: '' },
           verificationToken: 'mock-card-game-token',
           characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'complete-sequence-game') {
+      if (options.onCompleteSequenceGame) {
+        await options.onCompleteSequenceGame(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '순서 맞추기 완료', content: '하루 일과를 올바른 순서대로 맞춰서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '순서를 전부 맞췄어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'mock-sequence-game-token',
+          characterReply: '순서를 완벽하게 맞췄어요! 대단해요!',
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'complete-categorize-game') {
+      if (options.onCompleteCategorizeGame) {
+        await options.onCompleteCategorizeGame(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '분류하기 완료', content: '여러 물건을 올바른 무리로 모두 나눠서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '전부 올바르게 분류했어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'mock-categorize-game-token',
+          characterReply: '다 올바른 무리로 나눴어요! 정말 똑똑해요!',
         }),
       })
       return
@@ -1124,10 +1163,9 @@ test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-
   expect(saveRequestBody?.missionType).toBe('subjective')
 })
 
-// 위 복구가 toddler의 2단계(객관식)·3단계(전용 주관식 컴포넌트)까지
-// 건드리지 않았는지 — 지시서의 "다른 학습 단계를 건드리지 마세요"
-// 금지 사항을 직접 확인한다.
-test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관식)/3단계(주관식) steps', async ({ page }) => {
+// 위 복구가 toddler의 2단계(객관식)까지 건드리지 않았는지 — 지시서의
+// "다른 학습 단계를 건드리지 마세요" 금지 사항을 직접 확인한다.
+test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관식) step', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1142,10 +1180,12 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
               subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-              knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
               card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+              sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+              categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
             },
             confirmedTotal: 3,
             requiredTotal: 8,
@@ -1161,11 +1201,9 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
-  // 1단계(직접입력)는 knowhow.confirmed가 3(TODDLER_DIRECT1_COUNT)에
-  // 도달하면 끝나므로(전체 필요 개수 4와는 별개), knowhow 3/4인 채로도
-  // 이미 2단계(객관식)로 들어와 있다 — 여기서는 AI 추천 받기 카드가
-  // 보이면 안 된다.
+  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 1단계(직접입력)는
+  // knowhow.confirmed가 required(3)에 도달하면 끝나고 2단계(객관식)로
+  // 넘어간다 — 여기서는 AI 추천 받기 카드가 보이면 안 된다.
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await expect(page.getByText('✨ AI 추천 받기', { exact: true })).toHaveCount(0)
 })
@@ -1507,8 +1545,8 @@ test('completing 3 knowledge saves at the 8~9살 stage auto-closes the teach pan
   // 금액 표기 없이 바로 먹는다.
   await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기')
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 걷기(2.5초) → 식사 연출(3.5초) 뒤 자동으로 모달이 닫힌다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 })
 
 // 지시서(밥 먹는 캐릭터 에셋 깨짐 방지): 식사 그림(eating) 로드가
@@ -1573,10 +1611,15 @@ test('a failed-to-load eating image falls back to the idle portrait instead of a
   // 없어야 한다.
   await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-walking)/)
 
-  // "밥 먹이기"를 누르면 "식사" 그림으로 바뀌는데, 이 역시 같은 이유로
-  // 평상시 전신 그림으로 대체돼야 한다 — src에 "-eating"도 없어야 한다.
+  // "밥 먹이기"를 누르면 걷기(2.5초) 뒤 "식사" 그림으로 바뀌는데, 이
+  // 역시 같은 이유로 평상시 전신 그림으로 대체돼야 한다 — src에
+  // "-eating"도 없어야 한다.
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute('src', /nuri-toddler(?!-eating)/)
+  await expect(page.getByTestId('hungry-event-modal').locator('img')).toHaveAttribute(
+    'src',
+    /nuri-toddler(?!-eating)/,
+    { timeout: 4000 },
+  )
 })
 
 // 위 테스트와 같은 식사 이벤트지만, Stage 1 온보딩으로 체험판 가상
@@ -1666,8 +1709,8 @@ test('the meal event deducts 10,000원 from the mock allowance granted during on
   await expect(page.getByTestId('hungry-event-modal')).toContainText('배고파해요. 밥 먹으러 갑니다!')
   await expect(page.getByTestId('hungry-event-feed-button')).toHaveText('밥 먹이기 (-10,000원)')
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 걷기(2.5초) → 식사 연출(3.5초) 뒤 자동으로 모달이 닫히고 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
@@ -1779,10 +1822,12 @@ test('insufficient balance blocks feeding and shows an inline warning, without c
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('5,000원')
 })
 
-// 지시서(배고픔 이벤트 시 2.5D 동네 배경 걷기 애니메이션 구현): "밥
-// 먹이기"를 누르면 음식 아이콘 연출이 잠깐 나타난 뒤에야 모달이
-// 닫히는지 확인한다(즉시 닫히지 않는다).
-test('feeding plays a brief food-icon animation before the modal closes', async ({ page }) => {
+// 지시서(밥 먹기 이벤트 연출 수정): "밥 먹이기"를 누르면 곧바로
+// 닫히지 않고 걷기(2.5초) → 식사 연출(음식 아이콘 + "냠냠! 잘
+// 먹었습니다!" 문구, 3.5초)을 거친 뒤에야 모달이 닫히는지 확인한다.
+test('feeding walks to the restaurant, then shows the eating scene for a few seconds before the modal closes', async ({
+  page,
+}) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1831,11 +1876,149 @@ test('feeding plays a brief food-icon animation before the modal closes', async 
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible()
+  // 걷는 동안(2.5초)엔 아직 식사 연출이 나오지 않는다.
+  await expect(page.getByTestId('hungry-event-food-icon')).toHaveCount(0)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
-  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠! 잘 먹었습니다!')
+  // 식당에 도착하면(eating 단계) 음식 아이콘 + 안내 문구가 뜨고,
+  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible({ timeout: 4000 })
+  await expect(page.getByTestId('hungry-event-modal')).toContainText('냠냠! 잘 먹었습니다!')
+  // 그 뒤(3.5초) 모달이 자동으로 닫힌다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 5000 })
   await expect(page.getByTestId('hungry-warning-banner')).toHaveCount(0)
+})
+
+// 지시서(밥 먹기 이벤트: 캐릭터 걷기 이동 및 식당 내부 식사 모습 강제
+// 적용) 버그 회귀 방지: 캐릭터를 걷게 하려고 전신 그림 래퍼를
+// position:absolute로 뺐더니, 그 부모(.relative 래퍼)가 내용 없는
+// absolute 자식만으로는 폭을 가늠할 수 없어 items-center 때문에
+// 너비 0으로 쪼그라들었고, 그 결과 "왼쪽 42%" 같은 가로 위치가
+// "폭 0의 42%" = 0px가 되어 캐릭터가 화면에 전혀 보이지 않았다(식당
+// 내부 배경만 보임). 매 단계(고르는 중/걷는 중/식사 중)마다 전신
+// 그림이 실제로 화면에 보이는 크기를 갖는지 확인해 이 회귀를 막는다.
+test('the character portrait stays visible (non-zero size) through every phase of the meal event', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-visibility',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  const portrait = page.getByTestId('hungry-event-modal').locator('img')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  const choosingBox = await portrait.boundingBox()
+  expect(choosingBox?.width).toBeGreaterThan(0)
+  expect(choosingBox?.height).toBeGreaterThan(0)
+
+  await page.getByTestId('hungry-event-feed-button').click()
+  await page.waitForTimeout(500) // walking 단계 중
+  const walkingBox = await portrait.boundingBox()
+  expect(walkingBox?.width).toBeGreaterThan(0)
+  expect(walkingBox?.height).toBeGreaterThan(0)
+
+  await expect(page.getByTestId('hungry-event-food-icon')).toBeVisible({ timeout: 4000 }) // eating 단계 진입
+  const eatingBox = await portrait.boundingBox()
+  expect(eatingBox?.width).toBeGreaterThan(0)
+  expect(eatingBox?.height).toBeGreaterThan(0)
+})
+
+// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
+// 연출 구현): 평소에는 동네 전경이 보이고, "밥 먹이기"를 누르면(식당에
+// 들어가면) 식당 내부 배경이 페이드인(opacity-100)되는지 확인한다.
+test('the hungry event fades the background from the town square to the restaurant interior when feeding starts', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-bg',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-town-bg')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-0\b/)
+
+  await page.getByTestId('hungry-event-feed-button').click()
+  // 분수대 → 식당 걷기(2.5초)가 끝나고 도착해야 식당 내부로 전환된다.
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-100/, { timeout: 4000 })
 })
 
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
@@ -2296,11 +2479,15 @@ test('when the daily 지식 검증(teach) limit is exhausted, buying 지식 검�
   await expect(page.getByTestId('buy-validation-uses-button')).toBeVisible()
 })
 
-// 지시서(연령대별 식사 모습 이미지 적용): 식사 이벤트로 pose가
-// 'eating'이 되면 기존 🍙 이모지 오버레이 대신 연령대별 전신 식사
-// 일러스트가 뜨고, 식사가 끝나 pose가 'idle'로 돌아가면 원래의 평상시
-// 전신 일러스트로 되돌아온다.
-test('the meal event swaps the illustrated portrait to the age-tier eating image, then back to idle', async ({ page }) => {
+// 지시서(밥 먹기 이벤트 연출 수정: 홈 화면 식사 장면 제거): 식사
+// 연출(식사 포즈 전신 일러스트·"냠냠! 잘 먹었습니다!" 문구)은 이제
+// HungryEventModal 안에서만 나온다 — 모달이 자동으로 닫힌 뒤에도 홈
+// 화면(GameStage)의 평상시 전신 일러스트는 그대로 유지되고, 홈 화면
+// 말풍선에 "냠냠" 문구가 뜨지 않아야 한다(예전엔 여기서도 같은 장면이
+// 중복으로 나오는 버그가 있었다).
+test('feeding the meal event does not swap the home-screen portrait to the eating pose or show a home speech bubble', async ({
+  page,
+}) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -2386,12 +2573,11 @@ test('the meal event swaps the illustrated portrait to the age-tier eating image
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
-  await expect(portrait).toHaveAttribute('src', /nuri-toddler-eating/)
-
-  // 2600ms 후 식사가 끝나 pose가 다시 idle로 돌아간다 — 평상시 전신
-  // 일러스트로 되돌아왔는지 확인한다.
-  await expect(portrait).not.toHaveAttribute('src', /-eating/, { timeout: 4000 })
+  // 모달이 걷기 → 식사 연출을 거쳐 자동으로 닫힐 때까지(최대 8초),
+  // 홈 화면의 전신 일러스트는 'eating' 포즈로 바뀌지 않는다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
+  await expect(portrait).not.toHaveAttribute('src', /-eating/)
+  await expect(page.getByTestId('speech-bubble')).toHaveCount(0)
 })
 
 // 지시서(서점 팝업 흐름 수정): 자동으로 뜨던 서점 외출 팝업을 완전히
@@ -2488,7 +2674,8 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await teachThreeTimes('round0') // 배고픔 이벤트: 밥 먹이기 -10,000원
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
@@ -2500,6 +2687,104 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await expect(page.getByTestId('money-popup')).toContainText('10,000원')
   await expect(page.getByTestId('speech-bubble')).toContainText('심부름 성공')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+})
+
+// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
+// 연출 구현): 심부름을 수락하면(가게로 걸어 들어가면) 가게 내부
+// 배경이 페이드인(opacity-100)되는지 확인한다.
+test('accepting the errand event fades the background from the town square to the store interior', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-errand-bg',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'AI검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  await teachThreeTimes('round0') // 배고픔 이벤트부터 먼저 뜬다 — 지나가야 심부름까지 간다.
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+
+  await teachThreeTimes('round1')
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await expect(page.getByTestId('errand-event-town-bg')).toBeVisible()
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '0')
+
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '1')
 })
 
 // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) "거절하기"
@@ -2594,7 +2879,8 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await teachThreeTimes('round0') // 배고픔 이벤트
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 
   await teachThreeTimes('round1') // 심부름 이벤트 — 이번엔 거절한다.
@@ -2622,39 +2908,46 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
-// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정)로 흐름이
-// 다시 바뀌었다: toddler(8~9살)는 "① 직접입력 3문제(knowhow) → ②
-// 객관식 3문제(세트 전부 정답, objective) → ③ 직업 카드 맞추기 1개
-// (card_game) → ④ 노하우 1문제(knowhow)"라는 고정 순서로 정확히
-// 8개(3+1=knowhow4, objective3, card_game1)를 채워야 "종합 최종 시험
-// 보기" 버튼이 나타난다 — 8개를 다 채워도 더 이상 그 즉시 진화하지
-// 않는다(사용자 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야
-// 10살로 넘어감"). 이 테스트는 그 네 단계를 실제 UI로 끝까지 따라가,
-// 8개를 다 채운 뒤에도 진화 배너가 뜨지 않고 "종합 최종 시험 보기"
-// 버튼만 나타나는지 확인한다(최종 시험 자체는 별도 테스트에서
-// 다룬다). ②단계는 서버가 한 번에 2문제씩만 내려주므로(기존
-// handleGetObjectiveQuiz의 세트 크기, toddler 필요 개수 3과는 별개
-// 상수) 같은 세트를 한 번 더 제출해야 2/3→3/3이 된다 — 틀린 게 아니라
-// 이미 다 맞은 선택을 그대로 다시 제출하는 것뿐이다.
-test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×3(한 세트) → card-match game → direct×1(노하우) — reaches the 종합 최종 시험 보기 button without evolving yet', async ({ page }) => {
+// 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(8세
+// 학습 시스템: 8문제 커리큘럼 재구성) + 지시서(8세 학습 총 8문제 제한
+// 및 10대 강제 레벨업 로직 수정, 종합 최종 시험/패스권 시스템)로 흐름이
+// 최종적으로 이렇게 정리됐다: toddler(8~9살)는 "1단계 직접입력 3문제
+// (knowhow) → 2단계 객관식 2문제(세트 전부 정답, objective) → 3단계
+// 카드 맞추기 1문제(card_game) → 4단계 순서 맞추기 1문제(sequence_order)
+// → 5단계 분류하기 1문제(categorize)"라는 고정 순서로 정확히 8개
+// (3+2+1+1+1)를 채워야 "종합 최종 시험 보기" 버튼이 나타난다 — 8개를
+// 다 채워도 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두
+// 풀고 최종시험 8개 모두 합격해야 10살로 넘어감"). 이 테스트는 그 다섯
+// 단계를 실제 UI로 끝까지 따라가, 토들러의 식사·알바 2단계 로테이션이
+// 커리큘럼 중간(카드 맞추기 완료=6번째 저장)에 끼어드는 실제 상황에서도
+// 8개를 다 채운 뒤 진화 배너가 뜨지 않고 "종합 최종 시험 보기" 버튼만
+// 나타나는지 확인한다(최종 시험 자체는 아래 별도 테스트에서 다룬다).
+test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×2 → card game×1 → sequence×1 → categorize×1 — reaches the 종합 최종 시험 보기 button without evolving yet, even with an errand event interrupting mid-curriculum', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCount = 0
-  const REQUIRED = { knowhow: 4, objective: 3, card_game: 1 }
-  const confirmed = { objective: 0, knowhow: 0, card_game: 0 }
+  const REQUIRED = { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 }
+  const confirmed = { objective: 0, subjective: 0, knowhow: 0, card_game: 0, sequence_order: 0, categorize: 0 }
   const missionProgressFor = () => ({
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
       objective: { type: 'objective', confirmed: confirmed.objective, required: REQUIRED.objective, complete: confirmed.objective >= REQUIRED.objective },
-      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+      subjective: { type: 'subjective', confirmed: confirmed.subjective, required: REQUIRED.subjective, complete: true },
       knowhow: { type: 'knowhow', confirmed: confirmed.knowhow, required: REQUIRED.knowhow, complete: confirmed.knowhow >= REQUIRED.knowhow },
       card_game: { type: 'card_game', confirmed: confirmed.card_game, required: REQUIRED.card_game, complete: confirmed.card_game >= REQUIRED.card_game },
+      sequence_order: { type: 'sequence_order', confirmed: confirmed.sequence_order, required: REQUIRED.sequence_order, complete: confirmed.sequence_order >= REQUIRED.sequence_order },
+      categorize: { type: 'categorize', confirmed: confirmed.categorize, required: REQUIRED.categorize, complete: confirmed.categorize >= REQUIRED.categorize },
     },
-    confirmedTotal: confirmed.objective + confirmed.knowhow + confirmed.card_game,
+    confirmedTotal: confirmed.objective + confirmed.knowhow + confirmed.card_game + confirmed.sequence_order + confirmed.categorize,
     requiredTotal: 8,
-    allConfirmed: confirmed.objective >= REQUIRED.objective && confirmed.knowhow >= REQUIRED.knowhow && confirmed.card_game >= REQUIRED.card_game,
+    allConfirmed:
+      confirmed.objective >= REQUIRED.objective &&
+      confirmed.knowhow >= REQUIRED.knowhow &&
+      confirmed.card_game >= REQUIRED.card_game &&
+      confirmed.sequence_order >= REQUIRED.sequence_order &&
+      confirmed.categorize >= REQUIRED.categorize,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
   })
@@ -2698,11 +2991,10 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
         }),
       })
     },
-    // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정) 이후
-    // handleGetObjectiveQuiz는 toddler도 objective 요구치(3)와 똑같은
+    // handleGetObjectiveQuiz는 toddler도 objective 요구치(2)와 똑같은
     // 크기의 세트를 내려준다(objectiveQuizCount가 더 이상 티어별
     // 고정값이 아니라 MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier].objective
-    // 그대로다) — 3문제 세트 하나만 받는다.
+    // 그대로다) — 2문제 세트 하나만 받는다.
     onObjectiveQuiz: async (route) => {
       await route.fulfill({
         status: 200,
@@ -2711,7 +3003,6 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
           questions: [
             { id: 'mock-obj-1', text: '객관식 문제 1', choices: ['정답', '오답1', '오답2'] },
             { id: 'mock-obj-2', text: '객관식 문제 2', choices: ['정답', '오답1', '오답2'] },
-            { id: 'mock-obj-3', text: '객관식 문제 3', choices: ['정답', '오답1', '오답2'] },
           ],
           quizToken: 'mock-objective-quiz-token',
         }),
@@ -2720,10 +3011,10 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
     onObjectiveQuizSubmit: async (route) => {
       const body = route.request().postDataJSON() as { answers?: number[] }
       const answers = body.answers ?? []
-      const allCorrect = answers.length === 3 && answers.every((a) => a === 0)
+      const allCorrect = answers.length === 2 && answers.every((a) => a === 0)
       if (allCorrect) {
-        saveCount += 3
-        confirmed.objective = Math.min(confirmed.objective + 3, REQUIRED.objective)
+        saveCount += 2
+        confirmed.objective = Math.min(confirmed.objective + 2, REQUIRED.objective)
       }
       const progress = missionProgressFor()
       await route.fulfill({
@@ -2732,8 +3023,8 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
         body: JSON.stringify({
           allCorrect,
           results: answers.map((a, i) => ({ questionId: `mock-obj-${i + 1}`, correct: a === 0 })),
-          message: allCorrect ? '정답이에요! 3문제 모두 맞혔어요.' : '앗, 틀렸어요! 다시 도전해 볼까요?',
-          expAwarded: allCorrect ? 30 : 0,
+          message: allCorrect ? '정답이에요! 2문제 모두 맞혔어요.' : '앗, 틀렸어요! 다시 도전해 볼까요?',
+          expAwarded: allCorrect ? 20 : 0,
           exp: saveCount * 10,
           level: 1,
           leveledUp: false,
@@ -2768,36 +3059,26 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
   await teachKnowhow(3)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  // 걷기 → 식사 연출 뒤 모달이 자동으로 닫힌다 — 다음 "가르치기"
+  // 클릭이 그 닫힘을 기다려준다(actionability 자동 대기).
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
-  // ②단계: 객관식 3문제(세트 전부 정답) — 배고픔 이벤트가 패널을
-  // 자동으로 닫았으므로 다시 연다. handleGetObjectiveQuiz가 이제
-  // toddler의 objective 요구치(3)와 같은 크기의 세트를 내려주므로,
-  // "정답"(선택지 0번)을 셋 다 고르고 한 번만 제출하면 3/3이 된다.
+  // 2단계: 객관식 2문제(세트 전부 정답) — 배고픔 이벤트가 패널을
+  // 자동으로 닫았으므로 다시 연다. handleGetObjectiveQuiz가 toddler의
+  // objective 요구치(2)와 같은 크기의 세트를 내려주므로, "정답"(선택지
+  // 0번)을 둘 다 고르고 한 번만 제출하면 2/2가 된다.
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
-  await page.getByTestId('objective-quiz-choice-2-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-
-  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 식사·
-  // 심부름 2단계 로테이션은 onKnowledgeSaved 호출 총횟수(여기서는
-  // 3(직접입력) + 3(객관식 한 세트) = 6번째 호출)로만 판정되어 미션
-  // 종류와 무관하게 발동한다 — 이 세트를 제출하는 순간이 정확히 그
-  // 6번째 호출과 겹친다.
-  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
-  await page.getByTestId('errand-event-accept-button').click()
-  await expect(page.getByTestId('money-popup')).toContainText('10,000원')
-
-  await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
 
-  // ③단계: 직업 카드 맞추기 — 6쌍을 모두 맞추면 onCleared가 자동으로
-  // complete-card-game → save-knowledge(card_game)까지 이어간다.
-  // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정)로
-  // 고친 handleCardGameCleared의 isTeenStagedFlow 가드 덕분에, teen
-  // 전용 알바 이벤트(onTeenJobEventDue)는 여기서 뜨지 않는다.
+  // 3단계: 카드 맞추기 1문제(card_game) — teen의 ②단계와 완전히 같은
+  // CardMatchGame 컴포넌트를 재사용한다. 지시서(8세 학습 총 8문제 제한
+  // 및 10대 강제 레벨업 로직 수정)로 고친 handleCardGameCleared의
+  // isTeenStagedFlow 가드 덕분에, teen 전용 알바 이벤트
+  // (onTeenJobEventDue)는 여기서 뜨지 않는다.
   for (let i = 0; i < 6; i++) {
     const backs = page.getByTestId('card-match-back')
     const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
@@ -2807,14 +3088,41 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
   }
   await expect(page.getByTestId('job-event-modal')).not.toBeVisible()
 
-  // ④단계: 노하우 1문제(knowhow, 직접입력과 같은 자리) — 카드 맞추기를
-  // 끝내도 패널이 자동으로 닫히지 않으므로(식사·심부름 이벤트와 달리)
-  // 다시 열지 않고 그대로 이어간다. onKnowledgeSaved 통산 호출은
-  // 3(직접입력)+3(객관식 한 세트)+1(카드 맞추기)+1(이 저장)=8번째라
-  // 식사·심부름 로테이션(3의 배수마다 발동)의 다음 차례(9번째)에는
-  // 아직 못 미쳐 이번엔 아무 이벤트도 뜨지 않는다.
-  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('④단계')
-  await teachKnowhow(4)
+  // 8문제로 늘어나면서, "3회 저장마다 식사/알바 로테이션"이 완료 시점이
+  // 아니라 커리큘럼 중간(knowhow 3 + 객관식 2(한 세트) + card_game 1 =
+  // 정확히 6번째 저장, 식사 다음 2번째 로테이션인 심부름)에도 한 번 더
+  // 끼어든다 — 체험판 용돈을 아직 지급받지 않은 캐릭터라(onboarding
+  // 생략) 수락해도 금액 변화 없이 모달만 닫힌다(기존 "밥 먹이기"와
+  // 같은 원칙).
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('toddler-sequence-game-step')).toBeVisible()
+
+  // 4단계: 순서 맞추기 1문제(sequence_order) — 뒤섞인 칩의 data-order를
+  // 읽어 오름차순으로 눌러 올바른 순서를 맞춘다.
+  const sequenceChips = page.getByTestId('sequence-order-chip')
+  const orders = await sequenceChips.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-order'))))
+  for (const order of [...orders].sort((a, b) => a - b)) {
+    await page.locator(`[data-testid="sequence-order-chip"][data-order="${order}"]`).click()
+  }
+  await expect(page.getByTestId('toddler-categorize-game-step')).toBeVisible()
+
+  // 5단계: 분류하기 1문제(categorize) — 이 저장이 "유형별로 정해진
+  // 개수(3+3+1+1+1)"를 완성시키는 마지막 저장이다. 8문제를 다 채워도
+  // 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두 풀고
+  // 최종시험 8개 모두 합격해야 10살로 넘어감") — "종합 최종 시험 보기"
+  // 버튼만 나타난다(최종 시험 자체는 별도 테스트에서 다룬다).
+  const categorizeItems = page.getByTestId('categorize-item')
+  const itemCount = await categorizeItems.count()
+  for (let i = 0; i < itemCount; i++) {
+    const item = categorizeItems.nth(i)
+    const correctGroup = await item.getAttribute('data-correct-group')
+    await item.getByTestId(correctGroup === 'A' ? 'categorize-assign-a' : 'categorize-assign-b').click()
+  }
+  await page.getByTestId('categorize-check-button').click()
 
   await expect(page.getByTestId('evolution-banner')).not.toBeVisible()
   await expect(page.getByTestId('toddler-staged-flow-complete')).toBeVisible()
@@ -3079,7 +3387,7 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await teachKnowhow(3)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
   // ②단계: 직업 카드 맞추기 — 사이드바 게임이 그대로 학습 모달 안에
   // 임베드되어 있다. 6쌍을 모두 맞추면 onCleared가 자동으로
@@ -3138,7 +3446,7 @@ test('completing the teen (10대) 10-step curriculum — direct×3 → embedded 
   await teachKnowhow(5)
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('speech-bubble')).toContainText('냠냠')
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('teen-direct-step-label')).toContainText('⑤단계')
@@ -3169,10 +3477,12 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
-      objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+      objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
       subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
       card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+      sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+      categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
     },
     confirmedTotal: 3,
     requiredTotal: 8,
@@ -3224,13 +3534,11 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
           exp: 50,
           level: 1,
           leveledUp: false,
-          // 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직
-          // 수정): toddler의 objective 필요 개수는 3개인데 세트 크기는
-          // 2문제라, 이 한 세트를 통과해도 2/3로 아직 미완료다 —
-          // objective-quiz-step에 그대로 머문다(카드 맞추기로 넘어가지
-          // 않는다).
+          // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler의
+          // objective 필요 개수(2)가 세트 크기(2)와 같아, 이 한 세트를
+          // 통과하면 바로 2/2 완료되어 3단계(카드 맞추기)로 넘어간다.
           missionProgress: allCorrect
-            ? { ...missionProgressAtObjectiveStep, byType: { ...missionProgressAtObjectiveStep.byType, objective: { type: 'objective', confirmed: 2, required: 3, complete: false } }, confirmedTotal: 5 }
+            ? { ...missionProgressAtObjectiveStep, byType: { ...missionProgressAtObjectiveStep.byType, objective: { type: 'objective', confirmed: 2, required: 2, complete: true } }, confirmedTotal: 5 }
             : null,
           evolved: false,
           newAgeTier: null,
@@ -3257,12 +3565,11 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-retry-button').click()
   await expect(page.getByTestId('objective-quiz-question-0')).toContainText('세트 2')
 
-  // 이번엔 정답을 고르면 통과하지만, objective는 세트 하나(2문제)로는
-  // 필요 개수(3)를 다 못 채워 objective-quiz-step에 그대로 머문다.
+  // 이번엔 정답을 고르면 통과하고, 3단계(카드 맞추기)로 넘어간다.
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
 })
 
 // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 선택지
@@ -3277,10 +3584,12 @@ test('objective quiz choices render in a 2-column grid once there are 10+ option
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
-      objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+      objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
       subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 4, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
       card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+      sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+      categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
     },
     confirmedTotal: 3,
     requiredTotal: 8,

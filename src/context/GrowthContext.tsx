@@ -276,6 +276,19 @@ interface GrowthContextValue {
     verificationToken: string
     characterReply: string
   }>
+  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/분류하기도
+  // completeCardGame과 완전히 같은 모양 — 각자 다른 액션(complete-
+  // sequence-game/complete-categorize-game)을 부르는 것만 다르다.
+  completeSequenceGame: (companionType: CompanionType) => Promise<{
+    knowledge: { title: string; content: string }
+    verificationToken: string
+    characterReply: string
+  }>
+  completeCategorizeGame: (companionType: CompanionType) => Promise<{
+    knowledge: { title: string; content: string }
+    verificationToken: string
+    characterReply: string
+  }>
   // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): 6문제를
   // 모두 마친 toddler만 호출할 수 있다(서버가 재확인) — "1차(전체)"
   // 시험 문제 세트만 이 함수로 받는다. 1차 불합격 뒤의 재시험은 이
@@ -588,8 +601,10 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // remaining/dailyLimit 같은 필드가 없다. 돌아온 verificationToken을
   // 그대로 saveKnowledge(missionType='card_game')에 넘겨야 실제로
   // 저장(=XP·진화 판정)된다.
-  const completeCardGame = useCallback(async (companionType: CompanionType) => {
-    const res = await fetch('/api/character?action=complete-card-game', {
+  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/분류하기도
+  // 같은 모양이라 액션 이름/기본 에러 문구만 받는 제네릭 함수로 합쳤다.
+  const completeMinigame = useCallback(async (action: string, companionType: CompanionType, defaultError: string) => {
+    const res = await fetch(`/api/character?action=${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companionType }),
@@ -601,7 +616,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       error?: string
     }
     if (!res.ok || !data.knowledge || !data.verificationToken || !data.characterReply) {
-      throw new Error(data.error || '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.')
+      throw new Error(data.error || defaultError)
     }
     return {
       knowledge: data.knowledge,
@@ -609,6 +624,19 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
       characterReply: data.characterReply,
     }
   }, [])
+
+  const completeCardGame = useCallback(
+    (companionType: CompanionType) => completeMinigame('complete-card-game', companionType, '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.'),
+    [completeMinigame],
+  )
+  const completeSequenceGame = useCallback(
+    (companionType: CompanionType) => completeMinigame('complete-sequence-game', companionType, '순서 맞추기 완료를 처리하는 중 오류가 발생했어요.'),
+    [completeMinigame],
+  )
+  const completeCategorizeGame = useCallback(
+    (companionType: CompanionType) => completeMinigame('complete-categorize-game', companionType, '분류하기 완료를 처리하는 중 오류가 발생했어요.'),
+    [completeMinigame],
+  )
 
   const saveKnowledge = useCallback(
     async (
@@ -1093,6 +1121,8 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         verifyKnowledge,
         studyGenerate,
         completeCardGame,
+        completeSequenceGame,
+        completeCategorizeGame,
         saveKnowledge,
         getMissionProgress,
         listKnowledge,

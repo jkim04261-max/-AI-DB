@@ -679,10 +679,11 @@ export default function GrowPage() {
     setFeedError(null)
     setIsHungry(false)
     setHungryQuizRemaining(null)
-    setPose('eating')
-    showBubble('냠냠! 잘 먹었습니다!')
-    const t = setTimeout(() => setPose('idle'), 2600)
-    mealTimeoutsRef.current.push(t)
+    // 지시서(밥 먹기 이벤트 연출 수정): "냠냠! 잘 먹었습니다!" 식사
+    // 연출은 이제 HungryEventModal 안의 eating 단계에서만 보여준다 —
+    // 모달이 닫힌 뒤 홈 화면(GameStage)에서 같은 장면이 또 한 번
+    // 나오던 버그를 없애기 위해, 여기서 하던 setPose('eating') +
+    // showBubble + idle 복귀 타이머를 전부 제거했다.
   }
 
   // "나중에 먹기" 클릭(또는 모달 닫기) — 배고픈 상태로 남아, 상단에

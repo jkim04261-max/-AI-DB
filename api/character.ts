@@ -295,6 +295,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleCompleteCardGame(req, res, session.sub)
       return
     }
+    if (action === 'complete-sequence-game') {
+      await handleCompleteSequenceGame(req, res, session.sub)
+      return
+    }
+    if (action === 'complete-categorize-game') {
+      await handleCompleteCategorizeGame(req, res, session.sub)
+      return
+    }
     if (action === 'quiz-submit') {
       await handleSubmitQuiz(req, res, session.sub)
       return
@@ -941,7 +949,19 @@ async function handleGenerateStudy(req: VercelRequest, res: VercelResponse, user
 const CARD_GAME_COMPLETION_TITLE = '직업 카드 맞추기 완료'
 const CARD_GAME_COMPLETION_CONTENT = '직업 카드와 도구 카드를 모두 맞춰서 한 세트를 클리어했습니다.'
 
-async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, userId: number) {
+// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/분류하기도
+// card_game과 완전히 같은 성격("검증할 사용자 입력이 없는 완료 확인형
+// 미니게임")이라, 이름만 다른 세 함수를 만드는 대신 하나의 제네릭
+// 핸들러로 합쳤다 — Gemini를 부르지 않고 하루 한도도 쓰지 않으며,
+// verify-knowledge/study-generate와 똑같은 모양(verification + 서명된
+// verificationToken)으로 응답해서 프런트가 그대로 기존
+// saveKnowledge(missionType=...)에 넘기기만 하면 되도록 한다.
+async function handleCompleteMinigame(
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: number,
+  opts: { title: string; content: string; explanation: string; characterReply: string; errorLabel: string },
+) {
   const { companionType } = (req.body ?? {}) as { companionType?: unknown }
 
   try {
@@ -959,7 +979,7 @@ async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, u
 
     const verification: KnowledgeVerificationResult = {
       status: 'appropriate',
-      explanation: '모든 카드를 맞췄어요!',
+      explanation: opts.explanation,
       relevance: '',
       issues: '',
       suggestion: '',
@@ -969,8 +989,8 @@ async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, u
       userId,
       characterId: character.id,
       companionType: companionType as string,
-      title: CARD_GAME_COMPLETION_TITLE,
-      content: CARD_GAME_COMPLETION_CONTENT,
+      title: opts.title,
+      content: opts.content,
       status: verification.status,
       explanation: verification.explanation,
       relevance: verification.relevance,
@@ -981,15 +1001,51 @@ async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, u
     })
 
     res.status(200).json({
-      knowledge: { title: CARD_GAME_COMPLETION_TITLE, content: CARD_GAME_COMPLETION_CONTENT },
+      knowledge: { title: opts.title, content: opts.content },
       verification,
       verificationToken,
-      characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+      characterReply: opts.characterReply,
     })
   } catch (err) {
-    console.error('[api/character] unexpected error on complete-card-game', err)
-    res.status(500).json({ error: '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.' })
+    console.error(`[api/character] unexpected error on ${opts.errorLabel}`, err)
+    res.status(500).json({ error: `${opts.errorLabel}을 처리하는 중 오류가 발생했어요.` })
   }
+}
+
+async function handleCompleteCardGame(req: VercelRequest, res: VercelResponse, userId: number) {
+  await handleCompleteMinigame(req, res, userId, {
+    title: CARD_GAME_COMPLETION_TITLE,
+    content: CARD_GAME_COMPLETION_CONTENT,
+    explanation: '모든 카드를 맞췄어요!',
+    characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+    errorLabel: '카드 맞추기 완료',
+  })
+}
+
+const SEQUENCE_GAME_COMPLETION_TITLE = '순서 맞추기 완료'
+const SEQUENCE_GAME_COMPLETION_CONTENT = '하루 일과를 올바른 순서대로 맞춰서 한 세트를 클리어했습니다.'
+
+async function handleCompleteSequenceGame(req: VercelRequest, res: VercelResponse, userId: number) {
+  await handleCompleteMinigame(req, res, userId, {
+    title: SEQUENCE_GAME_COMPLETION_TITLE,
+    content: SEQUENCE_GAME_COMPLETION_CONTENT,
+    explanation: '순서를 전부 맞췄어요!',
+    characterReply: '순서를 완벽하게 맞췄어요! 대단해요!',
+    errorLabel: '순서 맞추기 완료',
+  })
+}
+
+const CATEGORIZE_GAME_COMPLETION_TITLE = '분류하기 완료'
+const CATEGORIZE_GAME_COMPLETION_CONTENT = '여러 물건을 올바른 무리로 모두 나눠서 한 세트를 클리어했습니다.'
+
+async function handleCompleteCategorizeGame(req: VercelRequest, res: VercelResponse, userId: number) {
+  await handleCompleteMinigame(req, res, userId, {
+    title: CATEGORIZE_GAME_COMPLETION_TITLE,
+    content: CATEGORIZE_GAME_COMPLETION_CONTENT,
+    explanation: '전부 올바르게 분류했어요!',
+    characterReply: '다 올바른 무리로 나눴어요! 정말 똑똑해요!',
+    errorLabel: '분류하기 완료',
+  })
 }
 
 // Persists a knowledge entry the user has reviewed and confirmed. Only
