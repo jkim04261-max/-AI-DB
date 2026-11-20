@@ -1733,6 +1733,66 @@ test('feeding plays a brief food-icon animation before the modal closes', async 
   await expect(page.getByTestId('hungry-warning-banner')).toHaveCount(0)
 })
 
+// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
+// 연출 구현): 평소에는 동네 전경이 보이고, "밥 먹이기"를 누르면(식당에
+// 들어가면) 식당 내부 배경이 페이드인(opacity-100)되는지 확인한다.
+test('the hungry event fades the background from the town square to the restaurant interior when feeding starts', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-meal-bg',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-town-bg')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveCSS('opacity', '0')
+
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveCSS('opacity', '1')
+})
+
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
 // 누르면 연출 없이 곧바로 모달이 닫히고, isHungry 경고 배너가 뜬 채로
 // 유지되는지 확인한다(퀴즈 3회를 풀기 전까지) — 지금까지는 이
@@ -2387,6 +2447,104 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await expect(page.getByTestId('money-popup')).toContainText('10,000원')
   await expect(page.getByTestId('speech-bubble')).toContainText('심부름 완료')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+})
+
+// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
+// 연출 구현): 심부름을 수락하면(가게로 걸어 들어가면) 가게 내부
+// 배경이 페이드인(opacity-100)되는지 확인한다.
+test('accepting the errand event fades the background from the town square to the store interior', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: body.profession,
+        custom_profession_label: body.customProfessionLabel ?? null,
+        level: 1,
+        exp: 0,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-errand-bg',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'AI검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  await teachThreeTimes('round0') // 배고픔 이벤트부터 먼저 뜬다 — 지나가야 심부름까지 간다.
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+
+  await teachThreeTimes('round1')
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await expect(page.getByTestId('errand-event-town-bg')).toBeVisible()
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '0')
+
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '1')
 })
 
 // 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지) "거절하기"

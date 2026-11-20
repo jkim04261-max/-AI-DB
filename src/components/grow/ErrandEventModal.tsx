@@ -4,16 +4,18 @@ import type { AgeTier } from '../../data/characterAge'
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { walkingPortraitSrc } from '../../data/characterWalking'
 import { useImageFallback } from '../../hooks/useImageFallback'
+import { TOWN_SQUARE_BG_SRC, STORE_INTERIOR_SRC } from '../../data/lifeEventAssets'
 
 // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 기존
 // HungryEventModal(배고픔 이벤트)과 똑같은 자리(GameStage 위,
 // absolute inset-0 z-30)에 뜨는 선택형 모달 — "심부름 하러 가기"를
 // 고르면 가상 용돈을 벌고, "거절하기"를 고르면 부모(GrowPage)가
-// HomeworkQuizModal을 대신 띄운다. 실제 마을/가게 배경 이미지는
-// HungryEventModal과 같은 이유로 이 세션에서 파일로 받을 수 없어
-// (채팅에 붙여넣은 이미지는 다운로드할 방법이 없음), 그 모달이 이미
-// 쓰고 있는 CSS 동네 배경(grow-hungry-town-bg 등)을 그대로 재사용한다
-// — 둘 다 "동네 마실"이라는 같은 장면이라 자연스럽다.
+// HomeworkQuizModal을 대신 띄운다.
+// 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
+// 연출 구현): 이전엔 실제 이미지가 없어 HungryEventModal과 같은 CSS
+// 동네 배경을 썼지만, 이제 실제 동네 전경/가게 내부 이미지로
+// 교체한다 — "심부름 하러 가기"를 누르면(= 가게로 걸어 들어가면)
+// 기존 확대(zoom) 애니메이션 위로 가게 내부 이미지가 페이드인된다.
 const ERRAND_EARNING_WON = 10_000
 // "심부름 하러 가기" 클릭 후 장보러 가는 연출을 보여주는 시간 —
 // HungryEventModal의 FEED_ANIMATION_MS와 같은 원칙(연출이 끝나야
@@ -60,8 +62,8 @@ export default function ErrandEventModal({
       aria-label="심부름 이벤트"
       className="absolute inset-0 z-30 overflow-hidden rounded-2xl"
     >
-      {/* HungryEventModal과 같은 CSS 동네 배경 — 패럴랙스(평상시) /
-          확대(심부름 떠나는 연출 중). */}
+      {/* 동네 전경(평상시) — 심부름을 수락하면(departing) 확대
+          애니메이션 위로 가게 내부 이미지가 페이드인된다. */}
       <div
         aria-hidden
         className={`absolute inset-0 overflow-hidden ${
@@ -70,8 +72,23 @@ export default function ErrandEventModal({
             : 'motion-safe:animate-[grow-hungry-bg-parallax_5s_ease-in-out_infinite]'
         }`}
       >
-        <div className="grow-hungry-town-bg absolute inset-0" />
-        <div className="grow-hungry-town-skyline absolute inset-x-0 bottom-[30%] h-[14%] opacity-70" />
+        {/* 배경 2장은 <img>가 아니라 CSS background-image로 깐다 —
+            HungryEventModal과 같은 이유(이 모달 안의 유일한 <img>를
+            캐릭터 전신 그림으로 유지). */}
+        <div
+          aria-hidden
+          data-testid="errand-event-town-bg"
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${TOWN_SQUARE_BG_SRC})` }}
+        />
+        <div
+          aria-hidden
+          data-testid="errand-event-store-bg"
+          className={`absolute inset-0 bg-cover bg-center transition-opacity duration-700 ${
+            departing ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{ backgroundImage: `url(${STORE_INTERIOR_SRC})` }}
+        />
       </div>
       <div aria-hidden className="absolute inset-0 bg-black/45" />
 
