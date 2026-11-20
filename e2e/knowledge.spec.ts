@@ -1787,10 +1787,10 @@ test('the hungry event fades the background from the town square to the restaura
 
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await expect(page.getByTestId('hungry-event-town-bg')).toBeVisible()
-  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveCSS('opacity', '0')
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-0\b/)
 
   await page.getByTestId('hungry-event-feed-button').click()
-  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveCSS('opacity', '1')
+  await expect(page.getByTestId('hungry-event-restaurant-bg')).toHaveClass(/opacity-100/)
 })
 
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
@@ -2541,10 +2541,10 @@ test('accepting the errand event fades the background from the town square to th
   await teachThreeTimes('round1')
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await expect(page.getByTestId('errand-event-town-bg')).toBeVisible()
-  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '0')
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveClass(/opacity-0\b/)
 
   await page.getByTestId('errand-event-accept-button').click()
-  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '1')
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveClass(/opacity-100/)
 })
 
 // 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지) "거절하기"
