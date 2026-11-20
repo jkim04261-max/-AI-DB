@@ -788,6 +788,20 @@ async function run() {
     )
     t.assert(blockedSave.statusCode === 400, '연령 제한에 걸린 토큰으로 저장을 시도하면 400으로 거부된다(우회 방지)')
 
+    // 버그 수정(8세 학습 시 "이해하기 힘들어요" 거절 무한 반복): 이
+    // 검증 호출에 보낸 systemInstruction이 더 이상 toddler/teen을 한
+    // 줄로 묶지 않는지 확인한다 — 묶여 있으면 Gemini가 8~9살도 이해할
+    // 쉬운 내용을 'teen'으로 잘못 판정해, toddler 캐릭터가 영원히
+    // 막히는 원인이 된다.
+    t.assert(
+      typeof lastSystemInstruction === 'string' && !lastSystemInstruction.includes('toddler(8~9살)/teen(10대)'),
+      'toddler와 teen을 한 줄로 묶어 설명하지 않는다(8세 학습 "이해하기 힘들어요" 무한 반복의 원인이었다)',
+    )
+    t.assert(
+      typeof lastSystemInstruction === 'string' && lastSystemInstruction.includes('toddler(8~9살)') && lastSystemInstruction.includes('teen(10대)'),
+      'toddler(8~9살)와 teen(10대)을 각각 별도 줄로 설명한다',
+    )
+
     // 레벨이 15(junior_20s 구간: Lv.10~19)가 되면 같은 지식도 정상적으로
     // 배울 수 있다 — DB에 새 컬럼을 만들지 않고 character.level만으로
     // 판정하므로, 레벨만 바꿔도 연령대가 그대로 따라온다.
