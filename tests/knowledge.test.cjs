@@ -21,14 +21,21 @@ async function run() {
   // 스스로 공부하기가 캐릭터의 연령대를 실제로 프롬프트에 반영하는지
   // 확인하는 테스트에서 쓴다.
   let lastSystemInstruction = null
+  // 지시서(문제 중복 및 반복 방지): objective-quiz도 study-generate와
+  // 같은 "이미 아는 제목" 패턴을 쓰는데, 그 목록은 systemInstruction이
+  // 아니라 contents(사용자 메시지) 쪽에 실린다 — 그걸 검증할 때만 쓴다.
+  let lastUserContent = null
   global.fetch = async (url, init) => {
     if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
       geminiCallCount++
       if (init?.body) {
         try {
-          lastSystemInstruction = JSON.parse(init.body)?.systemInstruction?.parts?.[0]?.text ?? null
+          const parsedBody = JSON.parse(init.body)
+          lastSystemInstruction = parsedBody?.systemInstruction?.parts?.[0]?.text ?? null
+          lastUserContent = parsedBody?.contents?.[0]?.parts?.[0]?.text ?? null
         } catch {
           lastSystemInstruction = null
+          lastUserContent = null
         }
       }
       if (geminiBehavior.kind === 'network-error') {
@@ -1343,6 +1350,10 @@ async function run() {
     t.assert(quizRes1.body.questions.every((q) => q.choices.length === 3), 'toddler(8~9살) 단계는 보기 3개가 출제된다(연령대별 선택지 개수)')
     const matchedTemplates1 = OBJECTIVE_QUIZ_TEMPLATE_PHRASES.filter((p) => lastSystemInstruction.includes(p))
     t.assert(matchedTemplates1.length === 2, '프롬프트에 서로 다른 문제 유형(역사/목적/도구/핵심역량) 2종이 지정된다(문제 유형 다양화)')
+    t.assert(
+      typeof lastUserContent === 'string' && lastUserContent.includes('이미 출제한 문제 목록: (아직 없음)'),
+      '아직 저장된 객관식 문제가 없으면 "이미 출제한 문제 목록"이 비어있다고 보낸다',
+    )
 
     // 2) 하나라도 틀리면 통과하지 못하고, 아무것도 저장되지 않는다.
     const wrongAnswers = mockedSet1.map((q) => (q.correctIndex + 1) % q.choices.length)
@@ -1388,6 +1399,19 @@ async function run() {
     await characterHandler(minaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterCorrectKnowledge)
     t.assert(afterCorrectKnowledge.body.entries.length === 2, '통과한 2문제가 각각 지식 항목으로 저장된다')
     t.assert(afterCorrectKnowledge.body.entries.every((e) => e.mission_type === 'objective'), '두 항목 모두 mission_type=objective로 저장된다')
+
+    // 3.5) 지시서(문제 중복 및 반복 방지): 방금 저장한 2문제의 title이
+    // 다음 GET 때 "이미 출제한 문제 목록"으로 Gemini 요청에 그대로
+    // 실린다 — study-generate의 "이미 아는 제목" 제외와 같은 원칙.
+    const mockedSet3 = makeObjectiveQuizMock(2, 3, [0, 0])
+    geminiBehavior = { kind: 'json', result: mockedSet3 }
+    const quizRes3 = mockRes()
+    await characterHandler(minaReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), quizRes3)
+    t.assert(quizRes3.statusCode === 200, '세 번째 GET도 정상 응답한다')
+    t.assert(
+      typeof lastUserContent === 'string' && mockedSet2.every((q) => lastUserContent.includes(q.text)),
+      '방금 저장한 객관식 문제들의 텍스트가 "이미 출제한 문제 목록"으로 Gemini 요청에 포함된다',
+    )
 
     // 4) 같은 requestId로 재제출(네트워크 재시도 등)하면 중복 저장·중복
     // XP 지급 없이 현재 상태를 그대로 돌려준다.

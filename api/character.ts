@@ -184,6 +184,11 @@ const NO_KNOWLEDGE_VALIDATION_TICKETS_MESSAGE =
 // 목록의 최대 길이 — 프롬프트 크기(=비용)를 제한하면서도 최근에 배운
 // 것 위주로 충분히 참고할 수 있는 수.
 const SELF_STUDY_KNOWN_TITLES_LIMIT = 20
+// 지시서(문제은행 및 연령별 학습 분량 자동 적용): objective-quiz-submit도
+// 같은 원칙 — "이미 푼 문제는 다시 출제하지 않는다." 20~50대는 objective
+// 유형 하나로만 요구치가 최대 17개(50/3 반올림)까지 쌓일 수 있어, 그
+// 전부를 놓치지 않도록 SELF_STUDY_KNOWN_TITLES_LIMIT보다 여유 있게 둔다.
+const OBJECTIVE_QUIZ_KNOWN_TITLES_LIMIT = 30
 
 // PR #65: 집중력 게이지(characters.focus_percent)의 1차 최소 반영 —
 // "교육·장비" 단계 자체는 PR #66에서 다루므로, 지금은 실제로 지식을
@@ -1431,9 +1436,27 @@ async function handleGetObjectiveQuiz(req: VercelRequest, res: VercelResponse, u
     const objectiveQuizCount = characterAgeTier === 'teen' ? 3 : 2
     const choiceCount = objectiveQuizChoiceCountForTier(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
 
+    // 지시서(문제 중복 및 반복 방지): 이 캐릭터가 이미 저장한 객관식
+    // 문제(mission_type='objective')의 title(=문제 텍스트 그대로,
+    // handleSubmitObjectiveQuiz 참고)을 Gemini에게 "이미 출제한 문제
+    // 목록"으로 넘겨 다시 내지 않도록 한다 — study-generate의 "이미
+    // 아는 제목" 제외와 완전히 같은 원칙.
+    const knownQuestionsResult = await sql<{ title: string }>`
+      SELECT title FROM character_knowledge_entries
+      WHERE character_id = ${character.id} AND user_id = ${userId} AND mission_type = 'objective'
+      ORDER BY created_at DESC
+      LIMIT ${OBJECTIVE_QUIZ_KNOWN_TITLES_LIMIT}
+    `
+
     let generated
     try {
-      generated = await generateObjectiveQuizBatch(resolveProfessionLabel(character), characterAgeTier, objectiveQuizCount, choiceCount)
+      generated = await generateObjectiveQuizBatch(
+        resolveProfessionLabel(character),
+        characterAgeTier,
+        objectiveQuizCount,
+        choiceCount,
+        knownQuestionsResult.rows.map((r) => r.title),
+      )
     } catch (err) {
       const { status, message } = resolveGeminiFailureMessage(err)
       res.status(status).json({ error: message })
