@@ -958,7 +958,7 @@ async function run() {
     // 당연히 toddler로 고정된다).
     const firstSave = await teachOnce(1, 'objective')
     t.assert(firstSave.statusCode === 201, '첫 지식 저장이 성공한다')
-    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/6뿐이라 아직 진화하지 않는다')
+    t.assert(firstSave.body.evolved === false, 'toddler는 레벨 조건이 없지만 미션이 1/8뿐이라 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '첫 평가에서 toddler로 고정된다')
 
     // 레벨이 이미 teen 기준(Lv.5)을 넘어도(퀴즈·시험 등으로 다른 곳에서
@@ -969,7 +969,7 @@ async function run() {
     kateNuri.exp = 1000
     const noMissionSave = await teachOnce(2, 'objective')
     t.assert(noMissionSave.statusCode === 201, '레벨만 충분한 상태에서도 저장 자체는 성공한다')
-    t.assert(noMissionSave.body.evolved === false, '미션이 2/6뿐이면 레벨이 충분해도 진화하지 않는다')
+    t.assert(noMissionSave.body.evolved === false, '미션이 2/8뿐이면 레벨이 충분해도 진화하지 않는다')
     t.assert(noMissionSave.body.missionProgress.confirmedTotal === 2, '지금까지 저장한 2건이 objective 2개로 집계된다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '레벨은 넘었지만 미션이 안 끝나서 toddler에 그대로 고정된다(진짜 게이트)')
 
@@ -978,11 +978,12 @@ async function run() {
     const kateNuriJson = getRes.body.characters.find((c) => c.companion_type === 'nuri')
     t.assert(kateNuriJson.level === 5 && kateNuriJson.age_tier === 'toddler', '캐릭터 목록 응답도 레벨(5)과 무관하게 age_tier는 toddler로 고정되어 내려온다')
 
-    // 2) 유형 구성이 3(knowhow)+2(objective)+1(subjective)가 아니면
-    // (객관식만 계속 쌓여도) 진화하지 않는다 — 지시서(학습 플로우 전면
-    // 개편)로 toddler만 균등분배(2/2/2)에서 이 비율로 바뀌었다(사용자
-    // 승인: "게이트를 3:2:1로 변경") — "총 6개"가 아니라 "유형별로 정해진
-    // 개수"가 조건인 것은 그대로다.
+    // 2) 유형 구성이 3(knowhow)+2(objective)+1(card_game)+1(sequence_order)
+    // +1(categorize)가 아니면(객관식만 계속 쌓여도) 진화하지 않는다 —
+    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성)로 toddler의 3단계가
+    // "주관식 1개"에서 "card_game 1 + sequence_order 1 + categorize 1"
+    // 로 바뀌었다 — "총 8개"가 아니라 "유형별로 정해진 개수"가 조건인
+    // 것은 그대로다.
     for (let n = 3; n <= 6; n++) {
       const res = await teachOnce(n, 'objective')
       t.assert(res.body.evolved === false, `${n}번째(여전히 objective만)까지는 진화하지 않는다`)
@@ -993,25 +994,48 @@ async function run() {
       missionsRes.body.missionProgress.byType.objective.confirmed === 2 && missionsRes.body.missionProgress.byType.objective.complete === true,
       'objective는 2개에서 더 이상 늘지 않고(유형별 상한 2) 완료 표시된다',
     )
-    t.assert(missionsRes.body.missionProgress.byType.subjective.required === 1 && missionsRes.body.missionProgress.byType.knowhow.required === 3, 'toddler의 유형별 필요 개수는 subjective 1개/knowhow 3개다')
-    t.assert(missionsRes.body.missionProgress.byType.subjective.confirmed === 0 && missionsRes.body.missionProgress.byType.knowhow.confirmed === 0, 'subjective/knowhow는 아직 0개다')
+    t.assert(
+      missionsRes.body.missionProgress.byType.card_game.required === 1 &&
+        missionsRes.body.missionProgress.byType.sequence_order.required === 1 &&
+        missionsRes.body.missionProgress.byType.categorize.required === 1 &&
+        missionsRes.body.missionProgress.byType.knowhow.required === 3,
+      'toddler의 유형별 필요 개수는 card_game/sequence_order/categorize 각 1개, knowhow 3개다',
+    )
+    t.assert(
+      missionsRes.body.missionProgress.byType.card_game.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.sequence_order.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.categorize.confirmed === 0 &&
+        missionsRes.body.missionProgress.byType.knowhow.confirmed === 0,
+      'card_game/sequence_order/categorize/knowhow는 아직 0개다',
+    )
     t.assert(missionsRes.body.missionProgress.allConfirmed === false, '유형이 한쪽으로 쏠려 있으면 총 개수가 충분해도 allConfirmed는 false다')
 
-    // 3) subjective 1개(새 필요 개수) + knowhow 3개까지 채우면(= 2+1+3=6)
-    // 레벨도 이미 충분하므로 그 즉시 진화한다.
-    const subj1 = await teachOnce(7, 'subjective')
-    t.assert(subj1.body.evolved === false, 'subjective가 1개로 꽉 찼어도(새 필요 개수) knowhow가 아직 0개라 진화하지 않는다')
-    await teachOnce(8, 'knowhow')
-    await teachOnce(9, 'knowhow')
-    const evolved = await teachOnce(10, 'knowhow')
+    // 3) card_game 1 + sequence_order 1 + categorize 1 + knowhow 3까지
+    // 채우면(= 2+1+1+1+3=8) 레벨도 이미 충분하므로 그 즉시 진화한다.
+    // 8문제(기존 6문제보다 2번 더 verify-knowledge를 호출함)라 여기서
+    // 하루 지식 검증 10회 한도를 넘기므로, 진화 판정 자체와는 무관한
+    // 그 제한에 걸리지 않도록 먼저 날짜를 넘긴다(위 2)까지 총 6회 소비).
+    mock.setFakeDate('2026-03-02')
+    const cardGame1 = await teachOnce(107, 'card_game')
+    t.assert(cardGame1.body.evolved === false, 'card_game이 1개로 꽉 찼어도 나머지 신유형 미니게임·knowhow가 남아 진화하지 않는다')
+    const seq1 = await teachOnce(108, 'sequence_order')
+    t.assert(seq1.body.evolved === false, 'sequence_order까지 채워도 categorize·knowhow가 남아 진화하지 않는다')
+    const cat1 = await teachOnce(109, 'categorize')
+    t.assert(cat1.body.evolved === false, 'categorize까지 채워도 knowhow가 아직 0개라 진화하지 않는다')
+    await teachOnce(110, 'knowhow')
+    await teachOnce(111, 'knowhow')
+    const evolved = await teachOnce(112, 'knowhow')
     t.assert(evolved.statusCode === 201, '유형별로 정해진 개수의 마지막 지식 저장이 성공한다')
-    t.assert(evolved.body.evolved === true, '객관식2+주관식1+노하우3이 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)')
+    t.assert(
+      evolved.body.evolved === true,
+      '객관식2+card_game1+sequence_order1+categorize1+노하우3이 모두 채워지면 진화한다(toddler→teen은 레벨과 무관)',
+    )
     t.assert(evolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(evolved.body.leveledUp === false, '레벨은 이미 5였으므로 이 저장 자체의 leveledUp은 false다(진화는 레벨을 강제로 올리지 않는다)')
     t.assert(evolved.body.savedReply?.includes('청소년 단계로 성장했어요'), '진화 시 응답 문구에 진화 전용 안내가 포함된다')
     t.assert(kateNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록되어 다음 요청에서도 유지된다')
 
-    // 4) teen으로 넘어간 뒤에는 toddler 때 쌓은 6개가 재사용되지 않고,
+    // 4) teen으로 넘어간 뒤에는 toddler 때 쌓은 8개가 재사용되지 않고,
     // teen 자신의 미션 집계가 0부터 다시 시작한다.
     const teenMissions = mockRes()
     await characterHandler(kateReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), teenMissions)
@@ -1025,11 +1049,12 @@ async function run() {
     // 5) 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen은 고정
     // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
     // ④객관식=objective3, subjective는 0)으로 10개를 요구한다. 지금까지
-    // 이미 지식 검증을 10회 썼으므로(하루 10회 제한), 이 구간에서 더
-    // 쓰기 전에 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
+    // 이미 지식 검증을 여러 번 썼으므로(하루 10회 제한, toddler 8문제
+    // 완료로 2026-03-02도 이미 6회 소비), 이 구간에서 더 쓰기 전에 또
+    // 한 번 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
     // 아니라 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의
     // 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
-    mock.setFakeDate('2026-03-02')
+    mock.setFakeDate('2026-03-03')
     const teachCardGame = async (n) => {
       const completeRes = mockRes()
       await characterHandler(
@@ -1074,7 +1099,7 @@ async function run() {
     // "그 즉시" 진화가 완성돼야 한다(save-knowledge 한 번이 아니어도 같은
     // 판정을 공유한다는 뜻). teen의 10회로 당일 하루 제한을 이미 다
     // 썼으므로, 다시 날짜를 넘긴다.
-    mock.setFakeDate('2026-03-03')
+    mock.setFakeDate('2026-03-04')
     kateNuri.level = 10
     kateNuri.exp = 4500
     geminiBehavior = { kind: 'json', result: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '', requiredAgeTier: 'toddler' } }
@@ -1248,12 +1273,13 @@ async function run() {
     }
   }
 
-  // --- 지시서 #03(8~9살 시험 시스템 전면 개편), 지시서(학습 플로우
-  // 전면 개편)로 숫자 갱신: toddler(8~9살)→teen(10대) 첫 진화는 "복잡한
-  // 레벨 조건 없이" 유형별로 정해진 개수 총 6개(knowhow 3+objective
-  // 2+subjective 1 — 사용자 승인: "게이트를 3:2:1로 변경") 확정만으로
-  // 즉시 진화해야 한다 — Lv.1(레벨 조건 AGE_TIER_MIN_LEVEL.teen=5에
-  // 한참 못 미침)인 채로도 진화하는지 전용으로 확인한다.
+  // --- 지시서 #03(8~9살 시험 시스템 전면 개편), 지시서(8세 학습
+  // 시스템: 8문제 커리큘럼 재구성)로 숫자 갱신: toddler(8~9살)→teen
+  // (10대) 첫 진화는 "복잡한 레벨 조건 없이" 유형별로 정해진 개수 총
+  // 8개(knowhow 3+objective 2+card_game 1+sequence_order 1+
+  // categorize 1) 확정만으로 즉시 진화해야 한다 — Lv.1(레벨 조건
+  // AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)인 채로도 진화하는지
+  // 전용으로 확인한다.
   {
     mock.seedUser(12, { email: 'leo@test.com' })
     const leoCookie = cookieHeaderFor(auth, 12, 0, 'leo@test.com')
@@ -1294,13 +1320,15 @@ async function run() {
 
     await teachOnceLeo(1, 'objective')
     await teachOnceLeo(2, 'objective')
-    await teachOnceLeo(3, 'subjective')
-    await teachOnceLeo(4, 'knowhow')
-    await teachOnceLeo(5, 'knowhow')
+    await teachOnceLeo(3, 'card_game')
+    await teachOnceLeo(4, 'sequence_order')
+    await teachOnceLeo(5, 'categorize')
+    await teachOnceLeo(6, 'knowhow')
+    await teachOnceLeo(7, 'knowhow')
     t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
-    const leoEvolved = await teachOnceLeo(6, 'knowhow')
-    t.assert(leoEvolved.statusCode === 201, '6번째(마지막) 지식 저장이 성공한다')
-    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별로 정해진 개수(2+1+3) 6개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
+    const leoEvolved = await teachOnceLeo(8, 'knowhow')
+    t.assert(leoEvolved.statusCode === 201, '8번째(마지막) 지식 저장이 성공한다')
+    t.assert(leoEvolved.body.evolved === true, 'Lv.1이어도 유형별로 정해진 개수(2+1+1+1+3) 8개를 채우면 즉시 진화한다(지시서 #03: 레벨 조건 없음)')
     t.assert(leoEvolved.body.newAgeTier === 'teen', '다음 연령대는 teen이다')
     t.assert(leoNuri.mission_unlocked_tier === 'teen', 'DB에도 teen으로 기록된다')
     t.assert(leoNuri.level === 1, '진화해도 레벨/경험치는 그대로다(진화가 레벨을 강제로 올리지 않는다)')
@@ -1574,7 +1602,7 @@ async function run() {
   {
     const characterAge = bundle('api/_lib/characterAge.ts')
     const EXPECTED_TOTAL_BY_TIER = {
-      toddler: 6,
+      toddler: 8,
       teen: 10,
       junior_20s: 20,
       career_30s: 30,
@@ -1587,25 +1615,50 @@ async function run() {
         `${tier} 단계의 필요 지식 총합은 ${expectedTotal}개다`,
       )
       const perType = characterAge.MISSIONS_REQUIRED_PER_TYPE_BY_TIER[tier]
-      const sum = perType.objective + perType.subjective + perType.knowhow + perType.card_game
+      const sum = perType.objective + perType.subjective + perType.knowhow + perType.card_game + perType.sequence_order + perType.categorize
       t.assert(
         sum === expectedTotal,
-        `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game})`,
+        `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game}+sequence_order${perType.sequence_order}+categorize${perType.categorize})`,
       )
-      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen만 고정 순서
+      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen은 고정 순서
       // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
       // ④객관식=objective3, subjective는 의도적으로 0)이라 다른 티어와
-      // 다른 모양이 맞다 — 다른 티어는 이 변경의 영향을 받지 않았는지
-      // (card_game은 항상 0) 그대로 확인한다.
+      // 다른 모양이 맞다.
+      // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler도 고정
+      // 순서 커리큘럼(직접입력3+객관식2+카드맞추기1+순서맞추기1+
+      // 분류하기1, subjective는 의도적으로 0)으로 바뀌어 더 이상 "세
+      // 유형 모두 최소 1개"가 아니다 — junior_20s 이상만 이 변경의
+      // 영향을 받지 않았는지(균등분배 3유형 + card_game/신유형 0) 그대로
+      // 확인한다.
       if (tier === 'teen') {
         t.assert(
-          perType.knowhow === 6 && perType.objective === 3 && perType.subjective === 0 && perType.card_game === 1,
-          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective는 0)을 요구한다',
+          perType.knowhow === 6 &&
+            perType.objective === 3 &&
+            perType.subjective === 0 &&
+            perType.card_game === 1 &&
+            perType.sequence_order === 0 &&
+            perType.categorize === 0,
+          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective·신유형 미니게임은 0)을 요구한다',
+        )
+      } else if (tier === 'toddler') {
+        t.assert(
+          perType.knowhow === 3 &&
+            perType.objective === 2 &&
+            perType.subjective === 0 &&
+            perType.card_game === 1 &&
+            perType.sequence_order === 1 &&
+            perType.categorize === 1,
+          'toddler 단계는 고정 커리큘럼(직접입력3+객관식2+카드맞추기1+순서맞추기1+분류하기1, subjective는 0)을 요구한다',
         )
       } else {
         t.assert(
-          perType.objective > 0 && perType.subjective > 0 && perType.knowhow > 0 && perType.card_game === 0,
-          `${tier} 단계는 세 유형(객관식/주관식/노하우) 모두 최소 1개 이상을 요구하고 card_game은 0이다(teen 전용 커리큘럼의 영향을 받지 않는다)`,
+          perType.objective > 0 &&
+            perType.subjective > 0 &&
+            perType.knowhow > 0 &&
+            perType.card_game === 0 &&
+            perType.sequence_order === 0 &&
+            perType.categorize === 0,
+          `${tier} 단계는 세 유형(객관식/주관식/노하우) 모두 최소 1개 이상을 요구하고 card_game/신유형 미니게임은 0이다(toddler/teen 전용 커리큘럼의 영향을 받지 않는다)`,
         )
       }
     }
