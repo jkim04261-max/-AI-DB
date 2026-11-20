@@ -56,6 +56,11 @@ async function mockCharacterApi(
     // 내려주는 기본값을 쓴다(이 단계 자체를 다루지 않는 테스트를 위한
     // 기본값, 다른 onXxx들과 같은 패턴).
     onCompleteCardGame?: (route: Route) => Promise<void>
+    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/
+    // 분류하기도 카드 맞추기와 완전히 같은 모의 패턴(기본 동작 있음,
+    // 필요하면 override).
+    onCompleteSequenceGame?: (route: Route) => Promise<void>
+    onCompleteCategorizeGame?: (route: Route) => Promise<void>
     // 지시서(한도 소진 시 구매 유도 UI) 전용 — 지정하지 않으면 소진되지
     // 않은 기본값(10/10, 3/3)을 돌려준다.
     onUsage?: (route: Route) => Promise<void>
@@ -193,6 +198,40 @@ async function mockCharacterApi(
           verification: { status: 'appropriate', explanation: '모든 카드를 맞췄어요!', relevance: '', issues: '', suggestion: '' },
           verificationToken: 'mock-card-game-token',
           characterReply: '우와, 카드를 다 맞췄어요! 정말 멋져요!',
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'complete-sequence-game') {
+      if (options.onCompleteSequenceGame) {
+        await options.onCompleteSequenceGame(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '순서 맞추기 완료', content: '하루 일과를 올바른 순서대로 맞춰서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '순서를 전부 맞췄어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'mock-sequence-game-token',
+          characterReply: '순서를 완벽하게 맞췄어요! 대단해요!',
+        }),
+      })
+      return
+    }
+    if (method === 'POST' && action === 'complete-categorize-game') {
+      if (options.onCompleteCategorizeGame) {
+        await options.onCompleteCategorizeGame(route)
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          knowledge: { title: '분류하기 완료', content: '여러 물건을 올바른 무리로 모두 나눠서 한 세트를 클리어했습니다.' },
+          verification: { status: 'appropriate', explanation: '전부 올바르게 분류했어요!', relevance: '', issues: '', suggestion: '' },
+          verificationToken: 'mock-categorize-game-token',
+          characterReply: '다 올바른 무리로 나눴어요! 정말 똑똑해요!',
         }),
       })
       return
@@ -1026,10 +1065,9 @@ test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-
   expect(saveRequestBody?.missionType).toBe('subjective')
 })
 
-// 위 복구가 toddler의 2단계(객관식)·3단계(전용 주관식 컴포넌트)까지
-// 건드리지 않았는지 — 지시서의 "다른 학습 단계를 건드리지 마세요"
-// 금지 사항을 직접 확인한다.
-test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관식)/3단계(주관식) steps', async ({ page }) => {
+// 위 복구가 toddler의 2단계(객관식)까지 건드리지 않았는지 — 지시서의
+// "다른 학습 단계를 건드리지 마세요" 금지 사항을 직접 확인한다.
+test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관식) step', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -2758,36 +2796,43 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
-// 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(학습
-// 플로우 전면 개편)로 흐름 자체가 바뀌었다: 더 이상 유형별 2개씩 자유
-// 순서가 아니라, toddler(8~9살)는 "1단계 직접입력 3문제(knowhow) →
-// 2단계 객관식 2문제(세트 전부 정답, objective) → 3단계 주관식
-// 1문제(subjective)"라는 고정 순서로 정확히 6개(3+2+1)를 채워야
-// 진화한다(사용자 승인: "게이트를 3:2:1로 변경"). 이 테스트는 그 세
-// 단계를 실제 UI로 끝까지 따라가, 토들러의 "6개 저장" 보상(지시서(서점
-// 팝업 흐름 수정) 이후로는 식사·알바 2단계 로테이션이라 정확히 2번째
-// 로테이션인 알바 이벤트가 2단계의 객관식 통과+3단계 완료가 겹치는
-// 6번째 저장에서 함께 발동함)과 겹치는 실제 상황에서도 진화 배너·
+// 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(8세
+// 학습 시스템: 8문제 커리큘럼 재구성)로 흐름 자체가 바뀌었다: 더 이상
+// 유형별 2개씩 자유 순서가 아니라, toddler(8~9살)는 "1단계 직접입력
+// 3문제(knowhow) → 2단계 객관식 2문제(세트 전부 정답, objective) →
+// 3단계 카드 맞추기 1문제(card_game) → 4단계 순서 맞추기 1문제
+// (sequence_order) → 5단계 분류하기 1문제(categorize)"라는 고정 순서로
+// 정확히 8개(3+2+1+1+1)를 채워야 진화한다. 이 테스트는 그 다섯 단계를
+// 실제 UI로 끝까지 따라가, 토들러의 "8개 저장" 보상(식사·알바 2단계
+// 로테이션이라 정확히 2번째 로테이션인 알바 이벤트가 5단계 완료와 겹치는
+// 8번째 저장에서 함께 발동함)과 겹치는 실제 상황에서도 진화 배너·
 // 캐릭터 그림·상태창이 전부 올바르게 바뀌는지 확인한다.
-test('evolving from toddler to teen via the new 3-stage flow (direct×3 → objective quiz×2 → subjective×1) shows the evolution banner and swaps the portrait to teen — even though it coincides with the part-time job event', async ({ page }) => {
+test('evolving from toddler to teen via the new 5-stage flow (direct×3 → objective quiz×2 → card game×1 → sequence×1 → categorize×1) shows the evolution banner and swaps the portrait to teen — even with an errand event interrupting mid-curriculum', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCount = 0
-  const REQUIRED = { knowhow: 3, objective: 2, subjective: 1 }
-  const confirmed = { objective: 0, subjective: 0, knowhow: 0 }
+  const REQUIRED = { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 }
+  const confirmed = { objective: 0, subjective: 0, knowhow: 0, card_game: 0, sequence_order: 0, categorize: 0 }
   const missionProgressFor = () => ({
     ageTier: 'toddler',
     ageTierLabel: '8~9살',
     byType: {
       objective: { type: 'objective', confirmed: confirmed.objective, required: REQUIRED.objective, complete: confirmed.objective >= REQUIRED.objective },
-      subjective: { type: 'subjective', confirmed: confirmed.subjective, required: REQUIRED.subjective, complete: confirmed.subjective >= REQUIRED.subjective },
+      subjective: { type: 'subjective', confirmed: confirmed.subjective, required: REQUIRED.subjective, complete: true },
       knowhow: { type: 'knowhow', confirmed: confirmed.knowhow, required: REQUIRED.knowhow, complete: confirmed.knowhow >= REQUIRED.knowhow },
-      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+      card_game: { type: 'card_game', confirmed: confirmed.card_game, required: REQUIRED.card_game, complete: confirmed.card_game >= REQUIRED.card_game },
+      sequence_order: { type: 'sequence_order', confirmed: confirmed.sequence_order, required: REQUIRED.sequence_order, complete: confirmed.sequence_order >= REQUIRED.sequence_order },
+      categorize: { type: 'categorize', confirmed: confirmed.categorize, required: REQUIRED.categorize, complete: confirmed.categorize >= REQUIRED.categorize },
     },
-    confirmedTotal: confirmed.objective + confirmed.subjective + confirmed.knowhow,
-    requiredTotal: 6,
-    allConfirmed: confirmed.objective >= REQUIRED.objective && confirmed.subjective >= REQUIRED.subjective && confirmed.knowhow >= REQUIRED.knowhow,
+    confirmedTotal: confirmed.objective + confirmed.knowhow + confirmed.card_game + confirmed.sequence_order + confirmed.categorize,
+    requiredTotal: 8,
+    allConfirmed:
+      confirmed.objective >= REQUIRED.objective &&
+      confirmed.knowhow >= REQUIRED.knowhow &&
+      confirmed.card_game >= REQUIRED.card_game &&
+      confirmed.sequence_order >= REQUIRED.sequence_order &&
+      confirmed.categorize >= REQUIRED.categorize,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
   })
@@ -2902,27 +2947,60 @@ test('evolving from toddler to teen via the new 3-stage flow (direct×3 → obje
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('final-subjective-step')).toBeVisible()
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
 
-  // 3단계: 주관식 1문제(개인 노하우) — 이 저장이 "유형별로 정해진
-  // 개수(3+2+1)"를 완성시키는 마지막 저장이고, 토들러의 "6개 저장"
-  // 보상(알바 이벤트)도 정확히 같은 저장에서 함께 발동한다.
-  await page.getByTestId('final-subjective-textarea').fill('모르는 건 부끄러운 게 아니야, 꼭 물어봐도 괜찮아!')
-  await page.getByTestId('final-subjective-complete-button').click()
+  // 3단계: 카드 맞추기 1문제(card_game) — teen의 ②단계와 완전히 같은
+  // CardMatchGame 컴포넌트를 재사용한다.
+  for (let i = 0; i < 6; i++) {
+    const backs = page.getByTestId('card-match-back')
+    const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
+    const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
+    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+  }
 
-  // 진화 배너가 뜬다 — 같은 저장에서 동시에 열리는 알바 연출에 가려지지
-  // 않고 실제로 보이는지 확인한다(핵심 회귀 포인트).
-  await expect(page.getByTestId('evolution-banner')).toBeVisible()
-  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
-
-  // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) 이후
-  // toddler는 "알바" 자리에서 선택형 심부름 이벤트가 뜬다 — 이 저장
-  // 자체가 teen으로 "방금" 진화시킨 저장이지만, 그 판정에 쓰인
-  // ageTier 클로저는 이 저장이 일어난 "그 순간"(아직 toddler) 기준
-  // 이라 심부름이 맞다.
+  // 8문제로 늘어나면서, "3회 저장마다 식사/알바 로테이션"이 완료 시점
+  // (예전의 6번째=마지막 저장)이 아니라 커리큘럼 중간(knowhow 3 + 이
+  // card_game 1번째 저장 = 정확히 6번째 저장, 식사 다음 2번째
+  // 로테이션인 심부름)에도 한 번 더 끼어든다 — 받아들이고 패널을 다시
+  // 열어서 이어간다.
+  // 체험판 용돈을 아직 지급받지 않은 캐릭터라(onboarding 생략), 수락해도
+  // 금액 변화 없이 모달만 닫힌다(기존 "밥 먹이기"와 같은 원칙).
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-accept-button').click()
-  await expect(page.getByTestId('money-popup')).toContainText('10,000원')
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('toddler-sequence-game-step')).toBeVisible()
+
+  // 4단계: 순서 맞추기 1문제(sequence_order) — 뒤섞인 칩의 data-order를
+  // 읽어 오름차순으로 눌러 올바른 순서를 맞춘다.
+  const sequenceChips = page.getByTestId('sequence-order-chip')
+  const orders = await sequenceChips.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-order'))))
+  for (const order of [...orders].sort((a, b) => a - b)) {
+    await page.locator(`[data-testid="sequence-order-chip"][data-order="${order}"]`).click()
+  }
+  await expect(page.getByTestId('toddler-categorize-game-step')).toBeVisible()
+
+  // 5단계: 분류하기 1문제(categorize) — 이 저장이 "유형별로 정해진
+  // 개수(3+2+1+1+1)"를 완성시키는 마지막 저장이고, 토들러의 "8개 저장"
+  // 보상(알바 이벤트)도 정확히 같은 저장에서 함께 발동한다.
+  const categorizeItems = page.getByTestId('categorize-item')
+  const itemCount = await categorizeItems.count()
+  for (let i = 0; i < itemCount; i++) {
+    const item = categorizeItems.nth(i)
+    const correctGroup = await item.getAttribute('data-correct-group')
+    await item.getByTestId(correctGroup === 'A' ? 'categorize-assign-a' : 'categorize-assign-b').click()
+  }
+  await page.getByTestId('categorize-check-button').click()
+
+  // 진화 배너가 뜬다 — 8문제로 늘어나면서 "3회 저장 로테이션"과 완료
+  // 시점이 더 이상 같은 저장에서 겹치지 않는다(위에서 이미 6번째
+  // 저장=card_game에서 한 번 소비했고, 남은 두 번(순서 맞추기+분류
+  // 하기)으로는 다시 3의 배수에 닿지 않는다) — 그래도 배너 자체는
+  // 정상적으로 뜨는지 확인한다.
+  await expect(page.getByTestId('evolution-banner')).toBeVisible()
+  await expect(page.getByTestId('evolution-banner')).toContainText('청소년')
 
   // 모든 연출이 끝난 뒤 — 실제 화면의 캐릭터 그림이 teen(10대) 일러스트로
   // 바뀌어 있어야 한다(지시서의 핵심 요구사항: "8세에 머물러 있지 않고
@@ -3186,12 +3264,14 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
     ageTierLabel: '8~9살',
     byType: {
       objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-      subjective: { type: 'subjective', confirmed: 0, required: 1, complete: false },
+      subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
       knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-      card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+      card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+      sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+      categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
     },
     confirmedTotal: 3,
-    requiredTotal: 6,
+    requiredTotal: 8,
     allConfirmed: false,
     nextAgeTier: 'teen',
     nextAgeTierLabel: '10대',
@@ -3268,11 +3348,11 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-retry-button').click()
   await expect(page.getByTestId('objective-quiz-question-0')).toContainText('세트 2')
 
-  // 이번엔 정답을 고르면 통과하고, 3단계(주관식)로 넘어간다.
+  // 이번엔 정답을 고르면 통과하고, 3단계(카드 맞추기)로 넘어간다.
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('final-subjective-step')).toBeVisible()
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
 })
 
 // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 선택지
