@@ -94,13 +94,17 @@ export default function OpeningProfileScreen({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-cyan-200/80">일하는 지역:</span>
+          {/* 지시서(일하는/공부하는 지역 표기 변경): "거주지역"이 성인
+              사용자에게는 와닿지 않는다는 지적에 따라 라벨·플레이스홀더
+              문구만 바꾼다 — state 변수명(region)·저장 안 함 원칙은
+              그대로다. */}
+          <span className="text-xs font-semibold text-cyan-200/80">일하는/공부하는 지역:</span>
           <input
             data-testid="opening-profile-region-input"
             value={region}
             onChange={(e) => setRegion(e.target.value)}
             maxLength={30}
-            placeholder="예: 경기도 일산 정발산동"
+            placeholder="예: 경기도 일산 정발산동 (학생은 학교 소재지)"
             className="rounded-xl border border-cyan-400/25 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
           />
         </label>

@@ -156,8 +156,14 @@ export function nextAgeTier(tier: AgeTier): AgeTier | null {
 // (아래 override), 다른 모든 연령대는 card_game:0을 명시해 기존 숫자가
 // 전혀 바뀌지 않는다(splitMissionsRequiredByType는 여전히 기존 3종만
 // 나눈다 — 아래 참고).
-export type MissionType = 'objective' | 'subjective' | 'knowhow' | 'card_game'
-export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow', 'card_game']
+// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 'sequence_order'(순서
+// 맞추기)/'categorize'(분류하기) 2종을 추가했다 — card_game과 완전히
+// 같은 성격("검증할 사용자 입력이 없는, 클리어하면 바로 확정되는
+// 미니게임")이라 같은 패턴(handleCompleteCardGame류)을 그대로 따른다.
+// toddler(8~9살)에서만 실제로 요구되고(아래 override), 다른 모든
+// 연령대는 0을 명시해 기존 숫자를 전혀 바꾸지 않는다.
+export type MissionType = 'objective' | 'subjective' | 'knowhow' | 'card_game' | 'sequence_order' | 'categorize'
+export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow', 'card_game', 'sequence_order', 'categorize']
 
 // 지시서(연령대별 스테이지 볼륨업): "한 연령대를 졸업하려면 유형별
 // 균형(PR #63)을 갖춘 지식을 몇 개 확정해야 하는지"가 더 이상 모든
@@ -168,8 +174,11 @@ export const MISSION_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow
 // "다음 단계로의 진화 조건"이 아니라 "60대 최종 마스터 시험"
 // 자체를 뜻한다 — allConfirmed가 true가 되는 순간이 곧 마스터 시험
 // 통과 시점이다(src/components/grow/InteractionPanel.tsx 참고).
+// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler만 6→8로
+// 올린다(직접입력 3 + 객관식 2 + 카드 맞추기 1 + 신유형 미니게임 2) —
+// teen 이상은 이번 지시서 범위 밖이라 그대로 둔다.
 export const MISSIONS_REQUIRED_TOTAL_BY_TIER: Record<AgeTier, number> = {
-  toddler: 6,
+  toddler: 8,
   teen: 10,
   junior_20s: 20,
   career_30s: 30,
@@ -189,7 +198,7 @@ const LEGACY_SPLIT_TYPES: MissionType[] = ['objective', 'subjective', 'knowhow']
 function splitMissionsRequiredByType(total: number): Record<MissionType, number> {
   const base = Math.floor(total / LEGACY_SPLIT_TYPES.length)
   const remainder = total - base * LEGACY_SPLIT_TYPES.length
-  const result = { objective: 0, subjective: 0, knowhow: 0, card_game: 0 } as Record<MissionType, number>
+  const result = { objective: 0, subjective: 0, knowhow: 0, card_game: 0, sequence_order: 0, categorize: 0 } as Record<MissionType, number>
   LEGACY_SPLIT_TYPES.forEach((type, i) => {
     result[type] = base + (i < remainder ? 1 : 0)
   })
@@ -213,9 +222,13 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // (MISSIONS_REQUIRED_TOTAL_BY_TIER.teen과 동일). junior_20s 이상은
 // 이번 지시서의 범위 밖이라(사용자 승인: "일단은 10대 커리큘럼부터
 // 완벽히 구현") 기존 균등분배 공식을 그대로 둔다.
+// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler의 "3단계
+// 주관식 1문제"를 "3단계 카드 맞추기(card_game) 1 → 4단계 순서 맞추기
+// (sequence_order) 1 → 5단계 분류하기(categorize) 1"로 바꿔
+// subjective를 0으로 내리고 합계를 8로 맞춘다(3+2+1+1+1=8).
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
-  toddler: { knowhow: 3, objective: 2, subjective: 1, card_game: 0 },
-  teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1 },
+  toddler: { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 },
+  teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1, sequence_order: 0, categorize: 0 },
 }
 
 export const MISSIONS_REQUIRED_PER_TYPE_BY_TIER: Record<AgeTier, Record<MissionType, number>> = Object.fromEntries(

@@ -286,9 +286,20 @@ export interface KnowledgeVerificationResult {
 
 const VERIFICATION_STATUSES = new Set<string>(['appropriate', 'needs_revision', 'unverifiable'])
 const AGE_TIER_VALUES = new Set<string>(['toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'])
-const AGE_TIER_GUIDE = `- toddler(8~9살)/teen(10대): 쉬운 기초 지식·역사·개념
+// 버그 수정(8세 학습 시 "이해하기 힘들어요" 거절 무한 반복): 이전엔
+// toddler(8~9살)와 teen(10대)을 "- toddler(8~9살)/teen(10대): 쉬운
+// 기초 지식·역사·개념" 한 줄로 묶어서 설명했다. 이 때문에 8~9살도
+// 충분히 이해할 만큼 쉬운 내용인데도 Gemini가 requiredAgeTier를
+// (둘 다 "쉬운 기초"라는 모호한 기준 안에서) 'teen'으로 고르는 일이
+// 잦았고, meetsAgeTier('toddler', 'teen')는 항상 false이므로 toddler
+// 캐릭터는 그런 내용을 저장할 때마다 번번이 나이 제한에 걸려
+// ageBlockedMessage("이해하기 힘들어요")가 끝없이 반복됐다. toddler와
+// teen을 완전히 분리된 줄로 쓰고, "8~9살이 이해할 수 있으면 teen이
+// 아니라 반드시 toddler를 고르라"고 명시해 모호함 자체를 없앤다.
+const AGE_TIER_GUIDE = `- toddler(8~9살): 아주 쉬운 낱말과 짧은 문장으로 된 생활·흥미 수준 지식(초등학교 저학년이 그대로 이해할 수 있는 내용) — 이 수준이면 teen이 아니라 반드시 toddler를 고르세요
+- teen(10대): toddler보다는 어렵지만 전문 용어 없이 10대 학생이 배우는 기초 개념·역사·사례
 - junior_20s(20대) 이상: 전문 자격증·라이센스, 고난도 해부학/실무 등 숙련이 필요한 내용
-그 지식을 이해하고 정확히 받아들이는 데 최소 몇 살이 필요한지 기준으로, 위 6개 값(toddler/teen/junior_20s/career_30s/veteran_40s/master_50s) 중 가장 낮은 값을 고르세요. 애매하면 더 낮은(쉬운) 값을 고르세요.`
+그 지식을 이해하고 정확히 받아들이는 데 최소 몇 살이 필요한지 기준으로, 위 6개 값(toddler/teen/junior_20s/career_30s/veteran_40s/master_50s) 중 가장 낮은 값을 고르세요. 8~9살도 그대로 이해할 수 있는 내용이면 애매해도 teen이 아니라 toddler를 고르세요.`
 
 // Delivered via `systemInstruction` (outside the user turn), which is the
 // actual prompt-injection defense here: Gemini is told in advance to treat

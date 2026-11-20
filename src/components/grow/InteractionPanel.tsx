@@ -16,8 +16,9 @@ import { KNOWLEDGE_CATEGORIES, KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_CATEGORY_ICON
 import type { AccountTierState } from '../../hooks/useAccountTier'
 import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
-import FinalSubjectiveStep from './FinalSubjectiveStep'
 import CardMatchGame from '../games/CardMatchGame'
+import SequenceOrderGame from '../games/SequenceOrderGame'
+import CategorizeGame from '../games/CategorizeGame'
 
 const COMPANION_LABEL: Record<Character['companionType'], string> = { nuri: '누리', duri: '두리' }
 const VERIFICATION_LABEL: Record<KnowledgeVerification['status'], string> = {
@@ -98,7 +99,18 @@ export default function InteractionPanel({
   // "만능마켓에서 구매하기" 버튼 클릭 — 호출부가 만능마켓 시트를 열어준다.
   onBuyMoreUses?: () => void
 }) {
-  const { verifyKnowledge, studyGenerate, saveKnowledge, completeCardGame, getMissionProgress, listKnowledge, listMessages, tickets } = useGrowth()
+  const {
+    verifyKnowledge,
+    studyGenerate,
+    saveKnowledge,
+    completeCardGame,
+    completeSequenceGame,
+    completeCategorizeGame,
+    getMissionProgress,
+    listKnowledge,
+    listMessages,
+    tickets,
+  } = useGrowth()
   const name = COMPANION_LABEL[character.companionType]
   // PR #52 후속: 지금 연령대에 맞는 예시 주제를 보여줘서, 2~3살/10대
   // 단계에서 너무 어려운 지식만 쓰다가 거절당해 진도가 막히지 않도록
@@ -180,21 +192,31 @@ export default function InteractionPanel({
     }
   }, [character.companionType, getMissionProgress])
 
-  // 지시서(학습 플로우 전면 개편): 8~9살(toddler) 단계에서만 "1단계
-  // 직접입력 3문제 → 2단계 객관식 2문제(세트 전부 정답 필요) → 3단계
-  // 주관식 1문제" 순서를 강제한다 — 사용자 승인에 따라 teen 이후
-  // 단계는 이 범위 밖이라 기존 자유 선택 3카드 UI를 전혀 건드리지
-  // 않는다. 단계는 서버가 내려준 missionProgress(byType별 confirmed/
-  // required)에서 그때그때 다시 계산한다 — 클라이언트에 별도로 저장하지
-  // 않으므로 새로고침·패널 재오픈 후에도 항상 정확한 단계로 복원된다.
+  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 8~9살(toddler) 단계
+  // 순서를 "1단계 직접입력 3문제 → 2단계 객관식 2문제(세트 전부 정답
+  // 필요) → 3단계 카드 맞추기 1문제 → 4단계 순서 맞추기 1문제 → 5단계
+  // 분류하기 1문제"(합계 8)로 강제한다. 이전엔 3단계가 "주관식 1문제"
+  // 였지만, 지시서가 주관식을 빼고 card_game+신유형 미니게임 2종으로
+  // 바꿨다 — teen 이후 단계는 이 범위 밖이라 기존 자유 선택 3카드
+  // UI를 전혀 건드리지 않는다. 단계는 서버가 내려준 missionProgress
+  // (byType별 confirmed/required)에서 그때그때 다시 계산한다 —
+  // 클라이언트에 별도로 저장하지 않으므로 새로고침·패널 재오픈 후에도
+  // 항상 정확한 단계로 복원된다.
   const isToddlerStagedFlow = characterAgeTier === 'toddler'
-  type ToddlerStep = 'direct' | 'multiple' | 'final' | 'complete'
+  type ToddlerStep = 'direct' | 'multiple' | 'card_game' | 'sequence_order' | 'categorize' | 'complete'
   const toddlerStep: ToddlerStep = (() => {
     if (!missionProgress) return 'direct'
-    const { knowhow, objective, subjective } = missionProgress.byType
+    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 새 유형 추가 전에
+    // 만들어진 모의 missionProgress에는 sequence_order/categorize가 아예
+    // 없을 수 있다 — required 0(이미 통과)으로 안전하게 처리한다(위 진행
+    // 칩 렌더링과 같은 이유).
+    const fallback = { confirmed: 0, required: 0 }
+    const { knowhow, objective, card_game, sequence_order = fallback, categorize = fallback } = missionProgress.byType
     if (knowhow.confirmed < knowhow.required) return 'direct'
     if (objective.confirmed < objective.required) return 'multiple'
-    if (subjective.confirmed < subjective.required) return 'final'
+    if (card_game.confirmed < card_game.required) return 'card_game'
+    if (sequence_order.confirmed < sequence_order.required) return 'sequence_order'
+    if (categorize.confirmed < categorize.required) return 'categorize'
     return 'complete'
   })()
 
@@ -244,6 +266,10 @@ export default function InteractionPanel({
   // (completeCardGame → saveKnowledge) 진행 중 중복 호출을 막는다.
   const [cardGameBusy, setCardGameBusy] = useState(false)
   const [cardGameError, setCardGameError] = useState<string | null>(null)
+  const [sequenceGameBusy, setSequenceGameBusy] = useState(false)
+  const [sequenceGameError, setSequenceGameError] = useState<string | null>(null)
+  const [categorizeGameBusy, setCategorizeGameBusy] = useState(false)
+  const [categorizeGameError, setCategorizeGameError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [verification, setVerification] = useState<KnowledgeVerification | null>(null)
   // The exact title/content that `verification` above was computed from —
@@ -462,11 +488,67 @@ export default function InteractionPanel({
       if (saveResult.missionProgress) setMissionProgress(saveResult.missionProgress)
       onKnowledgeSaved?.()
       flashPose('happy', 2500)
-      onTeenJobEventDue?.()
+      // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 카드 맞추기는
+      // 이제 toddler(3단계)에서도 쓰인다 — 알바 이벤트(onTeenJobEventDue)
+      // 는 teen 전용 보상이므로, 거기서 넘어온 클리어일 때만 부른다.
+      if (isTeenStagedFlow) onTeenJobEventDue?.()
     } catch (err) {
       setCardGameError(err instanceof Error ? err.message : '카드 맞추기 완료를 처리하는 중 오류가 발생했어요.')
     } finally {
       setCardGameBusy(false)
+    }
+  }
+
+  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 순서 맞추기/분류하기도
+  // handleCardGameCleared와 완전히 같은 모양 — toddler 4·5단계 전용이라
+  // onTeenJobEventDue는 아예 부르지 않는다.
+  const handleSequenceGameCleared = async () => {
+    if (sequenceGameBusy) return
+    setSequenceGameBusy(true)
+    setSequenceGameError(null)
+    try {
+      const completion = await completeSequenceGame(character.companionType)
+      const saveResult = await saveKnowledge(
+        character.companionType,
+        completion.knowledge.title,
+        completion.knowledge.content,
+        completion.knowledge.content,
+        completion.verificationToken,
+        'sequence_order',
+      )
+      pushLine('character', saveResult.savedReply)
+      if (saveResult.missionProgress) setMissionProgress(saveResult.missionProgress)
+      onKnowledgeSaved?.()
+      flashPose('happy', 2500)
+    } catch (err) {
+      setSequenceGameError(err instanceof Error ? err.message : '순서 맞추기 완료를 처리하는 중 오류가 발생했어요.')
+    } finally {
+      setSequenceGameBusy(false)
+    }
+  }
+
+  const handleCategorizeGameCleared = async () => {
+    if (categorizeGameBusy) return
+    setCategorizeGameBusy(true)
+    setCategorizeGameError(null)
+    try {
+      const completion = await completeCategorizeGame(character.companionType)
+      const saveResult = await saveKnowledge(
+        character.companionType,
+        completion.knowledge.title,
+        completion.knowledge.content,
+        completion.knowledge.content,
+        completion.verificationToken,
+        'categorize',
+      )
+      pushLine('character', saveResult.savedReply)
+      if (saveResult.missionProgress) setMissionProgress(saveResult.missionProgress)
+      onKnowledgeSaved?.()
+      flashPose('happy', 2500)
+    } catch (err) {
+      setCategorizeGameError(err instanceof Error ? err.message : '분류하기 완료를 처리하는 중 오류가 발생했어요.')
+    } finally {
+      setCategorizeGameBusy(false)
     }
   }
 
@@ -554,7 +636,12 @@ export default function InteractionPanel({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {MISSION_TYPES.map((type) => {
-              const p = missionProgress.byType[type]
+              // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 새
+              // 유형(sequence_order/categorize) 추가 전에 만들어진 모의
+              // missionProgress(e2e 테스트 등)는 이 필드가 아예 없을 수
+              // 있다 — required 0(이미 통과한 것으로 취급)으로 안전하게
+              // 처리해 전체 화면이 깨지지 않도록 한다.
+              const p = missionProgress.byType[type] ?? { type, confirmed: 0, required: 0, complete: true }
               return (
                 <span
                   key={type}
@@ -759,16 +846,52 @@ export default function InteractionPanel({
           }}
         />
       )}
-      {isToddlerStagedFlow && toddlerStep === 'final' && (
-        <FinalSubjectiveStep
-          companionType={character.companionType}
-          onSaved={(progress) => {
-            setMissionProgress(progress)
-            onKnowledgeSaved?.()
-            pushLine('character', '소중한 이야기를 들려줘서 고마워요! 오늘 학습을 모두 마쳤어요. 🎉')
-            flashPose('happy', 2500)
-          }}
-        />
+      {/* 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성) 3단계 — 이전엔
+          여기가 "주관식 1문제"(FinalSubjectiveStep)였지만, 지시서가 그
+          자리를 card_game 1문제로 바꿨다. teen의 ②단계와 완전히 같은
+          CardMatchGame + handleCardGameCleared를 재사용하되, 테스트
+          testid만 구분한다. */}
+      {isToddlerStagedFlow && toddlerStep === 'card_game' && (
+        <div
+          data-testid="toddler-card-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 3단계 · 직업 카드 맞추기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            직업 카드와 도구 카드를 전부 맞추면 다음 단계로 넘어가요.
+          </p>
+          <CardMatchGame onCleared={() => void handleCardGameCleared()} />
+          {cardGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {cardGameError && <p className="text-base font-bold text-rose-300">{cardGameError}</p>}
+        </div>
+      )}
+      {isToddlerStagedFlow && toddlerStep === 'sequence_order' && (
+        <div
+          data-testid="toddler-sequence-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🔢 4단계 · 순서 맞추기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            하루 일과를 올바른 순서대로 눌러서 전부 맞히면 다음 단계로 넘어가요.
+          </p>
+          <SequenceOrderGame onCleared={() => void handleSequenceGameCleared()} />
+          {sequenceGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {sequenceGameError && <p className="text-base font-bold text-rose-300">{sequenceGameError}</p>}
+        </div>
+      )}
+      {isToddlerStagedFlow && toddlerStep === 'categorize' && (
+        <div
+          data-testid="toddler-categorize-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🗂️ 5단계 · 분류하기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            물건들을 올바른 무리로 전부 나누면 오늘 학습이 끝나요.
+          </p>
+          <CategorizeGame onCleared={() => void handleCategorizeGameCleared()} />
+          {categorizeGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {categorizeGameError && <p className="text-base font-bold text-rose-300">{categorizeGameError}</p>}
+        </div>
       )}
       {isToddlerStagedFlow && toddlerStep === 'complete' && (
         <p data-testid="toddler-staged-flow-complete" className="text-base font-bold text-emerald-300">
