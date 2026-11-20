@@ -164,14 +164,20 @@ export default function HungryEventModal({
           {eating ? '냠냠! 잘 먹었습니다!' : `앗! ${companionName}님이 배고파해요. 밥 먹으러 갑니다!`}
         </p>
 
-        <div className="relative flex flex-1 items-end pb-2">
+        <div className="relative flex w-full flex-1 items-end pb-2">
           {/* 걷기 연출(지시서: "분수대 → 식당 2.5D 이동"): choosing/
               walking 단계에선 캐릭터를 분수대 앞(왼쪽)에서 식당 앞
               (오른쪽)까지 절대 위치(left)를 transition으로 2.5초간
               이동시킨다. eating 단계에서는 더 이상 거리 위의 캐릭터가
-              아니므로 가운데로 되돌려 식사 장면으로 보여준다. */}
+              아니므로 가운데로 되돌려 식사 장면으로 보여준다.
+              버그 수정(캐릭터가 안 보이던 문제): 이 div가 absolute로
+              빠지면서 부모(위 .relative 래퍼)가 items-center 때문에
+              내용 없이 너비 0으로 쪼그라들어, left:42%가 "0의 42%" =
+              0px가 되어 캐릭터가 화면 밖(진짜 너비 0인 상자 안)에
+              숨어버렸다 — 부모에 w-full을 추가해 고쳤다. 캐릭터가
+              배경보다 항상 위에 보이도록 z-index도 명시한다. */}
           <div
-            className="absolute bottom-2 transition-[left] ease-in-out"
+            className="absolute z-10 bottom-2 transition-[left] ease-in-out"
             style={{
               left: eating ? '50%' : phase === 'walking' ? `${WALK_END_LEFT_PERCENT}%` : `${WALK_START_LEFT_PERCENT}%`,
               transitionDuration: eating ? '0ms' : `${WALK_DURATION_MS}ms`,
