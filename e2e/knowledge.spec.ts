@@ -79,6 +79,12 @@ async function mockCharacterApi(
     // knowledgeValidationTickets)로 호출마다 쌓인 값을 유지한다.
     onPurchaseAiRecommendTicket?: (route: Route) => Promise<void>
     onPurchaseKnowledgeValidationTicket?: (route: Route) => Promise<void>
+    // 지시서(8세 이후 식당 방문·식사·배고픔 시스템): "문제 풀기"(ExamPanel,
+    // growth.spec.ts의 onQuiz/onQuizSubmit과 같은 action 이름)에서 정답을
+    // 맞혔을 때 배고픈 상태면 보상이 줄어드는지 검증할 때만 쓴다 —
+    // 지정하지 않으면 이 액션 자체를 쓰지 않는 기존 테스트들에 영향이 없다.
+    onQuiz?: (route: Route) => Promise<void>
+    onQuizSubmit?: (route: Route) => Promise<void>
   },
 ) {
   // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 기본 동작은 실제
@@ -271,6 +277,14 @@ async function mockCharacterApi(
         contentType: 'application/json',
         body: JSON.stringify({ aiRecommendTickets, knowledgeValidationTickets }),
       })
+      return
+    }
+    if (method === 'GET' && action === 'quiz' && options.onQuiz) {
+      await options.onQuiz(route)
+      return
+    }
+    if (method === 'POST' && action === 'quiz-submit' && options.onQuizSubmit) {
+      await options.onQuizSubmit(route)
       return
     }
     if (method === 'GET' && action === 'objective-quiz') {
@@ -2075,7 +2089,115 @@ test('"나중에 먹기" closes the modal immediately and keeps the hungry warni
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-later-button').click()
   await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0)
-  await expect(page.getByTestId('hungry-warning-banner')).toContainText('배고파요... 밥 사주세요!')
+  await expect(page.getByTestId('hungry-warning-banner')).toContainText('배고파서 공부를 더 못해요')
+})
+
+// 지시서(8세 이후 식당 방문·식사·배고픔 시스템) 페널티 2 — 배고픈
+// 상태에서는 "문제 풀기" 정답 보상(평소 30,000원, 3문제마다)이
+// HUNGER_CONFIG.rewardMultiplierWhileHungry(0.5)만큼만 지급된다.
+test('answering quiz questions correctly while hungry grants a reduced reward (HUNGER_CONFIG.rewardMultiplierWhileHungry)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-hungry-reward',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+    onQuiz: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          question: { id: 'accountant-1', text: '회계의 기본 등식은?', choices: ['자산 = 부채 + 자본', '수익 = 비용', '자산 = 자본', '부채 = 자본'] },
+        }),
+      })
+    },
+    onQuizSubmit: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          correct: true,
+          explanation: '자산은 부채와 자본의 합이에요.',
+          expAwarded: 5,
+          exp: 45,
+          level: 1,
+          leveledUp: false,
+          message: '정답이에요! (+5XP)',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  // 가르치기 3회 저장 → 식당 방문(배고픔) 이벤트 → [안 먹는다]로
+  // 배고픈 상태를 만든다.
+  await page.getByRole('button', { name: '가르치기' }).click()
+  for (let i = 0; i < 3; i++) {
+    await page.getByPlaceholder('지식 제목').fill(`지식 ${i}`)
+    await page.getByTestId('knowledge-content-textarea').fill(`내용 ${i}`)
+    await page.getByRole('button', { name: 'AI검증하기' }).click()
+    await page.getByRole('button', { name: '저장' }).click()
+    if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  }
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-later-button').click()
+  await expect(page.getByTestId('hungry-warning-banner')).toBeVisible()
+
+  // 배고픈 채로 문제 풀기 3문제를 맞혀 보상 트리거(3의 배수)를 건드린다.
+  const closeQuizPanelIfOpen = async () => {
+    const dialog = page.getByRole('dialog', { name: '문제 풀기' })
+    await dialog.waitFor({ state: 'detached', timeout: 1000 }).catch(() => {})
+    if ((await dialog.count()) > 0) {
+      await dialog.getByRole('button', { name: '닫기' }).first().click()
+      await expect(dialog).toHaveCount(0)
+    }
+  }
+  const answerCorrectly = async () => {
+    await closeQuizPanelIfOpen()
+    await page.getByRole('button', { name: '문제 풀기', exact: true }).click()
+    await page.getByRole('button', { name: /퀴즈 풀기/ }).click()
+    await expect(page.getByText('회계의 기본 등식은?')).toBeVisible()
+    await page.getByRole('button', { name: '자산 = 부채 + 자본' }).click()
+    await page.getByRole('button', { name: '제출' }).click()
+    await expect(page.getByRole('button', { name: '제출' })).toHaveCount(0)
+  }
+
+  await answerCorrectly() // 1번째 정답
+  await answerCorrectly() // 2번째 정답
+  await answerCorrectly() // 3번째 정답 → 보상 트리거 (평소 30,000원 → 배고프므로 15,000원)
+
+  await expect(page.getByTestId('money-popup')).toContainText('15,000원')
+  await expect(page.getByTestId('speech-bubble')).toContainText('배고파서 평소보다 적게 받았어요')
+  await expect(page.getByTestId('speech-bubble')).toContainText('15,000원')
 })
 
 // 지시서(누리AI 만능마켓): 온보딩으로 지급된 체험판 가상 용돈으로

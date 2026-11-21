@@ -38,6 +38,7 @@ import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
 import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
+import { HUNGER_CONFIG } from '../data/hungerConfig'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -94,17 +95,18 @@ const TURN_TRANSITION_LABEL: Partial<Record<GameMenuAction, string>> = {
 // 가르치기/스스로 공부하기 저장이 이만큼 쌓이면 패널을 닫고 "배고프다"
 // 말풍선 → (체험판 용돈 차감) → 맛있게 먹는 연출로 이어지는 짧은
 // 이벤트를 보여준다. 실제 네이버 플레이스 API 연동이나 실제 결제는
-// 하지 않는다 — '이모네김밥'은 이 체험판 안에서만 쓰이는 식당 이름
-// 플레이버 텍스트이고, 차감도 실제 DB가 아니라 useMockWallet.ts의
-// 체험판 용돈에서만 일어난다.
-const MEAL_TRIGGER_SAVE_COUNT = 3
-const MEAL_COST_WON = 10_000
-
+// 하지 않는다 — 차감도 실제 DB가 아니라 useMockWallet.ts의 체험판
+// 용돈에서만 일어난다.
+//
 // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에 먹기"를
 // 고르면 isHungry가 켜지고, 그 뒤 문제 풀기(퀴즈)를 이 횟수만큼
 // 시도(정답·오답 무관)하면 자동으로 꺼진다 — 요청 4번("5문제 풀이가
 // 끝나고 다음 단계로 넘어가면 배고픔 상태가 해제").
-const HUNGRY_QUIZ_PENALTY_COUNT = 5
+//
+// 지시서(8세 이후 식당 방문·식사·배고픔 시스템): 위 두 상수와 새로
+// 추가한 "배고플 때 보상 감소" 배율을 전부 src/data/hungerConfig.ts
+// 하나로 모았다(설정값 분리 요구사항).
+const { mealTriggerSaveCount: MEAL_TRIGGER_SAVE_COUNT, mealCostWon: MEAL_COST_WON, quizPenaltyCount: HUNGRY_QUIZ_PENALTY_COUNT } = HUNGER_CONFIG
 
 // 지시서(서점 팝업 흐름 수정): 10대 레벨업 트랜지션 직후 서점 외출
 // 팝업이 뜨는 것이 기획과 맞지 않아 자동 트리거를 완전히 제거했다
@@ -825,11 +827,20 @@ export default function GrowPage() {
 
     if (count % QUIZ_CORRECT_REWARD_INTERVAL === 0) {
       setOpenSheet(null)
-      if (wallet.balanceWon !== null) reward(wallet, QUIZ_CORRECT_REWARD_WON, 'quiz_reward')
-      setMoneyPopup(QUIZ_CORRECT_REWARD_WON)
+      // 지시서(8세 이후 식당 방문·식사·배고픔 시스템) 페널티 2: 배고픈
+      // 상태에서는 문제 정답 보상이 HUNGER_CONFIG.rewardMultiplierWhileHungry
+      // 만큼만 지급된다 — 팝업·말풍선도 실제로 받은(줄어든) 금액을
+      // 그대로 보여준다(지급 안 한 걸 지급한 것처럼 보이지 않게).
+      const earnedWon = isHungry ? Math.round(QUIZ_CORRECT_REWARD_WON * HUNGER_CONFIG.rewardMultiplierWhileHungry) : QUIZ_CORRECT_REWARD_WON
+      if (wallet.balanceWon !== null) reward(wallet, earnedWon, 'quiz_reward')
+      setMoneyPopup(earnedWon)
       const t = setTimeout(() => setMoneyPopup(null), 1800)
       outingTimeoutsRef.current.push(t)
-      showBubble(`문제를 맞혀서 ${QUIZ_CORRECT_REWARD_WON.toLocaleString('ko-KR')}원 받았어요! 💰`)
+      showBubble(
+        isHungry
+          ? `배고파서 평소보다 적게 받았어요... ${earnedWon.toLocaleString('ko-KR')}원 💰`
+          : `문제를 맞혀서 ${earnedWon.toLocaleString('ko-KR')}원 받았어요! 💰`,
+      )
     }
 
     if (count === QUIZ_SNACK_TRIGGER_COUNT) {
@@ -1056,13 +1067,15 @@ export default function GrowPage() {
           {/* 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): "나중에
               먹기"를 고른 뒤 문제 풀기를 HUNGRY_QUIZ_PENALTY_COUNT번
               시도할 때까지, 화면 상단(ResourceBar 바로 아래)에 계속
-              보이는 경고 — 어느 패널이 열려 있어도 가려지지 않는다. */}
+              보이는 경고 — 어느 패널이 열려 있어도 가려지지 않는다.
+              지시서(8세 이후 식당 방문·식사·배고픔 시스템) 페널티 1:
+              요구한 문구("배고파서 공부를 더 못해요")를 그대로 넣었다. */}
           {isHungry && (
             <div
               data-testid="hungry-warning-banner"
               className="flex items-center justify-center gap-1.5 rounded-xl border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600"
             >
-              {COMPANION_LABEL[character.companionType]}님, 배고파요... 밥 사주세요!
+              {COMPANION_LABEL[character.companionType]}님, 배고파서 공부를 더 못해요... 밥 사주세요!
             </div>
           )}
 
