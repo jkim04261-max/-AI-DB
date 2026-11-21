@@ -1182,10 +1182,10 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
             byType: {
               objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
               subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-              knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+              knowhow: { type: 'knowhow', confirmed: 2, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
               sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
-              categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
+              categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
             },
             confirmedTotal: 3,
             requiredTotal: 8,
@@ -1201,9 +1201,9 @@ test('the AI 추천 받기 card stays hidden during the toddler 2단계(객관�
   await page.goto('/grow')
   await page.getByRole('button', { name: '가르치기' }).click()
 
-  // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): 1단계(직접입력)는
-  // knowhow.confirmed가 required(3)에 도달하면 끝나고 2단계(객관식)로
-  // 넘어간다 — 여기서는 AI 추천 받기 카드가 보이면 안 된다.
+  // 지시서(8세 학습 커리큘럼 순서 강제 고정): 1·2번(직접입력)과
+  // 3번(카드 맞추기)이 모두 끝나면 4·5번(객관식)으로 넘어간다 —
+  // 여기서는 AI 추천 받기 카드가 보이면 안 된다.
   await expect(page.getByTestId('objective-quiz-step')).toBeVisible()
   await expect(page.getByText('✨ AI 추천 받기', { exact: true })).toHaveCount(0)
 })
@@ -2910,24 +2910,27 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
 
 // 지시서("8세 완료 후 10대 레벨업 트랜지션" 전면 점검) + 지시서(8세
 // 학습 시스템: 8문제 커리큘럼 재구성) + 지시서(8세 학습 총 8문제 제한
-// 및 10대 강제 레벨업 로직 수정, 종합 최종 시험/패스권 시스템)로 흐름이
-// 최종적으로 이렇게 정리됐다: toddler(8~9살)는 "1단계 직접입력 3문제
-// (knowhow) → 2단계 객관식 2문제(세트 전부 정답, objective) → 3단계
-// 카드 맞추기 1문제(card_game) → 4단계 순서 맞추기 1문제(sequence_order)
-// → 5단계 분류하기 1문제(categorize)"라는 고정 순서로 정확히 8개
-// (3+2+1+1+1)를 채워야 "종합 최종 시험 보기" 버튼이 나타난다 — 8개를
-// 다 채워도 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두
-// 풀고 최종시험 8개 모두 합격해야 10살로 넘어감"). 이 테스트는 그 다섯
-// 단계를 실제 UI로 끝까지 따라가, 토들러의 식사·알바 2단계 로테이션이
-// 커리큘럼 중간(카드 맞추기 완료=6번째 저장)에 끼어드는 실제 상황에서도
-// 8개를 다 채운 뒤 진화 배너가 뜨지 않고 "종합 최종 시험 보기" 버튼만
-// 나타나는지 확인한다(최종 시험 자체는 아래 별도 테스트에서 다룬다).
-test('completing the toddler (8~9살) 8-question curriculum — direct×3 → objective quiz×2 → card game×1 → sequence×1 → categorize×1 — reaches the 종합 최종 시험 보기 button without evolving yet, even with an errand event interrupting mid-curriculum', async ({ page }) => {
+// 및 10대 강제 레벨업 로직 수정, 종합 최종 시험/패스권 시스템, 8세
+// 학습 커리큘럼 순서 강제 고정)로 흐름이 최종적으로 이렇게 정리됐다:
+// toddler(8~9살)는 "1·2·6·8번 직접입력(knowhow) → 3번 카드 맞추기
+// (card_game) → 4·5번 객관식(세트 전부 정답, objective) → 7번 순서
+// 맞추기(sequence_order)"라는 고정 순서로 정확히 8개(4+2+1+1=8)를
+// 채워야 "종합 최종 시험 보기" 버튼이 나타난다 — 8개를 다 채워도
+// 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두 풀고
+// 최종시험 8개 모두 합격해야 10살로 넘어감"). 이 테스트는 그 순서를
+// 실제 UI로 끝까지 따라가, 토들러의 식사·알바 2단계 로테이션이
+// 커리큘럼 중간(카드 맞추기 완료=3번째 저장, 마지막 직접입력=6번째
+// 저장)에 끼어드는 실제 상황에서도 8개를 다 채운 뒤 진화 배너가 뜨지
+// 않고 "종합 최종 시험 보기" 버튼만 나타나는지 확인한다(최종 시험
+// 자체는 아래 별도 테스트에서 다룬다). 분류하기(categorize)는 이번
+// toddler 커리큘럼에서 요구 개수가 0이라 등장하지 않는다(신유형
+// 미니게임 자리가 7번 하나뿐이라 순서 맞추기만 쓴다 — 사용자 확인).
+test('completing the toddler (8~9살) 8-question curriculum in its fixed interleaved order — direct, direct, card game, objective×2, direct, sequence, direct — reaches the 종합 최종 시험 보기 button without evolving yet, even with hungry/errand events interrupting mid-curriculum', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCount = 0
-  const REQUIRED = { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 }
+  const REQUIRED = { knowhow: 4, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 0 }
   const confirmed = { objective: 0, subjective: 0, knowhow: 0, card_game: 0, sequence_order: 0, categorize: 0 }
   const missionProgressFor = () => ({
     ageTier: 'toddler',
@@ -3039,8 +3042,10 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
 
   await page.goto('/grow')
 
-  // ①단계: 직접입력 3문제(knowhow) — 3번째 저장 직후 배고픔 이벤트
-  // 모달로 패널이 자동으로 닫힌다(기존 패턴과 동일). 저장 성공 핸들러가
+  // 지시서(8세 학습 커리큘럼 순서 강제 고정 및 브라우저 기존 데이터
+  // 강제 초기화): 유형별로 몰아서 묻지 않고 "1·2번 직접입력 → 3번
+  // 카드 맞추기 → 4·5번 객관식 → 6번 직접입력 → 7번 순서 맞추기 →
+  // 8번 직접입력" 순서로 하나씩 섞어서 묻는다. 저장 성공 핸들러가
   // title/content를 비동기로 비우므로, 다음 입력을 채우기 전에 그게
   // 끝났는지 확인한다(기존 "completing 3 knowledge saves" 테스트와
   // 같은 이유).
@@ -3051,19 +3056,35 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
     await page.getByRole('button', { name: '저장' }).click()
   }
 
+  // 1·2번 문제: 직접입력(knowhow) 2문제.
   await page.getByRole('button', { name: '가르치기' }).click()
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('1번째 문제')
   await teachKnowhow(1)
   await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('2번째 문제')
   await teachKnowhow(2)
-  await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
-  await teachKnowhow(3)
+
+  // 3번 문제: 카드 맞추기(card_game) — teen의 ②단계와 완전히 같은
+  // CardMatchGame 컴포넌트를 재사용한다. 지시서(8세 학습 총 8문제 제한
+  // 및 10대 강제 레벨업 로직 수정)로 고친 handleCardGameCleared의
+  // isTeenStagedFlow 가드 덕분에, teen 전용 알바 이벤트
+  // (onTeenJobEventDue)는 여기서 뜨지 않는다. 이 3번째 저장 직후 "3회
+  // 저장마다 식사/알바 로테이션"의 첫 번째(식사)가 끼어든다.
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
+  for (let i = 0; i < 6; i++) {
+    const backs = page.getByTestId('card-match-back')
+    const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
+    const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
+    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+  }
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
   // 걷기 → 식사 연출 뒤 모달이 자동으로 닫힌다 — 다음 "가르치기"
   // 클릭이 그 닫힘을 기다려준다(actionability 자동 대기).
   await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
 
-  // 2단계: 객관식 2문제(세트 전부 정답) — 배고픔 이벤트가 패널을
+  // 4·5번 문제: 객관식 2문제(세트 전부 정답) — 식사 이벤트가 패널을
   // 자동으로 닫았으므로 다시 연다. handleGetObjectiveQuiz가 toddler의
   // objective 요구치(2)와 같은 크기의 세트를 내려주므로, "정답"(선택지
   // 0번)을 둘 다 고르고 한 번만 제출하면 2/2가 된다.
@@ -3072,28 +3093,13 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
 
-  // 3단계: 카드 맞추기 1문제(card_game) — teen의 ②단계와 완전히 같은
-  // CardMatchGame 컴포넌트를 재사용한다. 지시서(8세 학습 총 8문제 제한
-  // 및 10대 강제 레벨업 로직 수정)로 고친 handleCardGameCleared의
-  // isTeenStagedFlow 가드 덕분에, teen 전용 알바 이벤트
-  // (onTeenJobEventDue)는 여기서 뜨지 않는다.
-  for (let i = 0; i < 6; i++) {
-    const backs = page.getByTestId('card-match-back')
-    const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
-    const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
-    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
-    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
-  }
-  await expect(page.getByTestId('job-event-modal')).not.toBeVisible()
-
-  // 8문제로 늘어나면서, "3회 저장마다 식사/알바 로테이션"이 완료 시점이
-  // 아니라 커리큘럼 중간(knowhow 3 + 객관식 2(한 세트) + card_game 1 =
-  // 정확히 6번째 저장, 식사 다음 2번째 로테이션인 심부름)에도 한 번 더
-  // 끼어든다 — 체험판 용돈을 아직 지급받지 않은 캐릭터라(onboarding
-  // 생략) 수락해도 금액 변화 없이 모달만 닫힌다(기존 "밥 먹이기"와
-  // 같은 원칙).
+  // 6번 문제: 직접입력(knowhow) — 이 6번째 저장 직후 "3회 저장마다
+  // 식사/알바 로테이션"의 두 번째(심부름)가 끼어든다. 체험판 용돈을
+  // 아직 지급받지 않은 캐릭터라(onboarding 생략) 수락해도 금액 변화
+  // 없이 모달만 닫힌다(기존 "밥 먹이기"와 같은 원칙).
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('6번째 문제')
+  await teachKnowhow(3)
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-accept-button').click()
   await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
@@ -3101,28 +3107,21 @@ test('completing the toddler (8~9살) 8-question curriculum — direct×3 → ob
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('toddler-sequence-game-step')).toBeVisible()
 
-  // 4단계: 순서 맞추기 1문제(sequence_order) — 뒤섞인 칩의 data-order를
+  // 7번 문제: 순서 맞추기(sequence_order) — 뒤섞인 칩의 data-order를
   // 읽어 오름차순으로 눌러 올바른 순서를 맞춘다.
   const sequenceChips = page.getByTestId('sequence-order-chip')
   const orders = await sequenceChips.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-order'))))
   for (const order of [...orders].sort((a, b) => a - b)) {
     await page.locator(`[data-testid="sequence-order-chip"][data-order="${order}"]`).click()
   }
-  await expect(page.getByTestId('toddler-categorize-game-step')).toBeVisible()
 
-  // 5단계: 분류하기 1문제(categorize) — 이 저장이 "유형별로 정해진
-  // 개수(3+3+1+1+1)"를 완성시키는 마지막 저장이다. 8문제를 다 채워도
-  // 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두 풀고
-  // 최종시험 8개 모두 합격해야 10살로 넘어감") — "종합 최종 시험 보기"
-  // 버튼만 나타난다(최종 시험 자체는 별도 테스트에서 다룬다).
-  const categorizeItems = page.getByTestId('categorize-item')
-  const itemCount = await categorizeItems.count()
-  for (let i = 0; i < itemCount; i++) {
-    const item = categorizeItems.nth(i)
-    const correctGroup = await item.getAttribute('data-correct-group')
-    await item.getByTestId(correctGroup === 'A' ? 'categorize-assign-a' : 'categorize-assign-b').click()
-  }
-  await page.getByTestId('categorize-check-button').click()
+  // 8번 문제: 직접입력(knowhow) 마지막 1문제 — 이 저장이 "유형별로
+  // 정해진 개수(4+2+1+1)"를 완성시키는 마지막 저장이다. 8문제를 다
+  // 채워도 더 이상 그 즉시 진화하지 않는다(사용자 확인: "8문제 모두
+  // 풀고 최종시험 8개 모두 합격해야 10살로 넘어감") — "종합 최종 시험
+  // 보기" 버튼만 나타난다(최종 시험 자체는 별도 테스트에서 다룬다).
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('8번째 문제')
+  await teachKnowhow(4)
 
   await expect(page.getByTestId('evolution-banner')).not.toBeVisible()
   await expect(page.getByTestId('toddler-staged-flow-complete')).toBeVisible()
@@ -3150,10 +3149,12 @@ test('passing the 종합 최종 시험 (all 8 questions correct) evolves toddler
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 3, required: 3, complete: true },
+              objective: { type: 'objective', confirmed: 2, required: 2, complete: true },
               subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
               knowhow: { type: 'knowhow', confirmed: 4, required: 4, complete: true },
               card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
+              sequence_order: { type: 'sequence_order', confirmed: 1, required: 1, complete: true },
+              categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
             },
             confirmedTotal: 8,
             requiredTotal: 8,
@@ -3479,10 +3480,10 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
     byType: {
       objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
       subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-      card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 2, required: 4, complete: false },
+      card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
       sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
-      categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
+      categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
     },
     confirmedTotal: 3,
     requiredTotal: 8,
@@ -3536,7 +3537,8 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
           leveledUp: false,
           // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler의
           // objective 필요 개수(2)가 세트 크기(2)와 같아, 이 한 세트를
-          // 통과하면 바로 2/2 완료되어 3단계(카드 맞추기)로 넘어간다.
+          // 통과하면 바로 2/2 완료되어 6번째 문제(직접입력)로 넘어간다
+          // (3번 카드 맞추기는 이 모의 데이터에서 이미 끝난 상태다).
           missionProgress: allCorrect
             ? { ...missionProgressAtObjectiveStep, byType: { ...missionProgressAtObjectiveStep.byType, objective: { type: 'objective', confirmed: 2, required: 2, complete: true } }, confirmedTotal: 5 }
             : null,
@@ -3565,11 +3567,11 @@ test('getting an objective quiz question wrong resets the whole pair and serves 
   await page.getByTestId('objective-quiz-retry-button').click()
   await expect(page.getByTestId('objective-quiz-question-0')).toContainText('세트 2')
 
-  // 이번엔 정답을 고르면 통과하고, 3단계(카드 맞추기)로 넘어간다.
+  // 이번엔 정답을 고르면 통과하고, 6번째 문제(직접입력)로 넘어간다.
   await page.getByTestId('objective-quiz-choice-0-0').click()
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
-  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
+  await expect(page.getByTestId('toddler-direct-step-label')).toContainText('6번째 문제')
 })
 
 // 지시서(연령대별 객관식 선택지 개수 동적 변경 및 문제 유형 확장): 선택지
@@ -3586,10 +3588,10 @@ test('objective quiz choices render in a 2-column grid once there are 10+ option
     byType: {
       objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
       subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
-      knowhow: { type: 'knowhow', confirmed: 3, required: 3, complete: true },
-      card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+      knowhow: { type: 'knowhow', confirmed: 2, required: 4, complete: false },
+      card_game: { type: 'card_game', confirmed: 1, required: 1, complete: true },
       sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
-      categorize: { type: 'categorize', confirmed: 0, required: 1, complete: false },
+      categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
     },
     confirmedTotal: 3,
     requiredTotal: 8,

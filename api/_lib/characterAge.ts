@@ -229,12 +229,16 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // (MISSIONS_REQUIRED_TOTAL_BY_TIER.teen과 동일). junior_20s 이상은
 // 이번 지시서의 범위 밖이라(사용자 승인: "일단은 10대 커리큘럼부터
 // 완벽히 구현") 기존 균등분배 공식을 그대로 둔다.
-// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler의 "3단계
-// 주관식 1문제"를 "3단계 카드 맞추기(card_game) 1 → 4단계 순서 맞추기
-// (sequence_order) 1 → 5단계 분류하기(categorize) 1"로 바꿔
-// subjective를 0으로 내리고 합계를 8로 맞춘다(3+2+1+1+1=8).
+// 지시서(8세 학습 커리큘럼 순서 강제 고정 및 브라우저 기존 데이터
+// 강제 초기화): toddler의 8문제를 고정 순서(1·2·6·8번 직접입력,
+// 3번 카드 맞추기, 4·5번 객관식, 7번 순서 맞추기)로 다시 섞으면서
+// 유형별 필요 개수도 knowhow 3→4, sequence_order/categorize 1+1→
+// sequence_order만 1(신유형 미니게임 자리가 7번 하나뿐이라 둘 중
+// 하나만 쓴다 — 사용자 확인)로 바꾼다. categorize는 0으로 내려
+// 당분간 이 커리큘럼에서 안 쓰지만(코드/DB 값은 그대로 둔다),
+// subjective는 여전히 0이고 합계는 그대로 8(4+2+1+1=8)이다.
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
-  toddler: { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 },
+  toddler: { knowhow: 4, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 0 },
   teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1, sequence_order: 0, categorize: 0 },
 }
 

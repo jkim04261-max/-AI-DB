@@ -1008,11 +1008,12 @@ async function run() {
     const kateNuriJson = getRes.body.characters.find((c) => c.companion_type === 'nuri')
     t.assert(kateNuriJson.level === 5 && kateNuriJson.age_tier === 'toddler', '캐릭터 목록 응답도 레벨(5)과 무관하게 age_tier는 toddler로 고정되어 내려온다')
 
-    // 2) 유형 구성이 3(knowhow)+2(objective)+1(card_game)+1(sequence_order)
-    // +1(categorize)가 아니면(객관식만 계속 쌓여도) 진화하지 않는다 —
-    // 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성)로 toddler의 3단계가
-    // "주관식 1개"에서 "card_game 1 + sequence_order 1 + categorize 1"
-    // 로 바뀌었다 — "총 8개"가 아니라 "유형별로 정해진 개수"가 조건인
+    // 2) 유형 구성이 4(knowhow)+2(objective)+1(card_game)+1(sequence_order)
+    // 가 아니면(객관식만 계속 쌓여도) 진화하지 않는다 — 지시서(8세
+    // 학습 커리큘럼 순서 강제 고정)로 knowhow가 3→4로, sequence_order/
+    // categorize 2개가 sequence_order 1개로 바뀌었다(신유형 미니게임
+    // 자리가 하나뿐이라 categorize는 이번 toddler 커리큘럼에서는 0개 —
+    // 사용자 확인) — "총 8개"가 아니라 "유형별로 정해진 개수"가 조건인
     // 것은 그대로다.
     for (let n = 3; n <= 6; n++) {
       const res = await teachOnce(n, 'objective')
@@ -1027,9 +1028,9 @@ async function run() {
     t.assert(
       missionsRes.body.missionProgress.byType.card_game.required === 1 &&
         missionsRes.body.missionProgress.byType.sequence_order.required === 1 &&
-        missionsRes.body.missionProgress.byType.categorize.required === 1 &&
-        missionsRes.body.missionProgress.byType.knowhow.required === 3,
-      'toddler의 유형별 필요 개수는 card_game/sequence_order/categorize 각 1개, knowhow 3개다',
+        missionsRes.body.missionProgress.byType.categorize.required === 0 &&
+        missionsRes.body.missionProgress.byType.knowhow.required === 4,
+      'toddler의 유형별 필요 개수는 card_game/sequence_order 각 1개, knowhow 4개, categorize 0개다',
     )
     t.assert(
       missionsRes.body.missionProgress.byType.card_game.confirmed === 0 &&
@@ -1040,26 +1041,25 @@ async function run() {
     )
     t.assert(missionsRes.body.missionProgress.allConfirmed === false, '유형이 한쪽으로 쏠려 있으면 총 개수가 충분해도 allConfirmed는 false다')
 
-    // 3) card_game 1 + sequence_order 1 + categorize 1 + knowhow 3까지
-    // 채우면(= 2+1+1+1+3=8) 8문제가 모두 끝나지만, 종합 최종 시험에
-    // 합격하기 전까지는(final_exam_passed) 레벨이 충분해도 진화하지
-    // 않는다(사용자 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야
-    // 10살로 넘어감"). 8문제(기존 6문제보다 2번 더 verify-knowledge를
-    // 호출함)라 여기서 하루 지식 검증 10회 한도를 넘기므로, 진화 판정
-    // 자체와는 무관한 그 제한에 걸리지 않도록 먼저 날짜를 넘긴다(위
-    // 2)까지 총 6회 소비).
+    // 3) card_game 1 + sequence_order 1 + knowhow 4까지 채우면
+    // (= 2+1+1+4=8) 8문제가 모두 끝나지만, 종합 최종 시험에 합격하기
+    // 전까지는(final_exam_passed) 레벨이 충분해도 진화하지 않는다
+    // (사용자 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야 10살로
+    // 넘어감"). 8문제(기존 6문제보다 2번 더 verify-knowledge를 호출함)
+    // 라 여기서 하루 지식 검증 10회 한도를 넘기므로, 진화 판정 자체와는
+    // 무관한 그 제한에 걸리지 않도록 먼저 날짜를 넘긴다(위 2)까지 총
+    // 6회 소비).
     mock.setFakeDate('2026-03-02')
     const cardGame1 = await teachOnce(107, 'card_game')
     t.assert(cardGame1.body.evolved === false, 'card_game이 1개로 꽉 찼어도 나머지 신유형 미니게임·knowhow가 남아 진화하지 않는다')
     const seq1 = await teachOnce(108, 'sequence_order')
-    t.assert(seq1.body.evolved === false, 'sequence_order까지 채워도 categorize·knowhow가 남아 진화하지 않는다')
-    const cat1 = await teachOnce(109, 'categorize')
-    t.assert(cat1.body.evolved === false, 'categorize까지 채워도 knowhow가 아직 0개라 진화하지 않는다')
+    t.assert(seq1.body.evolved === false, 'sequence_order까지 채워도 knowhow가 남아 진화하지 않는다')
+    await teachOnce(109, 'knowhow')
     await teachOnce(110, 'knowhow')
     await teachOnce(111, 'knowhow')
     const allEightFilled = await teachOnce(112, 'knowhow')
     t.assert(allEightFilled.statusCode === 201, '8번째(마지막) 지식 저장이 성공한다')
-    t.assert(allEightFilled.body.missionProgress.allConfirmed === true, '8문제(직접입력3, 객관식2, 카드맞추기1, 순서맞추기1, 분류하기1)를 모두 채웠다')
+    t.assert(allEightFilled.body.missionProgress.allConfirmed === true, '8문제(직접입력4, 객관식2, 카드맞추기1, 순서맞추기1)를 모두 채웠다')
     t.assert(allEightFilled.body.evolved === false, '8문제를 다 채워도 아직 종합 최종 시험에 합격하지 않아 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'toddler', '미션은 끝났지만 최종 시험 전까지는 toddler에 그대로 고정된다(진짜 게이트)')
 
@@ -1361,13 +1361,13 @@ async function run() {
     await teachOnceLeo(2, 'objective')
     await teachOnceLeo(3, 'card_game')
     await teachOnceLeo(4, 'sequence_order')
-    await teachOnceLeo(5, 'categorize')
+    await teachOnceLeo(5, 'knowhow')
     await teachOnceLeo(6, 'knowhow')
     await teachOnceLeo(7, 'knowhow')
     t.assert(leoNuri.level === 1, '여기까지 레오는 여전히 Lv.1이다(AGE_TIER_MIN_LEVEL.teen=5에 한참 못 미침)')
     const leoEightFilled = await teachOnceLeo(8, 'knowhow')
     t.assert(leoEightFilled.statusCode === 201, '8번째(마지막) 지식 저장이 성공한다')
-    t.assert(leoEightFilled.body.missionProgress.allConfirmed === true, '8개(knowhow3+objective2+card_game1+sequence_order1+categorize1)를 모두 채웠다')
+    t.assert(leoEightFilled.body.missionProgress.allConfirmed === true, '8개(knowhow4+objective2+card_game1+sequence_order1)를 모두 채웠다')
     t.assert(leoEightFilled.body.evolved === false, '8개를 채워도 아직 종합 최종 시험에 합격하지 않아 진화하지 않는다')
     t.assert(leoNuri.mission_unlocked_tier === 'toddler', '미션은 끝났지만 최종 시험 전까지는 toddler에 그대로 고정된다')
 
@@ -1484,7 +1484,7 @@ async function run() {
     await teachOnceNora(2, 'objective')
     await teachCardGameNora(3)
     await teachOnceNora(4, 'sequence_order')
-    await teachOnceNora(5, 'categorize')
+    await teachOnceNora(5, 'knowhow')
     await teachOnceNora(6, 'knowhow')
     await teachOnceNora(7, 'knowhow')
     await teachOnceNora(8, 'knowhow')
@@ -1614,7 +1614,7 @@ async function run() {
     await teachOncePriya(2, 'objective')
     await teachCardGamePriya(3)
     await teachOncePriya(4, 'sequence_order')
-    await teachOncePriya(5, 'categorize')
+    await teachOncePriya(5, 'knowhow')
     await teachOncePriya(6, 'knowhow')
     await teachOncePriya(7, 'knowhow')
     await teachOncePriya(8, 'knowhow')
@@ -1999,14 +1999,15 @@ async function run() {
         sum === expectedTotal,
         `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game}+sequence_order${perType.sequence_order}+categorize${perType.categorize})`,
       )
-      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합/8세 학습 총 8문제
-      // 제한 및 10대 강제 레벨업 로직 수정): teen과 toddler 둘 다 고정
-      // 순서 커리큘럼(teen: ①③⑤직접입력=knowhow6, ②카드맞추기=
-      // card_game1, ④객관식=objective3; toddler: ①직접입력=knowhow3,
-      // ②객관식=objective2, ③카드맞추기=card_game1, ④신유형 미니게임=
-      // sequence_order1+categorize1)이라 subjective가 의도적으로 0이고
-      // 다른 티어와 모양이 다르다 — junior_20s 이상은 이 변경의
-      // 영향을 받지 않았는지(card_game/신유형 미니게임은 항상 0) 그대로
+      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합/8세 학습 커리큘럼
+      // 순서 강제 고정): teen과 toddler 둘 다 고정 순서 커리큘럼(teen:
+      // ①③⑤직접입력=knowhow6, ②카드맞추기=card_game1, ④객관식=
+      // objective3; toddler: 1·2·6·8번직접입력=knowhow4, 4·5번객관식=
+      // objective2, 3번카드맞추기=card_game1, 7번신유형 미니게임=
+      // sequence_order1(categorize는 신유형 미니게임 자리가 하나뿐이라
+      // 0 — 사용자 확인))이라 subjective가 의도적으로 0이고 다른
+      // 티어와 모양이 다르다 — junior_20s 이상은 이 변경의 영향을
+      // 받지 않았는지(card_game/신유형 미니게임은 항상 0) 그대로
       // 확인한다.
       if (tier === 'teen') {
         t.assert(
@@ -2020,13 +2021,13 @@ async function run() {
         )
       } else if (tier === 'toddler') {
         t.assert(
-          perType.knowhow === 3 &&
+          perType.knowhow === 4 &&
             perType.objective === 2 &&
             perType.subjective === 0 &&
             perType.card_game === 1 &&
             perType.sequence_order === 1 &&
-            perType.categorize === 1,
-          'toddler 단계는 고정 커리큘럼(직접입력3+객관식2+카드맞추기1+순서맞추기1+분류하기1, subjective는 0)을 요구한다',
+            perType.categorize === 0,
+          'toddler 단계는 고정 커리큘럼(직접입력4+객관식2+카드맞추기1+순서맞추기1, subjective·categorize는 0)을 요구한다',
         )
       } else {
         t.assert(
