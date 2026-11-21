@@ -205,11 +205,18 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
   return result
 }
 
-// 지시서(학습 플로우 전면 개편): toddler(8~9살)만 더 이상 균등분배(2/2/2)가
-// 아니라 "1단계 직접입력 3문제 → 2단계 객관식 2문제(전부 정답 필요) →
-// 3단계 주관식 1문제"라는 고정 순서 흐름과 숫자를 맞춘다(knowhow 3 +
-// objective 2 + subjective 1 = 6, MISSIONS_REQUIRED_TOTAL_BY_TIER.toddler와
-// 동일).
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정, 8~9세
+// 문제 유형 변경 및 종합 최종 시험/패스권 시스템 지시서를 수정, 이후
+// 8세 학습 시스템: 8문제 커리큘럼 재구성으로 분배를 재조정): toddler
+// (8~9살)의 커리큘럼은 "① 직접입력 3문제 → ② 객관식 2문제(세트 전부
+// 정답 필요) → ③ 직업 카드 맞추기 1개 → ④ 순서 맞추기 1개 → ⑤ 분류
+// 하기 1개"로 정확히 8문제다(knowhow 3 + objective 2 + card_game 1 +
+// sequence_order 1 + categorize 1 = 8, MISSIONS_REQUIRED_TOTAL_BY_TIER
+// .toddler와 동일). ③~⑤는 모두 card_game과 같은 "검증할 사용자 입력이
+// 없는 완료 확인형 미니게임" 패턴이다. 8/8을 채워도 그 즉시 진화하지
+// 않는다 — maybeEvolveAgeTier가 toddler→teen 전환에서
+// final_exam_passed도 함께 확인한다(아래 종합 최종 시험 참고. 사용자
+// 확인: "8문제 모두 풀고 최종시험 8개 모두 합격해야 10살로 넘어감").
 //
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)도 더 이상
 // 균등분배가 아니라 고정 순서 흐름이다 — "①직접입력 3 → ②직업 카드
@@ -222,12 +229,16 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // (MISSIONS_REQUIRED_TOTAL_BY_TIER.teen과 동일). junior_20s 이상은
 // 이번 지시서의 범위 밖이라(사용자 승인: "일단은 10대 커리큘럼부터
 // 완벽히 구현") 기존 균등분배 공식을 그대로 둔다.
-// 지시서(8세 학습 시스템: 8문제 커리큘럼 재구성): toddler의 "3단계
-// 주관식 1문제"를 "3단계 카드 맞추기(card_game) 1 → 4단계 순서 맞추기
-// (sequence_order) 1 → 5단계 분류하기(categorize) 1"로 바꿔
-// subjective를 0으로 내리고 합계를 8로 맞춘다(3+2+1+1+1=8).
+// 지시서(8세 학습 커리큘럼 순서 강제 고정 및 브라우저 기존 데이터
+// 강제 초기화): toddler의 8문제를 고정 순서(1·2·6·8번 직접입력,
+// 3번 카드 맞추기, 4·5번 객관식, 7번 순서 맞추기)로 다시 섞으면서
+// 유형별 필요 개수도 knowhow 3→4, sequence_order/categorize 1+1→
+// sequence_order만 1(신유형 미니게임 자리가 7번 하나뿐이라 둘 중
+// 하나만 쓴다 — 사용자 확인)로 바꾼다. categorize는 0으로 내려
+// 당분간 이 커리큘럼에서 안 쓰지만(코드/DB 값은 그대로 둔다),
+// subjective는 여전히 0이고 합계는 그대로 8(4+2+1+1=8)이다.
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
-  toddler: { knowhow: 3, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 },
+  toddler: { knowhow: 4, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 0 },
   teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1, sequence_order: 0, categorize: 0 },
 }
 
@@ -247,3 +258,47 @@ export function meetsAgeTier(current: AgeTier, required: AgeTier): boolean {
 
 export const ageBlockedMessage = (requiredLabel: string): string =>
   `아직은 너무 어려워서 이해하기 힘들어요! ${requiredLabel}가 되면 다시 가르쳐 주세요~`
+
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템): "종합
+// 최종 시험"에 불합격(재시험도 불합격)하면 마켓에서 살 수 있는 "음서재
+// 패스권" 가격표 — 연령대가 올라갈수록 비싸진다. 사용자 확인("8~9세만
+// 실제 구현")에 따라 지금은 toddler만 실제로 구매 가능하고(api/
+// character.ts의 handlePurchaseFinalExamPass), 나머지는 그 연령대의
+// 종합 최종 시험 자체가 아직 없어 향후 확장용으로만 값을 준비해 둔다.
+export const FINAL_EXAM_PASS_PRICE_BY_TIER: Record<AgeTier, number> = {
+  toddler: 30_000,
+  teen: 50_000,
+  junior_20s: 70_000,
+  career_30s: 100_000,
+  veteran_40s: 150_000,
+  master_50s: 200_000,
+}
+
+// 지시서: "60대 최종 시험은 패스권 적용 불가(구매 차단) 로직을 미리
+// 설계해 두세요" — master_50s 티어 안에서도 ageNumber(selfStudyDraftCount
+// ForTier 등이 쓰는 것과 같은 50/60대 분기 기준)가 60 이상이면 패스권을
+// 막는다. toddler~veteran_40s는 ageNumber 조건 없이 항상 구매 가능하다.
+export function isFinalExamPassBlockedForTier(tier: AgeTier, ageNumber?: number): boolean {
+  return tier === 'master_50s' && ageNumber !== undefined && ageNumber >= 60
+}
+
+// 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정): "종합
+// 최종 시험 8개 모두 합격해야 10살로 넘어감" — 랜덤 3~5문제가 아니라,
+// 이번 단계에서 실제로 저장한 학습 기록 전부(최대
+// MISSIONS_REQUIRED_TOTAL_BY_TIER[tier]개)를 1:1로 복습한다. 몇 개를
+// 복습할지는 handleGetFinalExam이 실제 저장 개수로 직접 정하므로 이
+// 함수는 더 이상 쓰지 않는다(삭제).
+//
+// 100점 만점 점수는 화면 표시용으로 남겨두되(scoreFinalExam), 합격
+// 기준은 더 이상 "80점 이상"이 아니라 "전부 정답"이다 — 재시험은
+// 전체를 다시 보는 게 아니라 틀린 문제만 다시 보는 구조(아래 참고)라,
+// 부분 점수를 허용하면 "틀린 문제만 재시험"이라는 요구 자체가 의미가
+// 없어진다. FINAL_EXAM_PASS_SCORE=100으로 두어, scoreFinalExam의 환산
+// 점수와 비교하는 기존 호출부(handleSubmitFinalExam)가 그대로
+// "score >= FINAL_EXAM_PASS_SCORE"만으로 "전부 정답"과 동치가 되게 한다
+// (정답 1개라도 빠지면 환산 점수가 100에 못 미친다).
+export const FINAL_EXAM_PASS_SCORE = 100
+export function scoreFinalExam(correctCount: number, totalCount: number): number {
+  if (totalCount <= 0) return 0
+  return Math.round((correctCount / totalCount) * 100)
+}

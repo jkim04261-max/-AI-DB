@@ -83,9 +83,10 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
       return
     }
-    // PR #63: InteractionPanel이 열릴 때마다 6미션 진행상황을 조회한다 —
-    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 항상 빈(0/6)
-    // 기본값을 돌려준다.
+    // PR #63: InteractionPanel이 열릴 때마다 미션 진행상황을 조회한다 —
+    // 이 파일의 테스트들은 진화 자체를 다루지 않으므로 항상 빈(0/8)
+    // 기본값을 돌려준다(지시서: 8세 학습 8문제 고정 — 직접입력3+객관식3
+    // +카드맞추기1+노하우1, knowhow 버킷에 직접입력3·노하우1이 합쳐짐).
     if (method === 'GET' && action === 'missions') {
       await route.fulfill({
         status: 200,
@@ -95,13 +96,13 @@ async function mockCharacterApi(
             ageTier: 'toddler',
             ageTierLabel: '8~9살',
             byType: {
-              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
-              subjective: { type: 'subjective', confirmed: 0, required: 2, complete: false },
-              knowhow: { type: 'knowhow', confirmed: 0, required: 2, complete: false },
-              card_game: { type: 'card_game', confirmed: 0, required: 0, complete: true },
+              objective: { type: 'objective', confirmed: 0, required: 3, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 0, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
             },
             confirmedTotal: 0,
-            requiredTotal: 6,
+            requiredTotal: 8,
             allConfirmed: false,
             nextAgeTier: 'teen',
             nextAgeTierLabel: '10대',
@@ -1120,9 +1121,10 @@ test('the grow guide button opens a help panel explaining evolution rules, profe
 
   const dialog = page.getByRole('dialog', { name: '누리AI 키우기 간단 설명서', exact: false })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByText('예시 문제 풀이형 2개', { exact: false })).toBeVisible()
-  await expect(dialog.getByText('객관식 2개', { exact: false })).toBeVisible()
-  await expect(dialog.getByText('노하우 설계형 2개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('직접 입력하기 3개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('객관식 3개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('직업 카드 맞추기 1개', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('노하우 알려주기 1개', { exact: false })).toBeVisible()
   await expect(dialog.getByText('직업 변경', { exact: false }).first()).toBeVisible()
 
   await dialog.getByRole('button', { name: '닫기' }).click()

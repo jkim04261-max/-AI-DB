@@ -431,6 +431,48 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [] })
   }
 
+  // --- 지시서(8세 학습 총 8문제 제한 및 10대 강제 레벨업 로직 수정):
+  // handleResetCharacterProgress's full soft-reset UPDATE...RETURNING —
+  // checked FIRST among every 'UPDATE characters' matcher (before exp/
+  // level/mission_unlocked_tier/focus_percent below), because its SET
+  // clause literally starts with "SET level = 1, exp = 0, ..." and so
+  // contains "SET level =" as a substring — checking the narrower
+  // exp/level matchers first would wrongly intercept this statement and
+  // destructure `values` with the wrong shape (this statement binds only
+  // [characterId, userId]; every literal value is inline, not bound). ---
+  if (has(text, 'UPDATE characters', 'reset_at = NOW()')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.level = 1
+    row.exp = 0
+    row.focus_percent = 90
+    row.mission_unlocked_tier = null
+    row.final_exam_attempts = 0
+    row.final_exam_passed = false
+    row.reset_at = new Date().toISOString()
+    return Promise.resolve({
+      rows: [
+        {
+          id: row.id,
+          user_id: row.user_id,
+          companion_type: row.companion_type,
+          stage: row.stage,
+          profession: row.profession,
+          custom_profession_label: row.custom_profession_label ?? null,
+          level: row.level,
+          exp: row.exp,
+          mission_unlocked_tier: row.mission_unlocked_tier,
+          focus_percent: row.focus_percent,
+          final_exam_attempts: row.final_exam_attempts,
+          final_exam_passed: row.final_exam_passed,
+          reset_at: row.reset_at,
+          created_at: new Date().toISOString(),
+        },
+      ],
+    })
+  }
+
   // --- api/character.ts: applyExpGain's exp update (checked before the
   // generic 'UPDATE characters' profession matcher below, since both start
   // with "UPDATE characters" but have completely different bound params) ---
@@ -476,6 +518,36 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows: [{ focus_percent: row.focus_percent }] })
   }
 
+  // --- handlePurchaseFinalExamPass's combined UPDATE (final_exam_passed +
+  // mission_unlocked_tier='teen' in one statement) — checked before the
+  // narrower 'SET final_exam_passed = true' matcher below, since this one
+  // also contains that substring. ---
+  if (has(text, 'UPDATE characters', "mission_unlocked_tier = 'teen'")) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row) {
+      row.final_exam_passed = true
+      row.mission_unlocked_tier = 'teen'
+    }
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- handleSubmitFinalExam's pass-path UPDATE (final_exam_passed only). ---
+  if (has(text, 'UPDATE characters', 'SET final_exam_passed = true')) {
+    const [characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row) row.final_exam_passed = true
+    return Promise.resolve({ rows: [] })
+  }
+
+  // --- handleSubmitFinalExam's fail-path UPDATE (final_exam_attempts). ---
+  if (has(text, 'UPDATE characters', 'SET final_exam_attempts =')) {
+    const [newAttempts, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (row) row.final_exam_attempts = newAttempts
+    return Promise.resolve({ rows: [] })
+  }
+
   // --- api/character.ts: change/set profession (checked before the
   // generic 'FROM characters' list matcher below, since this statement has
   // no FROM clause at all). PR #65: now also sets custom_profession_label
@@ -500,6 +572,9 @@ function sql(strings, ...values) {
           exp: row.exp ?? 0,
           mission_unlocked_tier: row.mission_unlocked_tier ?? null,
           focus_percent: row.focus_percent ?? 90,
+          final_exam_attempts: row.final_exam_attempts ?? 0,
+          final_exam_passed: row.final_exam_passed ?? false,
+          reset_at: row.reset_at ?? null,
           created_at: now,
         },
       ],
@@ -528,6 +603,9 @@ function sql(strings, ...values) {
               exp: row.exp ?? 0,
               mission_unlocked_tier: row.mission_unlocked_tier ?? null,
               focus_percent: row.focus_percent ?? 90,
+              final_exam_attempts: row.final_exam_attempts ?? 0,
+              final_exam_passed: row.final_exam_passed ?? false,
+              reset_at: row.reset_at ?? null,
               created_at: now,
             },
           ]
@@ -552,6 +630,9 @@ function sql(strings, ...values) {
         exp: c.exp ?? 0,
         mission_unlocked_tier: c.mission_unlocked_tier ?? null,
         focus_percent: c.focus_percent ?? 90,
+        final_exam_attempts: c.final_exam_attempts ?? 0,
+        final_exam_passed: c.final_exam_passed ?? false,
+        reset_at: c.reset_at ?? null,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -578,6 +659,9 @@ function sql(strings, ...values) {
       exp: 0,
       mission_unlocked_tier: null,
       focus_percent: 90,
+      final_exam_attempts: 0,
+      final_exam_passed: false,
+      reset_at: null,
     })
     return Promise.resolve({
       rows: [
@@ -592,6 +676,9 @@ function sql(strings, ...values) {
           exp: 0,
           mission_unlocked_tier: null,
           focus_percent: 90,
+          final_exam_attempts: 0,
+          final_exam_passed: false,
+          reset_at: null,
           created_at: now,
         },
       ],
@@ -743,11 +830,16 @@ function sql(strings, ...values) {
   // also contains 'COUNT(*)' and 'character_knowledge_entries' as
   // substrings but groups by mission_type instead of returning one total) ---
   if (has(text, 'GROUP BY mission_type')) {
-    const [characterId, userId, tier] = values
+    // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+    // resetAt(4번째 바인드값, 같은 템플릿에서 두 번 쓰여 5번째에도
+    // 똑같이 들어가지만 하나만 읽으면 충분하다)이 있으면 그 시각 이전
+    // 저장은 진행도 집계에서 뺀다(소프트 리셋).
+    const [characterId, userId, tier, resetAt] = values
     const counts = new Map()
     for (const e of state.knowledgeEntries) {
       if (e.character_id !== characterId || e.user_id !== userId) continue
       if (e.age_tier_at_save !== tier || !e.mission_type) continue
+      if (resetAt && e.created_at <= resetAt) continue
       counts.set(e.mission_type, (counts.get(e.mission_type) ?? 0) + 1)
     }
     const rows = [...counts.entries()].map(([mission_type, count]) => ({ mission_type, count }))
@@ -772,6 +864,21 @@ function sql(strings, ...values) {
       .reverse()
       .slice(0, limit)
       .map((e) => ({ title: e.title }))
+    return Promise.resolve({ rows })
+  }
+
+  // --- 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+  // handleGetFinalExam's saved-entries-to-review lookup (checked before the
+  // generic list matcher below — 'SELECT title, final_content' never
+  // collides with 'SELECT title FROM...' above since the comma breaks that
+  // substring match). resetAt is the 4th bound value (bound twice in the
+  // same template, same reasoning as the GROUP BY mission_type matcher). ---
+  if (has(text, 'SELECT title, final_content FROM character_knowledge_entries')) {
+    const [characterId, userId, tier, resetAt] = values
+    const rows = state.knowledgeEntries
+      .filter((e) => e.character_id === characterId && e.user_id === userId && e.age_tier_at_save === tier)
+      .filter((e) => !resetAt || e.created_at > resetAt)
+      .map((e) => ({ title: e.title, final_content: e.final_content }))
     return Promise.resolve({ rows })
   }
 

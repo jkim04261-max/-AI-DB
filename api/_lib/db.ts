@@ -290,6 +290,33 @@ export function ensureCharacterTables() {
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS mission_unlocked_tier TEXT
           CHECK (mission_unlocked_tier IN ('toddler', 'teen', 'junior_20s', 'career_30s', 'veteran_40s', 'master_50s'))
       `
+
+      // 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+      // toddler(8~9살)는 이제 6미션(직접입력3+객관식2+카드맞추기1)을
+      // 채워도 바로 진화하지 않고, 그 6개를 바탕으로 생성한 "종합 최종
+      // 시험"을 통과해야 한다(api/_lib/characterMissions.ts의
+      // maybeEvolveAgeTier가 toddler→teen 전환에서만 이 값도 함께 본다).
+      // final_exam_attempts는 1차 불합격에서 1, 2차 불합격(재시험도
+      // 불합격)에서 2가 되고, 2가 되면 "처음부터 다시 키우기" 또는
+      // "마켓에서 패스권 구매" 중 하나를 골라야만 더 진행할 수 있다.
+      // final_exam_passed가 true가 되는 순간(시험 합격 또는 패스권 구매)
+      // 그 즉시 teen으로 진화한다 — 둘 다 같은 플래그를 세팅하고 같은
+      // maybeEvolveAgeTier 호출에 맡기므로 진화 로직 자체는 하나뿐이다.
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS final_exam_attempts SMALLINT NOT NULL DEFAULT 0
+      `
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS final_exam_passed BOOLEAN NOT NULL DEFAULT false
+      `
+      // "처음부터 다시 키우기"의 저장소 — 기존 지식 기록(character_
+      // knowledge_entries)을 실제로 DELETE하면 되돌릴 수 없어 위험하므로
+      // (사용자 확인: "레벨/경험치/진행도만 리셋"), 대신 이 시각 이후에
+      // 저장된 항목만 미션 진행도로 세는 소프트 리셋을 쓴다 —
+      // getMissionProgress의 쿼리가 이 값을 함께 본다. NULL이면(모든
+      // 기존 캐릭터) 지금까지와 동일하게 전부 센다.
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS reset_at TIMESTAMPTZ
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -657,6 +684,9 @@ export interface CharacterRow {
   exp: number
   mission_unlocked_tier: AgeTierValue | null
   focus_percent: number
+  final_exam_attempts: number
+  final_exam_passed: boolean
+  reset_at: string | null
   created_at: string
 }
 

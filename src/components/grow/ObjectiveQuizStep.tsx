@@ -8,9 +8,11 @@ import type { MissionProgress } from '../../data/characterMissions'
 // 제출되고 전부 맞아야만 통과한다 — 하나라도 틀리면 answers를 초기화
 // 하고 getObjectiveQuiz를 다시 호출해 완전히 새 세트를 받아 처음부터
 // 반복한다(요청 3번: 세트 단위 무한 반복).
-// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): 세트 크기가 더 이상
-// 항상 2가 아니다(toddler=2, teen=3) — 서버가 내려준 문제 수만큼
-// 그대로 렌더링한다.
+// 지시서(10대 커리큘럼: 직업 카드 맞추기 통합, 이후 8세 학습 8문제
+// 제한 지시서로 toddler도 3문제로 조정): 세트 크기가 더 이상 고정값이
+// 아니다(toddler=3, teen=3 — 둘 다 handleGetObjectiveQuiz가
+// characterAge.ts의 objective 요구치를 그대로 쓴다) — 서버가 내려준
+// 문제 수만큼 그대로 렌더링한다.
 export default function ObjectiveQuizStep({
   companionType,
   onAllCorrect,

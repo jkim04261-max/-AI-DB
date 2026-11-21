@@ -45,12 +45,25 @@ export interface MissionProgress {
 // age_tier_at_save가 이 티어와 정확히 같은 행만 집계하므로 — 이전
 // 단계에서 쌓은 저장이나, 이 컬럼이 생기기 전(NULL)의 예전 저장은
 // 어느 단계의 집계에도 섞여 들어가지 않는다(완전히 새 시작).
-export async function getMissionProgress(userId: number, characterId: number, tier: AgeTier): Promise<MissionProgress> {
+//
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+// resetAt을 넘기면("처음부터 다시 키우기"를 한 캐릭터) 그 시각 이전에
+// 저장된 항목은 세지 않는다 — 기존 지식 기록을 실제로 지우지 않고도
+// (사용자 확인: "레벨/경험치/진행도만 리셋") 진행도만 0부터 다시
+// 시작하게 하는 소프트 리셋이다. resetAt이 null이면(모든 기존
+// 캐릭터) 지금까지와 똑같이 전부 센다.
+export async function getMissionProgress(
+  userId: number,
+  characterId: number,
+  tier: AgeTier,
+  resetAt: string | null = null,
+): Promise<MissionProgress> {
   const result = await sql<{ mission_type: MissionType; count: number }>`
     SELECT mission_type, COUNT(*)::int AS count
     FROM character_knowledge_entries
     WHERE character_id = ${characterId} AND user_id = ${userId}
       AND age_tier_at_save = ${tier} AND mission_type IS NOT NULL
+      AND (${resetAt}::timestamptz IS NULL OR created_at > ${resetAt}::timestamptz)
     GROUP BY mission_type
   `
   const counts = new Map(result.rows.map((r) => [r.mission_type, r.count]))
@@ -116,7 +129,25 @@ export interface EvolveResult {
 // 일이 없다 — 최초 고정 이후로는 아래 while 루프가 한 단계씩만 전진
 // 시키기 때문이다(한 번의 XP로 여러 단계를 건너뛸 수 있는 레벨과 달리,
 // 진화는 항상 한 단계씩).
-export async function maybeEvolveAgeTier(userId: number, characterId: number, level: number, pinnedTier: AgeTier | null): Promise<EvolveResult> {
+//
+// 지시서(8~9세 문제 유형 변경 및 종합 최종 시험/패스권 시스템):
+// toddler→teen 전환만은 6미션(allConfirmed)에 더해 finalExamPassed도
+// true여야 한다 — 종합 최종 시험 합격(api/character.ts의
+// handleSubmitFinalExam) 또는 패스권 구매(handlePurchaseFinalExamPass)
+// 둘 중 하나가 characters.final_exam_passed를 true로 바꾼 뒤 이 함수를
+// 다시 부르면, 그제서야 실제로 진화한다 — 두 경로가 완전히 같은 진화
+// 로직을 공유해서 "패스권=시험을 본 것으로 쳐준다"는 뜻이 코드로도
+// 그대로 드러난다. 6/6을 막 채웠지만 아직 시험을 안 봤다면 이 루프는
+// 여기서 멈추고(evolved:false) toddler에 머무른다 — 그 "멈춘" 상태를
+// InteractionPanel이 "종합 최종 시험 보기" 진입점으로 보여준다.
+export async function maybeEvolveAgeTier(
+  userId: number,
+  characterId: number,
+  level: number,
+  pinnedTier: AgeTier | null,
+  finalExamPassed: boolean,
+  resetAt: string | null = null,
+): Promise<EvolveResult> {
   let tier = pinnedTier
   if (tier === null) {
     tier = ageTierForLevel(level)
@@ -134,8 +165,9 @@ export async function maybeEvolveAgeTier(userId: number, characterId: number, le
     // 지시서 #03: toddler → teen 진입만은 레벨 조건을 보지 않는다.
     const levelSatisfied = tier === 'toddler' ? true : level >= AGE_TIER_MIN_LEVEL[next]
     if (!levelSatisfied) break
-    const progress = await getMissionProgress(userId, characterId, tier)
+    const progress = await getMissionProgress(userId, characterId, tier, resetAt)
     if (!progress.allConfirmed) break
+    if (tier === 'toddler' && !finalExamPassed) break
     await sql`
       UPDATE characters SET mission_unlocked_tier = ${next}
       WHERE id = ${characterId} AND user_id = ${userId}
@@ -145,7 +177,7 @@ export async function maybeEvolveAgeTier(userId: number, characterId: number, le
     newTier = next
   }
 
-  const missionProgress = await getMissionProgress(userId, characterId, tier)
+  const missionProgress = await getMissionProgress(userId, characterId, tier, resetAt)
   return {
     evolved,
     newAgeTier: newTier,
