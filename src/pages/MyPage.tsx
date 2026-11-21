@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Crown, LogOut, LogIn, UserPlus, MessageSquare, Trash2, Sprout } from 'lucide-react'
+import { User, Crown, LogOut, LogIn, UserPlus, MessageSquare, Trash2, Sprout, NotebookPen } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useChats } from '../context/ChatContext'
 import { useGrowth } from '../context/GrowthContext'
@@ -153,6 +153,24 @@ export default function MyPage() {
           AI 키우기로 이동
         </button>
       </div>
+
+      {/* 지시서(실제 업무·연구·비법·노하우 기록 시스템): 유저 본인의
+          업무/연구/노하우 기록장 진입점 — 기존 "내 AI" 카드와 같은
+          위치·스타일로 추가했다. */}
+      <button
+        onClick={() => navigate('/knowledge-log')}
+        className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left hover:bg-slate-50"
+      >
+        <span className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500">
+            <NotebookPen size={18} />
+          </span>
+          <span>
+            <p className="text-sm font-semibold text-slate-900">지식 기록장</p>
+            <p className="text-xs text-slate-400">나만의 업무·연구·노하우 기록</p>
+          </span>
+        </span>
+      </button>
 
       {/* 이용 플랜 업그레이드 — 결제 기능은 아직 없어서 "준비 중" 안내만 표시 */}
       <button

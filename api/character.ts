@@ -4,10 +4,13 @@ import {
   ensureKnowledgeTable,
   ensureCharacterMessagesTable,
   ensureGrowthTables,
+  ensurePersonalKnowledgeLogTables,
   sql,
   type CharacterRow,
   type KnowledgeEntryRow,
   type CharacterMessageRow,
+  type PersonalKnowledgeLogRow,
+  type PersonalKnowledgeLogAttachmentRow,
 } from './_lib/db'
 import { getSessionUser } from './_lib/auth'
 import {
@@ -274,6 +277,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleGetMissions(req, res, session.sub)
       return
     }
+    // 지시서(실제 업무·연구·비법·노하우 기록 시스템): "지식 기록장" —
+    // AI 캐릭터(누리/두리)와 전혀 무관한, 유저 본인의 개인 기록이다.
+    // 새 서버리스 함수 파일을 만들 수 없는 Vercel Hobby 12개 함수
+    // 한도 때문에 이 파일에 얹었을 뿐, companionType/character와는
+    // 아무 관계가 없다(아래 handleListKnowledgeLog 등 참고).
+    if (action === 'knowledge-log') {
+      await handleListKnowledgeLog(req, res, session.sub)
+      return
+    }
     await handleGet(res, session.sub)
     return
   }
@@ -333,6 +345,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'purchase-knowledge-validation-ticket') {
       await handlePurchaseKnowledgeValidationTicket(res, session.sub)
+      return
+    }
+    if (action === 'knowledge-log-save') {
+      await handleSaveKnowledgeLog(req, res, session.sub)
+      return
+    }
+    if (action === 'knowledge-log-delete') {
+      await handleDeleteKnowledgeLog(req, res, session.sub)
       return
     }
     await handlePost(req, res, session.sub)
@@ -2188,5 +2208,314 @@ async function handleSubmitExam(req: VercelRequest, res: VercelResponse, userId:
   } catch (err) {
     console.error('[api/character] unexpected error on exam-submit', err)
     res.status(500).json({ error: '시험 채점 중 오류가 발생했어요.' })
+  }
+}
+
+// ============================================================
+// 지시서(실제 업무·연구·비법·노하우 기록 시스템) — "지식 기록장"
+//
+// 위의 모든 핸들러와 달리 characters/companionType과 전혀 무관하다 —
+// userId만으로 유저 본인의 개인 기록을 읽고 쓴다. Vercel Hobby 플랜의
+// 12개 서버리스 함수 한도(이 파일 처음 부분의 "merge instead of add"
+// 설명 참고) 때문에 새 함수 파일을 못 만들어 여기 이어붙였을 뿐이다.
+// ============================================================
+
+// src/data/personalKnowledgeLog.ts의 프런트엔드 사본과 반드시 같은 값이어야
+// 한다(이 저장소의 기존 api//src 중복 패턴, characterAge.ts와 동일).
+const KNOWLEDGE_LOG_CATEGORIES = new Set(['work_log', 'research_note', 'success_case', 'failure_case', 'tip'])
+const KNOWLEDGE_LOG_VISIBILITIES = new Set(['private', 'partial', 'public'])
+const KNOWLEDGE_LOG_ATTACHMENT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+])
+const MAX_KNOWLEDGE_LOG_ATTACHMENTS = 5
+const MAX_KNOWLEDGE_LOG_BUSINESS_NAME_LENGTH = 100
+const MAX_KNOWLEDGE_LOG_TAGS_LENGTH = 200
+const MAX_KNOWLEDGE_LOG_CONTENT_LENGTH = 5000
+// YYYY-MM-DD만 허용 — Postgres DATE 컬럼에 그대로 바인딩한다. 모양만
+// 보는 정규식(자릿수만 확인)으로는 "2026-13-99"처럼 달력에 없는 날짜도
+// 통과시켜 저장 시점에 Postgres 에러(500)로서야 드러나므로, 실제
+// 연/월/일 범위와 Date로 되돌렸을 때 입력과 정확히 일치하는지까지
+// (2월 30일처럼 JS의 날짜 롤오버를 역으로 이용해) 확인한다.
+const ENTRY_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+function isValidEntryDate(value: string): boolean {
+  const match = ENTRY_DATE_PATTERN.exec(value)
+  if (!match) return false
+  const [, yearStr, monthStr, dayStr] = match
+  const year = Number(yearStr)
+  const month = Number(monthStr)
+  const day = Number(dayStr)
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+interface IncomingKnowledgeLogAttachment {
+  url: string
+  mimeType: string
+  name: string | null
+}
+
+// api/conversations/[id].ts의 isTrustedBlobUrl과 같은 이유(SSRF 방지) —
+// 이 핸들러는 첨부 바이트를 직접 fetch하지는 않지만, DB에 저장하는
+// url이 우리 Blob 스토어가 아니면 다른 사람이 아무 외부 URL이나 "첨부"
+// 로 등록해 지식 기록장을 임의 링크 저장소처럼 악용할 수 있다.
+function isTrustedBlobUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && hostname.endsWith('.public.blob.vercel-storage.com')
+  } catch {
+    return false
+  }
+}
+
+function parseIncomingKnowledgeLogAttachments(raw: unknown): IncomingKnowledgeLogAttachment[] | null {
+  if (raw == null) return []
+  if (!Array.isArray(raw) || raw.length > MAX_KNOWLEDGE_LOG_ATTACHMENTS) return null
+
+  const attachments: IncomingKnowledgeLogAttachment[] = []
+  for (const item of raw) {
+    const a = item as Partial<IncomingKnowledgeLogAttachment>
+    if (
+      typeof a.url !== 'string' ||
+      typeof a.mimeType !== 'string' ||
+      !KNOWLEDGE_LOG_ATTACHMENT_MIME_TYPES.has(a.mimeType) ||
+      !isTrustedBlobUrl(a.url)
+    ) {
+      return null
+    }
+    attachments.push({ url: a.url, mimeType: a.mimeType, name: typeof a.name === 'string' ? a.name : null })
+  }
+  return attachments
+}
+
+function toKnowledgeLogJson(row: PersonalKnowledgeLogRow, attachments: PersonalKnowledgeLogAttachmentRow[]) {
+  return {
+    id: row.id,
+    entryDate: row.entry_date,
+    businessName: row.business_name,
+    category: row.category,
+    tags: row.tags,
+    content: row.content,
+    visibility: row.visibility,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    attachments: attachments.map((a) => ({ url: a.url, mimeType: a.mime_type, name: a.name })),
+  }
+}
+
+// 목록 조회 — 최신순. 삭제 전까지는 몇 번을 조회해도 데이터가 바뀌지
+// 않는 순수 읽기다(peekTeachUsage 등과 같은 원칙).
+async function handleListKnowledgeLog(req: VercelRequest, res: VercelResponse, userId: number) {
+  try {
+    await ensurePersonalKnowledgeLogTables()
+
+    // @vercel/postgres의 sql 태그는 배열 파라미터를 못 받으므로(위
+    // api/conversations/[id].ts의 같은 주석 참고) "로그 목록 먼저 →
+    // 그 id들로 ANY($1) 조회" 두 단계가 아니라, user_id 하나로 거르는
+    // LEFT JOIN 한 번으로 (로그, 첨부) 쌍을 전부 받아온다(첨부가 없는
+    // 로그는 첨부 컬럼이 전부 null인 행 하나로 온다).
+    const rows = await sql<{
+      log_id: number
+      entry_date: string
+      business_name: string | null
+      category: PersonalKnowledgeLogRow['category']
+      tags: string | null
+      content: string
+      visibility: PersonalKnowledgeLogRow['visibility']
+      created_at: string
+      updated_at: string
+      attachment_url: string | null
+      attachment_mime_type: string | null
+      attachment_name: string | null
+    }>`
+      SELECT l.id AS log_id, l.entry_date, l.business_name, l.category, l.tags, l.content, l.visibility,
+        l.created_at, l.updated_at,
+        a.url AS attachment_url, a.mime_type AS attachment_mime_type, a.name AS attachment_name
+      FROM personal_knowledge_logs l
+      LEFT JOIN personal_knowledge_log_attachments a ON a.log_id = l.id
+      WHERE l.user_id = ${userId}
+      ORDER BY l.entry_date DESC, l.created_at DESC, l.id DESC, a.position ASC
+    `
+
+    interface BuiltEntry {
+      id: number
+      entryDate: string
+      businessName: string | null
+      category: PersonalKnowledgeLogRow['category']
+      tags: string | null
+      content: string
+      visibility: PersonalKnowledgeLogRow['visibility']
+      createdAt: string
+      updatedAt: string
+      attachments: { url: string; mimeType: string | null; name: string | null }[]
+    }
+    const entriesById = new Map<number, BuiltEntry>()
+    const orderedIds: number[] = []
+    for (const row of rows.rows) {
+      let entry = entriesById.get(row.log_id)
+      if (!entry) {
+        entry = {
+          id: row.log_id,
+          entryDate: row.entry_date,
+          businessName: row.business_name,
+          category: row.category,
+          tags: row.tags,
+          content: row.content,
+          visibility: row.visibility,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          attachments: [],
+        }
+        entriesById.set(row.log_id, entry)
+        orderedIds.push(row.log_id)
+      }
+      if (row.attachment_url) {
+        entry.attachments.push({ url: row.attachment_url, mimeType: row.attachment_mime_type, name: row.attachment_name })
+      }
+    }
+
+    res.status(200).json({ entries: orderedIds.map((id) => entriesById.get(id)) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on knowledge-log', err)
+    res.status(500).json({ error: '지식 기록을 불러오는 중 오류가 발생했어요.' })
+  }
+}
+
+// 등록/수정 — body에 id가 있으면(그리고 그 id가 실제로 이 유저 소유면)
+// UPDATE, 없으면 INSERT. 첨부는 매번 통째로 다시 쓴다(UPDATE 시 기존
+// 행을 지우고 새로 넣는다) — 순서 변경·삭제까지 한 번에 반영되는 가장
+// 단순한 방법이고, 어차피 한 번에 최대 5개뿐이라 비용도 작다.
+async function handleSaveKnowledgeLog(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { id, entryDate, businessName, category, tags, content, visibility, attachments } = (req.body ?? {}) as {
+    id?: unknown
+    entryDate?: unknown
+    businessName?: unknown
+    category?: unknown
+    tags?: unknown
+    content?: unknown
+    visibility?: unknown
+    attachments?: unknown
+  }
+
+  if (typeof entryDate !== 'string' || !isValidEntryDate(entryDate)) {
+    res.status(400).json({ error: '날짜를 올바르게 입력해주세요.' })
+    return
+  }
+  if (typeof category !== 'string' || !KNOWLEDGE_LOG_CATEGORIES.has(category)) {
+    res.status(400).json({ error: '주제(카테고리)를 선택해주세요.' })
+    return
+  }
+  if (typeof content !== 'string' || !content.trim() || content.trim().length > MAX_KNOWLEDGE_LOG_CONTENT_LENGTH) {
+    res.status(400).json({ error: `내용을 ${MAX_KNOWLEDGE_LOG_CONTENT_LENGTH}자 이내로 입력해주세요.` })
+    return
+  }
+  if (businessName !== undefined && businessName !== null) {
+    if (typeof businessName !== 'string' || businessName.length > MAX_KNOWLEDGE_LOG_BUSINESS_NAME_LENGTH) {
+      res.status(400).json({ error: `직장/상호명은 ${MAX_KNOWLEDGE_LOG_BUSINESS_NAME_LENGTH}자 이내로 입력해주세요.` })
+      return
+    }
+  }
+  if (tags !== undefined && tags !== null) {
+    if (typeof tags !== 'string' || tags.length > MAX_KNOWLEDGE_LOG_TAGS_LENGTH) {
+      res.status(400).json({ error: `태그는 ${MAX_KNOWLEDGE_LOG_TAGS_LENGTH}자 이내로 입력해주세요.` })
+      return
+    }
+  }
+  const resolvedVisibility = typeof visibility === 'string' && KNOWLEDGE_LOG_VISIBILITIES.has(visibility) ? visibility : 'private'
+  const parsedAttachments = parseIncomingKnowledgeLogAttachments(attachments)
+  if (parsedAttachments === null) {
+    res.status(400).json({ error: `첨부 파일은 최대 ${MAX_KNOWLEDGE_LOG_ATTACHMENTS}개까지, 허용된 사진·동영상 형식만 가능해요.` })
+    return
+  }
+
+  try {
+    await ensurePersonalKnowledgeLogTables()
+
+    const resolvedBusinessName = typeof businessName === 'string' && businessName.trim() ? businessName.trim() : null
+    const resolvedTags = typeof tags === 'string' && tags.trim() ? tags.trim() : null
+
+    let logId: number
+    if (typeof id === 'number') {
+      // 소유자 확인을 UPDATE 쿼리 자체의 WHERE 조건으로 걸어, 남의
+      // 기록을 id만 바꿔 보내는 시도를 막는다(건물 등록 PR의 owner_user_id
+      // 패턴과 동일).
+      const updated = await sql<{ id: number }>`
+        UPDATE personal_knowledge_logs
+        SET entry_date = ${entryDate}, business_name = ${resolvedBusinessName}, category = ${category},
+            tags = ${resolvedTags}, content = ${content.trim()}, visibility = ${resolvedVisibility}, updated_at = now()
+        WHERE id = ${id} AND user_id = ${userId}
+        RETURNING id
+      `
+      if (!updated.rows[0]) {
+        res.status(404).json({ error: '지식 기록을 찾을 수 없어요.' })
+        return
+      }
+      logId = updated.rows[0].id
+      await sql`DELETE FROM personal_knowledge_log_attachments WHERE log_id = ${logId}`
+    } else {
+      const inserted = await sql<{ id: number }>`
+        INSERT INTO personal_knowledge_logs (user_id, entry_date, business_name, category, tags, content, visibility)
+        VALUES (${userId}, ${entryDate}, ${resolvedBusinessName}, ${category}, ${resolvedTags}, ${content.trim()}, ${resolvedVisibility})
+        RETURNING id
+      `
+      logId = inserted.rows[0].id
+    }
+
+    for (let i = 0; i < parsedAttachments.length; i++) {
+      const a = parsedAttachments[i]
+      await sql`
+        INSERT INTO personal_knowledge_log_attachments (log_id, position, url, mime_type, name)
+        VALUES (${logId}, ${i}, ${a.url}, ${a.mimeType}, ${a.name})
+      `
+    }
+
+    const savedResult = await sql<PersonalKnowledgeLogRow>`
+      SELECT id, user_id, entry_date, business_name, category, tags, content, visibility, created_at, updated_at
+      FROM personal_knowledge_logs
+      WHERE id = ${logId}
+    `
+    const attachmentsResult = await sql<PersonalKnowledgeLogAttachmentRow>`
+      SELECT id, log_id, position, url, mime_type, name, created_at
+      FROM personal_knowledge_log_attachments
+      WHERE log_id = ${logId}
+      ORDER BY position
+    `
+
+    res.status(200).json({ entry: toKnowledgeLogJson(savedResult.rows[0], attachmentsResult.rows) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on knowledge-log-save', err)
+    res.status(500).json({ error: '지식 기록을 저장하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 삭제 — ON DELETE CASCADE로 첨부 행도 함께 지워진다. 소유자 확인을
+// DELETE 쿼리 자체의 WHERE 조건으로 건다(위 저장 핸들러와 같은 원칙).
+async function handleDeleteKnowledgeLog(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { id } = (req.body ?? {}) as { id?: unknown }
+  if (typeof id !== 'number') {
+    res.status(400).json({ error: '삭제할 기록을 찾을 수 없어요.' })
+    return
+  }
+
+  try {
+    await ensurePersonalKnowledgeLogTables()
+
+    const deleted = await sql<{ id: number }>`
+      DELETE FROM personal_knowledge_logs WHERE id = ${id} AND user_id = ${userId} RETURNING id
+    `
+    if (!deleted.rows[0]) {
+      res.status(404).json({ error: '지식 기록을 찾을 수 없어요.' })
+      return
+    }
+    res.status(200).json({ ok: true })
+  } catch (err) {
+    console.error('[api/character] unexpected error on knowledge-log-delete', err)
+    res.status(500).json({ error: '지식 기록을 삭제하는 중 오류가 발생했어요.' })
   }
 }
