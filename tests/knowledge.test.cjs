@@ -1665,9 +1665,17 @@ async function run() {
     t.assert(resetRes.body.character?.level === 1 && resetRes.body.character?.age_tier === 'toddler', '리셋하면 레벨 1·toddler 단계로 돌아간다')
     t.assert(priyaNuri.final_exam_attempts === 0 && priyaNuri.final_exam_passed === false, '최종 시험 시도/합격 상태도 함께 리셋된다')
 
+    // 지시서(8세 학습 기존 데이터 강제 삭제 및 8문제 순서 강제 고정):
+    // DB에서는 삭제되지 않지만(소프트 리셋), 리셋 이후에는 이 "학습
+    // 기록" 목록/총개수에도 더 이상 보이지 않는다 — 리셋 전 기록이
+    // 화면에 그대로 남아 "리셋이 안 됐다"처럼 보이던 혼동을 없앤다.
     const afterResetKnowledge = mockRes()
     await characterHandler(priyaReq({ method: 'GET', query: { action: 'knowledge', companionType: 'nuri' } }), afterResetKnowledge)
-    t.assert(afterResetKnowledge.body.entries.length === knowledgeCountBeforeReset, '기존 학습 기록은 리셋돼도 삭제되지 않는다(소프트 리셋)')
+    t.assert(afterResetKnowledge.body.entries.length === 0 && afterResetKnowledge.body.total === 0, '리셋 이후에는 학습 기록 목록이 0개로 보인다(화면 기준)')
+    t.assert(
+      mock.state.knowledgeEntries.filter((e) => e.character_id === priyaNuri.id).length === knowledgeCountBeforeReset,
+      'DB에는 리셋 전 8개의 지식 기록이 그대로 남아 있다(소프트 리셋 — 삭제되지 않음)',
+    )
 
     const afterResetMissions = mockRes()
     await characterHandler(priyaReq({ method: 'GET', query: { action: 'missions', companionType: 'nuri' } }), afterResetMissions)
