@@ -467,6 +467,44 @@ function sql(strings, ...values) {
           final_exam_attempts: row.final_exam_attempts,
           final_exam_passed: row.final_exam_passed,
           reset_at: row.reset_at,
+          address: row.address ?? null,
+          building_built_at: row.building_built_at ?? null,
+          created_at: new Date().toISOString(),
+        },
+      ],
+    })
+  }
+
+  // --- api/character.ts: handleCompleteBuilding — checked before the
+  // generic 'UPDATE characters' profession matcher below, since both start
+  // with "UPDATE characters" but this one's SET clause is "SET address =
+  // COALESCE(...), building_built_at = COALESCE(...)" and binds
+  // [address, characterId, userId] instead of [profession,
+  // customProfessionLabel, userId, companionType]. ---
+  if (has(text, 'UPDATE characters', 'SET address = COALESCE')) {
+    const [address, characterId, userId] = values
+    const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
+    if (!row) return Promise.resolve({ rows: [] })
+    row.address = address ?? row.address ?? null
+    row.building_built_at = row.building_built_at ?? new Date().toISOString()
+    return Promise.resolve({
+      rows: [
+        {
+          id: row.id,
+          user_id: row.user_id,
+          companion_type: row.companion_type,
+          stage: row.stage,
+          profession: row.profession,
+          custom_profession_label: row.custom_profession_label ?? null,
+          level: row.level ?? 1,
+          exp: row.exp ?? 0,
+          mission_unlocked_tier: row.mission_unlocked_tier ?? null,
+          focus_percent: row.focus_percent ?? 90,
+          final_exam_attempts: row.final_exam_attempts ?? 0,
+          final_exam_passed: row.final_exam_passed ?? false,
+          reset_at: row.reset_at ?? null,
+          address: row.address ?? null,
+          building_built_at: row.building_built_at ?? null,
           created_at: new Date().toISOString(),
         },
       ],
@@ -575,6 +613,8 @@ function sql(strings, ...values) {
           final_exam_attempts: row.final_exam_attempts ?? 0,
           final_exam_passed: row.final_exam_passed ?? false,
           reset_at: row.reset_at ?? null,
+          address: row.address ?? null,
+          building_built_at: row.building_built_at ?? null,
           created_at: now,
         },
       ],
@@ -606,6 +646,8 @@ function sql(strings, ...values) {
               final_exam_attempts: row.final_exam_attempts ?? 0,
               final_exam_passed: row.final_exam_passed ?? false,
               reset_at: row.reset_at ?? null,
+              address: row.address ?? null,
+              building_built_at: row.building_built_at ?? null,
               created_at: now,
             },
           ]
@@ -633,6 +675,8 @@ function sql(strings, ...values) {
         final_exam_attempts: c.final_exam_attempts ?? 0,
         final_exam_passed: c.final_exam_passed ?? false,
         reset_at: c.reset_at ?? null,
+        address: c.address ?? null,
+        building_built_at: c.building_built_at ?? null,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -662,6 +706,8 @@ function sql(strings, ...values) {
       final_exam_attempts: 0,
       final_exam_passed: false,
       reset_at: null,
+      address: null,
+      building_built_at: null,
     })
     return Promise.resolve({
       rows: [
@@ -679,6 +725,8 @@ function sql(strings, ...values) {
           final_exam_attempts: 0,
           final_exam_passed: false,
           reset_at: null,
+          address: null,
+          building_built_at: null,
           created_at: now,
         },
       ],

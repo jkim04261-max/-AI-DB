@@ -323,6 +323,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handleResetCharacterProgress(req, res, session.sub)
       return
     }
+    if (action === 'complete-building') {
+      await handleCompleteBuilding(req, res, session.sub)
+      return
+    }
     if (action === 'exam-submit') {
       await handleSubmitExam(req, res, session.sub)
       return
@@ -354,7 +358,7 @@ async function findOwnCharacter(userId: number, companionType: unknown): Promise
   if (typeof companionType !== 'string' || !COMPANION_TYPES.has(companionType)) return null
 
   const result = await sql<CharacterRow>`
-    SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, created_at
+    SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, address, building_built_at, created_at
     FROM characters
     WHERE user_id = ${userId} AND companion_type = ${companionType}
   `
@@ -374,7 +378,7 @@ async function handleGet(res: VercelResponse, userId: number) {
     await ensureCharacterTables()
 
     const result = await sql<CharacterRow>`
-      SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, created_at
+      SELECT id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, address, building_built_at, created_at
       FROM characters
       WHERE user_id = ${userId}
       ORDER BY created_at ASC
@@ -486,7 +490,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, userId: numbe
       INSERT INTO characters (user_id, companion_type, stage)
       VALUES (${userId}, ${companionType}, 'child')
       ON CONFLICT (user_id, companion_type) DO NOTHING
-      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, address, building_built_at, created_at
     `
     const character = inserted.rows[0]
     if (!character) {
@@ -543,7 +547,7 @@ async function handlePatch(req: VercelRequest, res: VercelResponse, userId: numb
       UPDATE characters
       SET profession = ${profession}, custom_profession_label = ${normalizedCustomLabel}
       WHERE user_id = ${userId} AND companion_type = ${companionType}
-      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, address, building_built_at, created_at
     `
     const character = updated.rows[0]
     if (!character) {
@@ -2028,7 +2032,7 @@ async function handleResetCharacterProgress(req: VercelRequest, res: VercelRespo
       SET level = 1, exp = 0, focus_percent = 90, mission_unlocked_tier = NULL,
           final_exam_attempts = 0, final_exam_passed = false, reset_at = NOW()
       WHERE id = ${character.id} AND user_id = ${userId}
-      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, created_at
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, address, building_built_at, created_at
     `
     const row = updated.rows[0]
 
@@ -2039,6 +2043,52 @@ async function handleResetCharacterProgress(req: VercelRequest, res: VercelRespo
   } catch (err) {
     console.error('[api/character] unexpected error on reset-character-progress', err)
     res.status(500).json({ error: '초기화하는 중 오류가 발생했어요.' })
+  }
+}
+
+// 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현, 1단계): 위치
+// 선정 → 건설 애니메이션을 끝낸 뒤 한 번만 호출된다 — 멱등이라
+// building_built_at이 이미 있으면 그대로 두고(덮어써서 "다시 짓는"
+// 시나리오를 만들지 않는다) 현재 상태만 돌려준다. address는 매번
+// 갱신할 수 있게 둔다(온보딩에서 비워뒀다가 여기서 처음 채우는 흐름과,
+// 나중에 "다른 위치 보기"로 바꾸는 흐름 둘 다 같은 액션 하나로 충분).
+// 직업별 건물 유형 분기·상호명 저장은 다음 PR에서 다룬다(사용자 확인:
+// "위치선택→건설 애니메이션 먼저, 직업별 분기·상호명 저장은 다음 PR").
+async function handleCompleteBuilding(req: VercelRequest, res: VercelResponse, userId: number) {
+  const { companionType, address } = (req.body ?? {}) as { companionType?: unknown; address?: unknown }
+
+  if (address !== undefined && typeof address !== 'string') {
+    res.status(400).json({ error: '올바르지 않은 주소예요.' })
+    return
+  }
+  const normalizedAddress = typeof address === 'string' ? address.trim().slice(0, 200) : undefined
+
+  try {
+    await ensureCharacterTables()
+
+    const character = await findOwnCharacter(userId, companionType)
+    if (!character) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    const updated = await sql<CharacterRow>`
+      UPDATE characters
+      SET address = COALESCE(${normalizedAddress ?? null}, address),
+          building_built_at = COALESCE(building_built_at, NOW())
+      WHERE id = ${character.id} AND user_id = ${userId}
+      RETURNING id, user_id, companion_type, stage, profession, custom_profession_label, level, exp, mission_unlocked_tier, focus_percent, final_exam_attempts, final_exam_passed, reset_at, address, building_built_at, created_at
+    `
+    const row = updated.rows[0]
+    if (!row) {
+      res.status(404).json({ error: '캐릭터를 찾을 수 없어요.' })
+      return
+    }
+
+    res.status(200).json({ character: toCharacterJson(row) })
+  } catch (err) {
+    console.error('[api/character] unexpected error on complete-building', err)
+    res.status(500).json({ error: '건물을 짓는 중 오류가 발생했어요.' })
   }
 }
 

@@ -88,6 +88,12 @@ export interface Character {
   // 된다) — 서버가 계산한 "진짜" 연령대를 그대로 쓴다(api/character.ts의
   // toCharacterJson).
   ageTier: AgeTier
+  // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 온보딩
+  // 화면에서 입력한 "일하는/공부하는 지역"을 여기서 처음으로 실제
+  // 저장한다 — 건물을 아직 안 지었으면(buildingBuilt===false) null일
+  // 수 있다.
+  address: string | null
+  buildingBuilt: boolean
   createdAt: string
 }
 
@@ -196,8 +202,9 @@ interface GrowthContextValue {
   tickets: TicketBalances
   purchaseAiRecommendTicket: () => Promise<TicketBalances>
   purchaseKnowledgeValidationTicket: () => Promise<TicketBalances>
-  createCharacter: (companionType: CompanionType) => Promise<void>
-  setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<void>
+  createCharacter: (companionType: CompanionType) => Promise<Character>
+  setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<Character>
+  completeBuilding: (companionType: CompanionType, address?: string) => Promise<void>
   verifyKnowledge: (
     companionType: CompanionType,
     title: string,
@@ -356,6 +363,8 @@ interface CharacterApiRow {
   exp: number
   age_tier: AgeTier
   focus_percent: number
+  address?: string | null
+  building_built_at?: string | null
   created_at: string
 }
 
@@ -370,6 +379,12 @@ function fromApiRow(row: CharacterApiRow): Character {
     exp: row.exp ?? 0,
     ageTier: row.age_tier ?? 'toddler',
     focusPercent: row.focus_percent ?? 90,
+    address: row.address ?? null,
+    // 이 필드 자체가 응답에 아예 없으면(이 기능을 모르는 기존 모의 API
+    // 응답 등) "이미 지어진 것"으로 본다 — 실제 서버는 모든 캐릭터 응답에
+    // 항상 이 키를 명시적으로 포함하므로(생성 직후엔 null), 진짜 "아직
+    // 안 지음"은 명시적 null로만 구분된다.
+    buildingBuilt: row.building_built_at === undefined ? true : row.building_built_at !== null,
     createdAt: row.created_at,
   }
 }
@@ -497,6 +512,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
     const created = fromApiRow(data.character)
     setCharacters((prev) => [...prev, created])
+    return created
   }, [])
 
   // PR #65: profession==='custom'일 때만 customProfessionLabel을 함께
@@ -511,6 +527,25 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
     if (!res.ok || !data.character) {
       throw new Error(data.error || '직업을 저장하는 중 오류가 발생했어요.')
+    }
+    const updated = fromApiRow(data.character)
+    setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? updated : c)))
+    return updated
+  }, [])
+
+  // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 위치 선정→
+  // 건설 애니메이션을 마친 뒤 한 번 호출된다 — 서버가 멱등하게 처리하므로
+  // (이미 지었으면 building_built_at을 덮어쓰지 않음) 여러 번 불려도
+  // 안전하다.
+  const completeBuilding = useCallback(async (companionType: CompanionType, address?: string) => {
+    const res = await fetch('/api/character?action=complete-building', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companionType, address }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
+    if (!res.ok || !data.character) {
+      throw new Error(data.error || '건물을 짓는 중 오류가 발생했어요.')
     }
     const updated = fromApiRow(data.character)
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? updated : c)))
@@ -1118,6 +1153,7 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
         purchaseKnowledgeValidationTicket,
         createCharacter,
         setProfession,
+        completeBuilding,
         verifyKnowledge,
         studyGenerate,
         completeCardGame,

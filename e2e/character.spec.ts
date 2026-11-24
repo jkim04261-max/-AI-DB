@@ -651,3 +651,81 @@ test('shows the character\'s focus gauge percentage', async ({ page }) => {
 
   await expect(page.getByTestId('focus-gauge')).toContainText('72%')
 })
+
+// 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현, 1단계): 서버가
+// 캐릭터를 "아직 건물 안 지음"(building_built_at: null)으로 내려주면,
+// 온보딩 직후 평소 성장 화면 대신 TownBuildingScreen(위치 선정→건설
+// 애니메이션→완성)을 먼저 거친다 — 완성 모달에서 확인을 누르는 순간
+// complete-building이 호출되고(입력한 주소가 그대로 실려간다), 그 뒤에만
+// 평소 성장 화면으로 들어간다.
+test('a freshly created character with no building yet walks through TownBuildingScreen (pick a plot → construction animation → complete) before entering the grow screen', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let completeBuildingBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST' && !action) {
+      const body = route.request().postDataJSON() as { companionType: string }
+      const created = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: body.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        address: null,
+        building_built_at: null,
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
+      return true
+    }
+    if (method === 'POST' && action === 'complete-building') {
+      completeBuildingBody = route.request().postDataJSON() as Record<string, unknown>
+      const updated = {
+        id: 1,
+        user_id: USER.id,
+        companion_type: completeBuildingBody.companionType,
+        stage: 'child',
+        profession: null,
+        level: 1,
+        exp: 0,
+        address: completeBuildingBody.address,
+        building_built_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-region-input').fill('서울시 강남구 압구정동')
+  await page.getByTestId('opening-profile-start-button').click()
+
+  // 평소 성장 화면 위로 TownBuildingScreen이 전체화면으로 덮는다.
+  await expect(page.getByTestId('town-building-screen')).toBeVisible()
+  await expect(page.getByTestId('town-building-address-chip')).toContainText('서울시 강남구 압구정동')
+
+  await page.getByTestId('town-building-pick-location-button').click()
+  await expect(page.getByTestId('town-building-selected-plot')).toContainText('서울시 강남구 압구정동')
+  await page.getByTestId('town-building-start-button').click()
+
+  // 진행률 바가 0→100%까지 자동으로 차오른 뒤 완성 모달이 뜬다.
+  await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('town-building-complete-button').click()
+
+  await expect.poll(() => completeBuildingBody).toBeTruthy()
+  expect(completeBuildingBody?.address).toBe('서울시 강남구 압구정동')
+
+  // 완성 확인을 누른 뒤에만 평소 성장 화면(캐릭터 스프라이트)으로 들어간다.
+  await expect(page.getByTestId('town-building-screen')).toHaveCount(0)
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+})

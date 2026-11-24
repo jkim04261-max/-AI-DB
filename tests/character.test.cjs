@@ -215,6 +215,74 @@ async function run() {
     }
   }
 
+  // --- 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현, 1단계):
+  // 'complete-building' 액션 — 위치 선정→건설 애니메이션을 끝낸 뒤 한 번
+  // 호출된다. ---
+  {
+    mock.seedUser(20, { email: 'grace@test.com' })
+    const graceCookie = cookieHeaderFor(auth, 20, 0, 'grace@test.com')
+    const graceReq = (overrides = {}) => ({ headers: { cookie: graceCookie }, ...overrides })
+
+    {
+      const res = mockRes()
+      await characterHandler(graceReq({ method: 'POST', query: { action: 'complete-building' }, body: { companionType: 'nuri', address: '서울시 강남구' } }), res)
+      t.assert(res.statusCode === 404, '아직 캐릭터를 만들지 않았으면 404')
+    }
+
+    await characterHandler(graceReq({ method: 'POST', body: { companionType: 'nuri' } }), mockRes())
+
+    {
+      const getRes = mockRes()
+      await characterHandler(graceReq({ method: 'GET', query: {} }), getRes)
+      const nuri = getRes.body.characters.find((c) => c.companion_type === 'nuri')
+      t.assert(nuri.building_built_at === null, '건물을 짓기 전에는 building_built_at이 null이다')
+      t.assert(nuri.address === null, '건물을 짓기 전에는 address도 null이다')
+    }
+
+    {
+      const res = mockRes()
+      await characterHandler(
+        graceReq({ method: 'POST', query: { action: 'complete-building' }, body: { companionType: 'nuri', address: '서울시 강남구 압구정동' } }),
+        res,
+      )
+      t.assert(res.statusCode === 200, '위치 선정→건설을 마치면 complete-building이 성공한다 (200)')
+      t.assert(res.body.character?.address === '서울시 강남구 압구정동', '응답에 저장한 주소가 그대로 담긴다')
+      t.assert(res.body.character?.building_built_at !== null, '건물이 지어진 시각이 채워진다')
+    }
+
+    // 멱등성: 이미 지은 뒤 다시 호출해도(예: 화면 재진입) 기존
+    // building_built_at을 덮어쓰지 않는다 — "다시 짓기"가 아니다.
+    {
+      const first = mockRes()
+      await characterHandler(graceReq({ method: 'GET', query: {} }), first)
+      const firstBuiltAt = first.body.characters.find((c) => c.companion_type === 'nuri').building_built_at
+
+      const res = mockRes()
+      await characterHandler(
+        graceReq({ method: 'POST', query: { action: 'complete-building' }, body: { companionType: 'nuri', address: '다른 주소로 바꿔보기' } }),
+        res,
+      )
+      t.assert(res.statusCode === 200, '이미 지은 뒤 다시 호출해도 성공한다 (200, 멱등)')
+      t.assert(res.body.character?.building_built_at === firstBuiltAt, '이미 지어진 시각은 덮어쓰지 않는다')
+      t.assert(res.body.character?.address === '다른 주소로 바꿔보기', '다만 주소는 매번 갱신할 수 있다(다른 위치 보기 대응)')
+    }
+
+    // address를 생략하면(예: 자동 트리거된 기존 캐릭터가 주소 없이
+    // 재방문) 기존 주소를 그대로 둔다.
+    {
+      const res = mockRes()
+      await characterHandler(graceReq({ method: 'POST', query: { action: 'complete-building' }, body: { companionType: 'nuri' } }), res)
+      t.assert(res.statusCode === 200, 'address를 생략해도 성공한다 (200)')
+      t.assert(res.body.character?.address === '다른 주소로 바꿔보기', 'address를 생략하면 기존 값을 그대로 유지한다')
+    }
+
+    {
+      const res = mockRes()
+      await characterHandler(graceReq({ method: 'POST', query: { action: 'complete-building' }, body: { companionType: 'nuri', address: 123 } }), res)
+      t.assert(res.statusCode === 400, '문자열이 아닌 address는 거부된다 (400)')
+    }
+  }
+
   return t.summary()
 }
 
