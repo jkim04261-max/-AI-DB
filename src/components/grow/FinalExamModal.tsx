@@ -26,6 +26,7 @@ export default function FinalExamModal({
   onClose,
   onPassed,
   onOpenPassMarket,
+  onReset,
 }: {
   companionType: CompanionType
   onClose: () => void
@@ -36,6 +37,13 @@ export default function FinalExamModal({
   // 유도 버튼과 같은 만능마켓 진입점을 그대로 연다(GrowPage의
   // onBuyMoreUses, 학습·교육관 카테고리에 패스권이 있다).
   onOpenPassMarket: () => void
+  // 지시서(/grow 화면 최신 반영 및 리셋(#151) 동작 점검): "처음부터
+  // 다시 키우기"가 성공했을 때 — 호출부(InteractionPanel)가 자기
+  // 안에서 패널이 열릴 때 딱 한 번만 불러오고 캐시해 둔 missionProgress/
+  // 학습 기록 목록을 다시 불러오게 한다(서버는 이미 reset_at 기준으로
+  // 정확히 계산하지만, 화면이 다시 요청하지 않으면 리셋 전 값이 그대로
+  // 남아 보인다).
+  onReset: () => void
 }) {
   const { getFinalExam, submitFinalExam, resetCharacterProgress } = useGrowth()
 
@@ -151,6 +159,7 @@ export default function FinalExamModal({
     setResetError(null)
     try {
       await resetCharacterProgress(companionType)
+      onReset()
       onClose()
     } catch (err) {
       setResetError(err instanceof Error ? err.message : '초기화하는 중 오류가 발생했어요.')

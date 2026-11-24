@@ -3223,6 +3223,149 @@ test('passing the 종합 최종 시험 (all 8 questions correct) evolves toddler
   await expect(page.getByTestId('illustrated-age-portrait-nuri')).toHaveAttribute('src', /nuri-teen/)
 })
 
+// 지시서(/grow 화면 최신 반영 및 리셋(#151) 동작 점검): "처음부터 다시
+// 키우기"로 reset-character-progress가 성공한 뒤에도 InteractionPanel이
+// 들고 있던 missionProgress/학습 기록 상태가 그대로 남아 있어서 "리셋했는데
+// 화면은 그대로"로 보이는 버그가 있었다 — FinalExamModal의 onReset이
+// missionProgress와 records를 다시 불러오는지 끝까지 확인한다.
+test('resetting via 처음부터 다시 키우기 refreshes stale mission progress and 학습 기록 count without a page reload', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+
+  let missionsCallCount = 0
+  let hasReset = false
+
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onMissions: async (route) => {
+      missionsCallCount += 1
+      const reset = hasReset
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: reset ? 0 : 2, required: 2, complete: !reset },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: reset ? 0 : 4, required: 4, complete: !reset },
+              card_game: { type: 'card_game', confirmed: reset ? 0 : 1, required: 1, complete: !reset },
+              sequence_order: { type: 'sequence_order', confirmed: reset ? 0 : 1, required: 1, complete: !reset },
+              categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
+            },
+            confirmedTotal: reset ? 0 : 8,
+            requiredTotal: 8,
+            allConfirmed: !reset,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+    onListKnowledge: async (route) => {
+      const reset = hasReset
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entries: reset
+            ? []
+            : Array.from({ length: 9 }, (_, i) => ({
+                id: i,
+                character_id: 1,
+                profession: 'accountant',
+                title: `예전 지식 ${i + 1}`,
+                original_content: '리셋 전에 저장된 학습 기록이에요.',
+                final_content: '리셋 전에 저장된 학습 기록이에요.',
+                verification_status: 'appropriate',
+                verification_explanation: '정확해요',
+                source: 'user_taught',
+                created_at: '2026-01-01T00:00:00.000Z',
+              })),
+          total: reset ? 0 : 9,
+        }),
+      })
+    },
+    onFinalExam: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          questions: Array.from({ length: 8 }, (_, i) => ({ id: `fe-${i}`, text: `복습 문제 ${i + 1}`, choices: ['정답', '오답1', '오답2'] })),
+          examToken: 'tok-final-exam',
+          attemptNumber: 2,
+          passScore: 100,
+        }),
+      })
+    },
+    onFinalExamSubmit: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          passed: false,
+          score: 0,
+          results: [],
+          message: '아쉽지만 또 불합격이에요.',
+          attemptNumber: 2,
+          blocked: true,
+          retakeExamToken: null,
+          wrongQuestions: [],
+          missionProgress: null,
+          evolved: false,
+          newAgeTier: null,
+          newAgeTierLabel: null,
+        }),
+      })
+    },
+    onResetCharacterProgress: async (route) => {
+      hasReset = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { ...NURI_ACCOUNTANT, level: 1, exp: 0, age_tier: 'toddler', focus_percent: 90 },
+          message: '처음부터 다시 시작해요! 새로운 마음으로 다시 키워볼까요?',
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+
+  // 리셋 전: 8/8 완료 상태라 1번째 문제가 아니라 최종 시험 진입 화면이고,
+  // 학습 기록을 펼치면 리셋 전 9개가 보인다.
+  await page.getByRole('button', { name: '가르치기' }).click()
+  await page.getByRole('button', { name: /학습 기록/ }).click()
+  await expect(page.getByText('예전 지식 1')).toBeVisible()
+  await expect(page.getByRole('button', { name: /학습 기록 \(9개\)/ })).toBeVisible()
+
+  await expect(page.getByTestId('open-final-exam-button')).toBeVisible()
+  await page.getByTestId('open-final-exam-button').click()
+
+  await expect(page.getByTestId('final-exam-step')).toBeVisible()
+  for (let i = 0; i < 8; i++) {
+    await page.getByTestId(`final-exam-choice-${i}-1`).click()
+  }
+  await page.getByTestId('final-exam-submit-button').click()
+
+  await expect(page.getByTestId('final-exam-blocked-choice')).toBeVisible()
+  await page.getByTestId('final-exam-reset-button').click()
+
+  // 리셋 성공 → 모달이 닫히고, missionProgress와 학습 기록이 다시 불려와
+  // 0/8·0개 상태로 화면에 즉시 반영돼야 한다(새로고침 없이).
+  await expect(page.getByTestId('final-exam-step')).not.toBeVisible()
+  await expect.poll(() => missionsCallCount).toBeGreaterThan(1)
+  await expect(page.getByText('1번째 문제 · 직접 입력하기')).toBeVisible()
+
+  await expect(page.getByRole('button', { name: /학습 기록 \(0개\)/ })).toBeVisible()
+  await expect(page.getByText('아직 가르친 지식이 없어요.')).toBeVisible()
+  await expect(page.getByText('예전 지식 1')).not.toBeVisible()
+})
+
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)은 더 이상
 // 균등분배가 아니라 "①직접입력 3 → ②직업 카드 맞추기 1 → ③직접입력 1
 // → ④객관식 3 → ⑤개인 꿀팁/노하우 2"(합계 10)의 고정 순서다. 사이드바에
