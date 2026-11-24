@@ -317,6 +317,18 @@ export function ensureCharacterTables() {
       await sql`
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS reset_at TIMESTAMPTZ
       `
+
+      // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 온보딩
+      // 화면(OpeningProfileScreen)이 모으기만 하고 어디에도 저장하지
+      // 않던 "일하는/공부하는 지역"을, 이 건물 짓기 단계에서 처음으로
+      // 실제 저장한다. building_built_at이 NULL이면(모든 기존 캐릭터
+      // 포함) 아직 건물을 안 지은 것 — api/character.ts의 'complete-
+      // building' 액션에서만 값을 채운다. 둘 다 nullable 추가 컬럼이라
+      // 기존 캐릭터 행에는 아무 영향이 없다.
+      await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS address TEXT`
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS building_built_at TIMESTAMPTZ
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -687,6 +699,8 @@ export interface CharacterRow {
   final_exam_attempts: number
   final_exam_passed: boolean
   reset_at: string | null
+  address: string | null
+  building_built_at: string | null
   created_at: string
 }
 

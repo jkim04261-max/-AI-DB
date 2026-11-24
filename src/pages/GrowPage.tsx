@@ -38,6 +38,7 @@ import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
 import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
 import OpeningProfileScreen, { type OpeningProfile } from '../components/grow/OpeningProfileScreen'
+import TownBuildingScreen from '../components/grow/TownBuildingScreen'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 
@@ -173,6 +174,7 @@ export default function GrowPage() {
     loading,
     createCharacter,
     setProfession,
+    completeBuilding,
     listMessages,
     getExam,
     listKnowledge,
@@ -189,6 +191,18 @@ export default function GrowPage() {
   // 캐릭터(누리/두리)를 만드는 중인지만 들고 있는다.
   const [onboardingFor, setOnboardingFor] = useState<CompanionType | null>(null)
   const [onboardingSubmitting, setOnboardingSubmitting] = useState(false)
+  // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 온보딩
+  // 직후(또는 아직 건물을 안 지은 기존 캐릭터를 선택했을 때) "위치
+  // 선정→건설 애니메이션→완성" 시퀀스를 보여준다 — buildingFor가 세팅된
+  // 동안은 평소 성장 화면 대신 TownBuildingScreen을 전체화면으로
+  // 띄운다. 완성 뒤에 보여줄 인사말 이름은 onboardingGreetingName에
+  // 잠깐 들고 있다가(없으면 "직업 변경"처럼 기존 캐릭터 경로), 실제
+  // selectCompanion 직후에만 꺼내 쓴다.
+  const [buildingFor, setBuildingFor] = useState<CompanionType | null>(null)
+  const [buildingAddress, setBuildingAddress] = useState('')
+  const [buildingSubmitting, setBuildingSubmitting] = useState(false)
+  const [buildingError, setBuildingError] = useState<string | null>(null)
+  const [onboardingGreetingName, setOnboardingGreetingName] = useState<string | null>(null)
   const [showProfessionPicker, setShowProfessionPicker] = useState(false)
   // 지시서("누리AI 키우기 간단 설명서"): 성장 규칙/직업 변경/미션
   // 진행 방법을 보여주는 읽기 전용 도움말 패널 — 다른 로직과 완전히
@@ -432,6 +446,19 @@ export default function GrowPage() {
     }
   }, [character?.companionType, character?.profession, getExam, listMessages, listKnowledge])
 
+  // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 아직
+  // 건물을 안 지은 캐릭터를 선택하면(이 기능이 나오기 전에 만든 기존
+  // 캐릭터 포함) TownBuildingScreen을 자동으로 띄운다 — 온보딩 직후
+  // 신규 캐릭터는 handleOnboardingComplete가 이미 buildingFor를
+  // 세팅하므로 이 effect는 그 값을 덮어쓰지 않는다(아래 가드).
+  useEffect(() => {
+    if (!character || character.buildingBuilt) return
+    if (onboardingFor || buildingFor) return
+    setBuildingAddress(character.address ?? '')
+    setBuildingError(null)
+    setBuildingFor(character.companionType)
+  }, [character, onboardingFor, buildingFor])
+
   // 행동력(usage)은 캐릭터별이 아니라 계정 전체 하루 한도라, 로그인
   // 시점에 한 번 불러온다.
   useEffect(() => {
@@ -577,30 +604,41 @@ export default function GrowPage() {
   // Stage 1(오프닝 프로필): OpeningProfileScreen이 모은 입력값을 받아
   // 실제로 캐릭터를 만든다. 캐릭터 생성·직업 저장은 PR #65까지 이미
   // 있는 기존 API를 그대로 재사용한다(새로운 쓰기 위험이 아님) — 이름·
-  // 생일·거주지역·초기 용돈은 어디에도 저장하지 않고 화면(말풍선·
-  // wallet 체험판 상태)에만 반영한다.
+  // 생일·초기 용돈은 여전히 어디에도 저장하지 않고 화면(말풍선·wallet
+  // 체험판 상태)에만 반영한다. 지시서(프로필 주소 기반 2.5D 동네 건물
+  // 짓기 시스템 구현)부터는 거주지역만 예외로, 캐릭터를 바로 성장
+  // 화면으로 보내지 않고 TownBuildingScreen(위치 선정→건설 애니메이션
+  // →완성)을 먼저 거치게 하며, 그 화면에서 확인을 누르는 순간 처음으로
+  // 서버에 저장된다(handleBuildingComplete 참고) — 인사말도 그때까지
+  // 미뤄둔다.
   const handleOnboardingComplete = async (profile: OpeningProfile) => {
     if (!onboardingFor) return
     const companionType = onboardingFor
     setOnboardingSubmitting(true)
     setError(null)
     try {
-      await createCharacter(companionType)
+      let latest = await createCharacter(companionType)
       if (profile.profession) {
-        await setProfession(companionType, 'custom', profile.profession)
+        latest = await setProfession(companionType, 'custom', profile.profession)
       }
       wallet.grantInitialAllowance(GROW_INITIAL_ALLOWANCE_WON)
-      selectCompanion(companionType)
       setOnboardingFor(null)
 
-      // 지시서(캐릭터 인사말 말풍선): AI 키우기 메인 화면에 막 들어왔을
-      // 때 0.5초 뒤 페이드인되는 인사말 — 입력한 이름을 그대로 끼워
-      // 넣는다(기존 toddlerProfessionGreeting과 달리 이름을 포함).
-      // 5초 후 자동으로 사라지거나, 그 전에 캐릭터를 탭하면 바로 닫힌다
-      // (아래 onTapCharacter 참고). 이름은 이 onComplete 콜백에만 잠깐
-      // 존재하는 값이라(OpeningProfileScreen도 어디에도 저장하지 않음,
-      // 생일·거주지역과 같은 원칙) 재방문 시에는 다시 보여줄 수 없다 —
-      // "프로필 생성 직후"라는 지시서의 범위와 정확히 일치한다.
+      // 지시서(프로필 주소 기반 2.5D 동네 건물 짓기 시스템 구현): 서버가
+      // 이 캐릭터를 "아직 건물 안 지음"으로 내려줄 때만 TownBuildingScreen
+      // 을 거친다 — buildingBuilt는 응답에 building_built_at 키 자체가
+      // 없는 경우(이 기능을 모르는 예전 모의 API 등) true로 기본
+      // 처리되므로(fromApiRow 참고), 그런 환경에서는 예전과 똑같이 바로
+      // 성장 화면으로 들어간다.
+      if (!latest.buildingBuilt) {
+        setOnboardingGreetingName(profile.name.trim())
+        setBuildingAddress(profile.region)
+        setBuildingError(null)
+        setBuildingFor(companionType)
+        return
+      }
+
+      selectCompanion(companionType)
       const greetingName = profile.name.trim()
       openingGreetingTimeoutRef.current = setTimeout(() => {
         openingGreetingTimeoutRef.current = null
@@ -611,6 +649,42 @@ export default function GrowPage() {
       setError(err instanceof Error ? err.message : '캐릭터를 만드는 중 오류가 발생했어요.')
     } finally {
       setOnboardingSubmitting(false)
+    }
+  }
+
+  // TownBuildingScreen의 완성 모달에서 "OOOAI 키우기 시작"을 누르면
+  // 호출된다 — 이때 처음으로 주소를 서버에 저장하고(이미 지었으면
+  // 멱등하게 무시), 평소의 성장 화면으로 들어간다. onboardingGreetingName
+  // 이 있으면(방금 온보딩을 마친 신규 캐릭터) 기존 "캐릭터 인사말
+  // 말풍선"을 그대로 띄우고, 없으면(아직 건물을 안 지은 기존 캐릭터를
+  // 나중에 다시 선택한 경우) 말풍선 없이 조용히 들어간다.
+  const handleBuildingComplete = async () => {
+    if (!buildingFor) return
+    const companionType = buildingFor
+    setBuildingSubmitting(true)
+    setBuildingError(null)
+    try {
+      await completeBuilding(companionType, buildingAddress)
+      selectCompanion(companionType)
+      setBuildingFor(null)
+
+      const greetingName = onboardingGreetingName
+      setOnboardingGreetingName(null)
+      if (greetingName) {
+        // 지시서(캐릭터 인사말 말풍선): AI 키우기 메인 화면에 막
+        // 들어왔을 때 0.5초 뒤 페이드인되는 인사말 — 입력한 이름을
+        // 그대로 끼워 넣는다. 5초 후 자동으로 사라지거나, 그 전에
+        // 캐릭터를 탭하면 바로 닫힌다(아래 onTapCharacter 참고).
+        openingGreetingTimeoutRef.current = setTimeout(() => {
+          openingGreetingTimeoutRef.current = null
+          showBubble(openingGreeting(greetingName), 5000)
+          dismissibleGreetingRef.current = true
+        }, 500)
+      }
+    } catch (err) {
+      setBuildingError(err instanceof Error ? err.message : '건물을 짓는 중 오류가 발생했어요.')
+    } finally {
+      setBuildingSubmitting(false)
     }
   }
 
@@ -1382,6 +1456,16 @@ export default function GrowPage() {
           submitting={onboardingSubmitting}
           onCancel={() => setOnboardingFor(null)}
           onComplete={handleOnboardingComplete}
+        />
+      )}
+
+      {buildingFor && (
+        <TownBuildingScreen
+          companionType={buildingFor}
+          address={buildingAddress}
+          submitting={buildingSubmitting}
+          error={buildingError}
+          onComplete={() => void handleBuildingComplete()}
         />
       )}
     </div>
