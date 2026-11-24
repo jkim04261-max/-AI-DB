@@ -1275,11 +1275,20 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
       return
     }
 
+    // 지시서(8세 학습 기존 데이터 강제 삭제 및 8문제 순서 강제 고정):
+    // missionProgress(getMissionProgress)는 이미 reset_at 이후 저장만
+    // 집계하는데, 이 "학습 기록" 목록/총개수는 reset_at과 무관하게 항상
+    // 전체 이력을 보여주고 있었다 — "처음부터 다시 키우기"를 눌러 진행도
+    // (X/8)는 0으로 돌아가도 "학습 기록 (N개)"는 그대로라 리셋이 전혀
+    // 안 된 것처럼 보이는 혼동의 실제 원인이었다. 소프트 리셋 전 기록은
+    // DB에서 삭제하지 않지만(사용자 확인: "기존 지식 기록은 유지"),
+    // 이 목록에는 더 이상 보이지 않게 한다.
     const [entries, countResult] = await Promise.all([
       sql<KnowledgeEntryRow>`
         SELECT id, user_id, character_id, profession, custom_profession_label, title, original_content, final_content, verification_status, verification_explanation, source, mission_type, age_tier_at_save, knowledge_category, created_at
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND user_id = ${userId}
+          AND (${character.reset_at}::timestamptz IS NULL OR created_at > ${character.reset_at}::timestamptz)
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
@@ -1287,6 +1296,7 @@ async function handleListKnowledge(req: VercelRequest, res: VercelResponse, user
         SELECT COUNT(*)::int AS count
         FROM character_knowledge_entries
         WHERE character_id = ${character.id} AND user_id = ${userId}
+          AND (${character.reset_at}::timestamptz IS NULL OR created_at > ${character.reset_at}::timestamptz)
       `,
     ])
 

@@ -846,10 +846,15 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows })
   }
 
-  // --- api/character.ts: handleListKnowledge's count ---
+  // --- api/character.ts: handleListKnowledge's count — 지시서(8세 학습
+  // 기존 데이터 강제 삭제 및 8문제 순서 강제 고정): resetAt(3번째 바인드
+  // 값) 이전 저장은 "처음부터 다시 키우기" 이후 더 이상 이 목록/총개수에
+  // 집계되지 않는다(getMissionProgress의 진행도 집계와 같은 원칙). ---
   if (has(text, 'COUNT(*)', 'character_knowledge_entries')) {
-    const [characterId, userId] = values
-    const count = state.knowledgeEntries.filter((e) => e.character_id === characterId && e.user_id === userId).length
+    const [characterId, userId, resetAt] = values
+    const count = state.knowledgeEntries.filter(
+      (e) => e.character_id === characterId && e.user_id === userId && (!resetAt || e.created_at > resetAt),
+    ).length
     return Promise.resolve({ rows: [{ count }] })
   }
 
@@ -882,11 +887,15 @@ function sql(strings, ...values) {
     return Promise.resolve({ rows })
   }
 
-  // --- api/character.ts: handleListKnowledge's page of entries ---
+  // --- api/character.ts: handleListKnowledge's page of entries — resetAt
+  // (3번째 바인드 값)은 위 COUNT(*) 매처와 같은 이유로 똑같이 적용한다.
+  // 같은 템플릿 안에서 resetAt을 두 번 인터폴레이션해서(IS NULL OR...)
+  // 4번째 바인드 값으로 resetAt이 그대로 한 번 더 들어오므로(값은 같지만
+  // 자리 하나를 차지한다), limit/offset을 읽기 전에 그 자리를 건너뛴다. ---
   if (has(text, 'FROM character_knowledge_entries')) {
-    const [characterId, userId, limit, offset] = values
+    const [characterId, userId, resetAt, , limit, offset] = values
     const rows = state.knowledgeEntries
-      .filter((e) => e.character_id === characterId && e.user_id === userId)
+      .filter((e) => e.character_id === characterId && e.user_id === userId && (!resetAt || e.created_at > resetAt))
       .slice()
       .reverse() // newest first, matching ORDER BY created_at DESC on insertion order
       .slice(offset, offset + limit)
