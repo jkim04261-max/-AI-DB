@@ -193,6 +193,23 @@ export default function InteractionPanel({
     }
   }, [character.companionType, getMissionProgress])
 
+  // 지시서(/grow 화면 최신 반영 및 리셋(#151) 동작 점검): "처음부터 다시
+  // 키우기"는 FinalExamModal 안에서 일어나는데, 이 missionProgress/
+  // records(학습 기록 목록)는 둘 다 패널이 처음 열릴 때 딱 한 번만
+  // 불러오고 그 뒤로는 다시 불러오지 않는 로컬 상태라, 리셋 성공 뒤에도
+  // 그대로 남아 있었다 — 서버(getMissionProgress/handleListKnowledge)는
+  // 이미 reset_at 기준으로 정확히 계산해 주는데, 화면이 그 값을 다시
+  // 받아오지 않아 "리셋했는데 그대로 보인다"는 혼동으로 이어졌다.
+  // FinalExamModal의 onReset이 이 둘을 함께 새로고침한다.
+  const handleFinalExamReset = () => {
+    getMissionProgress(character.companionType)
+      .then(setMissionProgress)
+      .catch(() => {})
+    setRecords(null)
+    setRecordsTotal(0)
+    if (recordsOpen) void loadRecords()
+  }
+
   // 지시서(8세 학습 커리큘럼 순서 강제 고정 및 브라우저 기존 데이터
   // 강제 초기화): 8~9살(toddler) 단계의 8문제를 유형별로 몰아서 묻지
   // 않고, 아래 고정된 순서로 하나씩 섞어서 묻는다 — 1번 직접입력,
@@ -984,6 +1001,7 @@ export default function InteractionPanel({
             setFinalExamOpen(false)
             onBuyMoreUses?.()
           }}
+          onReset={handleFinalExamReset}
         />
       )}
 
