@@ -1,5 +1,10 @@
 import type { ProfessionCategory, ProfessionId } from './characterProfessions'
 import { PROFESSION_CATEGORY } from './characterProfessions'
+import buildingPharmacySrc from '../assets/grow/town/buildings/building-pharmacy.webp'
+import buildingReligiousSrc from '../assets/grow/town/buildings/building-religious.webp'
+import buildingFactorySrc from '../assets/grow/town/buildings/building-factory.webp'
+import buildingOtherSrc from '../assets/grow/town/buildings/building-other.webp'
+import buildingCommonSrc from '../assets/grow/town/buildings/building-common.webp'
 
 // 지시서(누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선)에서
 // 건물 유형 목록을 "상가, 회사, 학교, 병원, 약국, 공장, 종교시설,
@@ -50,6 +55,23 @@ const BUILDING_NAME_FIELD_LABEL_BY_TYPE: Record<BuildingType, string> = {
 
 export function buildingNameFieldLabel(buildingType: BuildingType): string {
   return BUILDING_NAME_FIELD_LABEL_BY_TYPE[buildingType]
+}
+
+// 긴급 수정 지시서("건물 그래픽이 지도에 나타나지 않음"): 부지 위에
+// 실제로 그려 넣을 2.5D 건물 이미지. 약국·종교시설·공장·기타(펜션)는
+// 전용 이미지가 있고, 상가·회사·학교·병원은 전용 이미지가 아직 없어
+// 공통 건물 이미지(building-common.webp)로 대체한다 — 지시서 1번
+// "전용 이미지가 없더라도 반드시 공통 건물이 표시되도록 하세요"를
+// 그대로 따른 것이며, 유형 구분은 건물 위 아이콘 배지로 보완한다.
+export const BUILDING_TYPE_IMAGE: Record<BuildingType, string> = {
+  store: buildingCommonSrc,
+  office: buildingCommonSrc,
+  school: buildingCommonSrc,
+  hospital: buildingCommonSrc,
+  pharmacy: buildingPharmacySrc,
+  factory: buildingFactorySrc,
+  religious: buildingReligiousSrc,
+  other: buildingOtherSrc,
 }
 
 // 직업 카테고리별로 가장 먼저 추천할 건물 유형 — 사용자가 직접

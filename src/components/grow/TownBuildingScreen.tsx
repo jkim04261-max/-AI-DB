@@ -6,6 +6,7 @@ import { PROFESSION_LABEL } from '../../data/characterProfessions'
 import {
   BUILDING_TYPES,
   BUILDING_TYPE_ICON,
+  BUILDING_TYPE_IMAGE,
   BUILDING_TYPE_LABEL,
   buildingNameFieldLabel,
   suggestedBuildingType,
@@ -54,6 +55,45 @@ const PLOTS: Plot[] = [
   // 계속 추가하면 된다(30~40개까지 그대로 확장 가능).
 ]
 
+// 긴급 수정 지시서 2번: 건물 지붕 위에 상호명 간판을 띄운 실제 건물
+// 그래픽. 지도(와이드 화면)와 걷기/입장 화면에서 공통으로 쓴다 —
+// 부지 좌표(%)에 bottom-center 기준으로 배치해 건물이 "땅 위에 선"
+// 것처럼 보이게 한다.
+function BuildingMarker({
+  left,
+  top,
+  buildingType,
+  buildingName,
+  dimmed,
+}: {
+  left: number
+  top: number
+  buildingType: BuildingType
+  buildingName: string
+  dimmed?: boolean
+}) {
+  return (
+    <div
+      data-testid="town-building-placed"
+      data-plot-building-type={buildingType}
+      className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-full flex-col items-center ${dimmed ? 'opacity-80' : ''}`}
+      style={{ left: `${left}%`, top: `${top}%` }}
+    >
+      <div
+        data-testid="town-building-placed-sign"
+        className="mb-0.5 max-w-[7rem] truncate rounded-md border border-amber-300/70 bg-amber-100/95 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 shadow sm:text-xs"
+      >
+        {buildingName}
+      </div>
+      <img
+        src={BUILDING_TYPE_IMAGE[buildingType]}
+        alt={`${buildingName} 건물`}
+        className="h-16 w-20 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)] sm:h-20 sm:w-24"
+      />
+    </div>
+  )
+}
+
 export default function TownBuildingScreen({
   companionType,
   address,
@@ -63,6 +103,7 @@ export default function TownBuildingScreen({
   profession,
   customProfessionLabel,
   ageTier,
+  occupiedPlots = [],
 }: {
   companionType: CompanionType
   address: string
@@ -72,6 +113,7 @@ export default function TownBuildingScreen({
   profession: ProfessionId | null
   customProfessionLabel: string | null
   ageTier: AgeTier
+  occupiedPlots?: { plotId: string; buildingType: BuildingType; buildingName: string }[]
 }) {
   const [step, setStep] = useState<BuildingStep>('intro')
   const [progress, setProgress] = useState(0)
@@ -263,6 +305,21 @@ export default function TownBuildingScreen({
                   <img src={townMapSrc} alt="우리 동네 2.5D 지도" className="block h-full w-full object-cover" />
 
                   {PLOTS.map((plot) => {
+                    const occupied = occupiedPlots.find((p) => p.plotId === plot.id)
+                    // 다른 캐릭터가 이미 지은 부지는 빈 부지 핀 대신
+                    // 실제 건물 그래픽을 보여주고, 클릭(재건설)을 막는다
+                    // (지시서 "이미 건설된 부지에는 중복 건설되지 않도록").
+                    if (occupied) {
+                      return (
+                        <BuildingMarker
+                          key={plot.id}
+                          left={plot.left}
+                          top={plot.top}
+                          buildingType={occupied.buildingType}
+                          buildingName={occupied.buildingName}
+                        />
+                      )
+                    }
                     const isSelected = plot.id === selectedPlotId
                     return (
                       <button
@@ -431,15 +488,20 @@ export default function TownBuildingScreen({
             className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-emerald-300/30"
           >
             <img src={townMapSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover" />
-            {/* 목적지 건물 표시 — 선택한 부지 자리에 방금 지은 건물
-                간판을 겹쳐 보여준다. */}
-            <div
-              aria-hidden
-              className="absolute -translate-x-1/2 -translate-y-full rounded-lg border border-amber-300/70 bg-amber-100/95 px-2 py-0.5 text-[11px] font-extrabold text-amber-900 shadow"
-              style={{ left: `${walkTargetLeft}%`, top: `${walkTargetTop}%` }}
-            >
-              {BUILDING_TYPE_ICON[buildingType]} {buildingName || nameFieldLabel}
-            </div>
+            {occupiedPlots.map((plot) => (
+              <BuildingMarker
+                key={plot.plotId}
+                left={PLOTS.find((p) => p.id === plot.plotId)?.left ?? 0}
+                top={PLOTS.find((p) => p.id === plot.plotId)?.top ?? 0}
+                buildingType={plot.buildingType}
+                buildingName={plot.buildingName}
+                dimmed
+              />
+            ))}
+            {/* 목적지 건물 — 방금 지은 건물 그래픽+상호명 간판을 부지
+                자리에 실제로 그려 넣는다(긴급 수정 지시서 1·2번: 완성
+                문구만 표시하지 말고 지도 위에 실제 건물을 배치). */}
+            <BuildingMarker left={walkTargetLeft} top={walkTargetTop} buildingType={buildingType} buildingName={buildingName || nameFieldLabel} />
 
             {/* 지시서(1단계 PR #156) 6번: 제자리 바운스가 아니라 실제
                 좌우 이동 — 도로/인도를 따라 출발지(왼쪽)에서 목적지
@@ -494,6 +556,9 @@ export default function TownBuildingScreen({
                 enteringPhase === 'interior' ? 'opacity-0' : 'opacity-100'
               }`}
             />
+            {enteringPhase !== 'interior' && (
+              <BuildingMarker left={walkTargetLeft} top={walkTargetTop} buildingType={buildingType} buildingName={buildingName || nameFieldLabel} />
+            )}
             <img
               src={interiorSrcFor(buildingType)}
               alt={`${buildingName || nameFieldLabel} 내부`}

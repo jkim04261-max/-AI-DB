@@ -765,12 +765,21 @@ test('a freshly created character with no building yet walks through the full 2.
   await expect(walker).toBeVisible({ timeout: 5000 })
   const startLeft = await walker.evaluate((el) => el.style.left)
   expect(startLeft).toBe('6%')
+
+  // 긴급 수정 지시서: "완성 문구만 표시하지 말고 부지 위에 실제 건물
+  // 그래픽을 배치하라" — 걷는 동안 목적지 부지에 이미 간판이 달린
+  // 실제 건물 그림이 서 있어야 한다("빈 부지 그대로"가 아니어야 함).
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  await expect(page.getByTestId('town-building-placed-sign')).toContainText('강남약국')
+
   await page.getByTestId('town-building-skip-walk-button').click()
 
   // 건물 안으로 들어가면(entering) 완성 안내와 함께, 입력한 상호명이
   // 그대로 메시지에 반영된다.
   await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
   await expect(page.getByTestId('town-building-complete-message')).toContainText('강남약국')
+  // 건물 외부 화면(입장 전)에서도 같은 건물 그래픽이 보인다.
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
   await page.getByTestId('town-building-complete-button').click()
 
   await expect.poll(() => completeBuildingBody).toBeTruthy()
@@ -919,4 +928,76 @@ test('a character that already finished building (even with no building_type/nam
   await page.goto('/grow')
   await expect(page.getByTestId('town-building-screen')).toHaveCount(0)
   await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+})
+
+// 긴급 수정 지시서 4번: "이미 건설된 부지에는 중복 건설되지 않도록
+// 하세요" — 누리가 이미 부지 3(plot-3)에 약국을 지었다면, 아직 건물을
+// 안 지은 두리의 건설 화면 지도에는 그 자리에 빈 부지 핀이 아니라
+// 실제 건물 그래픽이 보여야 하고(새로고침 후에도 유지), 그 부지는
+// 다시 클릭해서 고를 수 없어야 한다.
+test('a plot another character already built on shows the real building (not an empty pin) and cannot be re-selected', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            {
+              id: 1,
+              user_id: USER.id,
+              companion_type: 'nuri',
+              stage: 'child',
+              profession: 'pharmacist',
+              level: 1,
+              exp: 0,
+              address: '서울시 종로구',
+              building_built_at: '2026-11-24T00:00:00.000Z',
+              building_type: 'pharmacy',
+              building_name: '강남약국',
+              building_plot_id: 'plot-3',
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+            {
+              id: 2,
+              user_id: USER.id,
+              companion_type: 'duri',
+              stage: 'child',
+              profession: 'teacher',
+              level: 1,
+              exp: 0,
+              address: '서울시 종로구',
+              building_built_at: null,
+              building_type: null,
+              building_name: null,
+              building_plot_id: null,
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  // 누리는 이미 건물을 지었으니 두리로 전환하면 아직 안 지은 두리의
+  // TownBuildingScreen이 자동으로 뜬다.
+  await page.getByRole('button', { name: '두리' }).click()
+  await expect(page.getByTestId('town-building-screen')).toBeVisible()
+  await page.getByTestId('town-building-pick-location-button').click()
+  await expect(page.getByTestId('town-building-map')).toBeVisible()
+
+  // 부지 3 자리에는 빈 부지 핀(town-building-plot) 대신 누리가 지은
+  // 실제 건물 그래픽+간판이 보인다.
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  await expect(page.getByTestId('town-building-placed-sign')).toContainText('강남약국')
+  // 클릭 가능한 빈 부지는 나머지 4개뿐이다(부지 3 제외).
+  await expect(page.getByTestId('town-building-plot')).toHaveCount(4)
 })

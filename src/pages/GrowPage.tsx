@@ -1469,6 +1469,13 @@ export default function GrowPage() {
           profession={characters.find((c) => c.companionType === buildingFor)?.profession ?? null}
           customProfessionLabel={characters.find((c) => c.companionType === buildingFor)?.customProfessionLabel ?? null}
           ageTier={characters.find((c) => c.companionType === buildingFor)?.ageTier ?? 'toddler'}
+          occupiedPlots={characters
+            .filter((c) => c.companionType !== buildingFor && c.buildingPlotId && c.buildingType && c.buildingName)
+            .map((c) => ({
+              plotId: c.buildingPlotId as string,
+              buildingType: c.buildingType as BuildingType,
+              buildingName: c.buildingName as string,
+            }))}
           onComplete={(building) => void handleBuildingComplete(building)}
         />
       )}
