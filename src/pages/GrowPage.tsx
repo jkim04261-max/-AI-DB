@@ -4,6 +4,7 @@ import { Briefcase, BookOpen } from 'lucide-react'
 import GrowGuideSheet from '../components/grow/GrowGuideSheet'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType } from '../context/GrowthContext'
+import type { BuildingType } from '../data/buildingTypes'
 import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS, type ProfessionId } from '../data/characterProfessions'
 import type { CharacterPose } from '../components/grow/CharacterSprite'
 import GameStage from '../components/grow/GameStage'
@@ -658,13 +659,13 @@ export default function GrowPage() {
   // 이 있으면(방금 온보딩을 마친 신규 캐릭터) 기존 "캐릭터 인사말
   // 말풍선"을 그대로 띄우고, 없으면(아직 건물을 안 지은 기존 캐릭터를
   // 나중에 다시 선택한 경우) 말풍선 없이 조용히 들어간다.
-  const handleBuildingComplete = async () => {
+  const handleBuildingComplete = async (building?: { buildingType: BuildingType; buildingName: string; plotId: string }) => {
     if (!buildingFor) return
     const companionType = buildingFor
     setBuildingSubmitting(true)
     setBuildingError(null)
     try {
-      await completeBuilding(companionType, buildingAddress)
+      await completeBuilding(companionType, buildingAddress, building)
       selectCompanion(companionType)
       setBuildingFor(null)
 
@@ -1465,7 +1466,10 @@ export default function GrowPage() {
           address={buildingAddress}
           submitting={buildingSubmitting}
           error={buildingError}
-          onComplete={() => void handleBuildingComplete()}
+          profession={characters.find((c) => c.companionType === buildingFor)?.profession ?? null}
+          customProfessionLabel={characters.find((c) => c.companionType === buildingFor)?.customProfessionLabel ?? null}
+          ageTier={characters.find((c) => c.companionType === buildingFor)?.ageTier ?? 'toddler'}
+          onComplete={(building) => void handleBuildingComplete(building)}
         />
       )}
     </div>

@@ -469,6 +469,9 @@ function sql(strings, ...values) {
           reset_at: row.reset_at,
           address: row.address ?? null,
           building_built_at: row.building_built_at ?? null,
+          building_type: row.building_type ?? null,
+          building_name: row.building_name ?? null,
+          building_plot_id: row.building_plot_id ?? null,
           created_at: new Date().toISOString(),
         },
       ],
@@ -478,15 +481,20 @@ function sql(strings, ...values) {
   // --- api/character.ts: handleCompleteBuilding — checked before the
   // generic 'UPDATE characters' profession matcher below, since both start
   // with "UPDATE characters" but this one's SET clause is "SET address =
-  // COALESCE(...), building_built_at = COALESCE(...)" and binds
-  // [address, characterId, userId] instead of [profession,
+  // COALESCE(...), building_built_at = COALESCE(...), building_type =
+  // COALESCE(...), building_name = COALESCE(...), building_plot_id =
+  // COALESCE(...)" and binds [address, buildingType, buildingName,
+  // plotId, characterId, userId] instead of [profession,
   // customProfessionLabel, userId, companionType]. ---
   if (has(text, 'UPDATE characters', 'SET address = COALESCE')) {
-    const [address, characterId, userId] = values
+    const [address, buildingType, buildingName, plotId, characterId, userId] = values
     const row = state.characters.find((c) => c.id === characterId && c.user_id === userId)
     if (!row) return Promise.resolve({ rows: [] })
     row.address = address ?? row.address ?? null
     row.building_built_at = row.building_built_at ?? new Date().toISOString()
+    row.building_type = row.building_type ?? buildingType ?? null
+    row.building_name = row.building_name ?? buildingName ?? null
+    row.building_plot_id = row.building_plot_id ?? plotId ?? null
     return Promise.resolve({
       rows: [
         {
@@ -505,6 +513,9 @@ function sql(strings, ...values) {
           reset_at: row.reset_at ?? null,
           address: row.address ?? null,
           building_built_at: row.building_built_at ?? null,
+          building_type: row.building_type ?? null,
+          building_name: row.building_name ?? null,
+          building_plot_id: row.building_plot_id ?? null,
           created_at: new Date().toISOString(),
         },
       ],
@@ -615,6 +626,9 @@ function sql(strings, ...values) {
           reset_at: row.reset_at ?? null,
           address: row.address ?? null,
           building_built_at: row.building_built_at ?? null,
+          building_type: row.building_type ?? null,
+          building_name: row.building_name ?? null,
+          building_plot_id: row.building_plot_id ?? null,
           created_at: now,
         },
       ],
@@ -648,6 +662,9 @@ function sql(strings, ...values) {
               reset_at: row.reset_at ?? null,
               address: row.address ?? null,
               building_built_at: row.building_built_at ?? null,
+              building_type: row.building_type ?? null,
+              building_name: row.building_name ?? null,
+              building_plot_id: row.building_plot_id ?? null,
               created_at: now,
             },
           ]
@@ -677,6 +694,9 @@ function sql(strings, ...values) {
         reset_at: c.reset_at ?? null,
         address: c.address ?? null,
         building_built_at: c.building_built_at ?? null,
+        building_type: c.building_type ?? null,
+        building_name: c.building_name ?? null,
+        building_plot_id: c.building_plot_id ?? null,
         created_at: now,
       }))
     return Promise.resolve({ rows })
@@ -708,6 +728,9 @@ function sql(strings, ...values) {
       reset_at: null,
       address: null,
       building_built_at: null,
+      building_type: null,
+      building_name: null,
+      building_plot_id: null,
     })
     return Promise.resolve({
       rows: [
@@ -727,6 +750,9 @@ function sql(strings, ...values) {
           reset_at: null,
           address: null,
           building_built_at: null,
+          building_type: null,
+          building_name: null,
+          building_plot_id: null,
           created_at: now,
         },
       ],
