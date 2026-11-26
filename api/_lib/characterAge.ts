@@ -237,9 +237,19 @@ function splitMissionsRequiredByType(total: number): Record<MissionType, number>
 // 하나만 쓴다 — 사용자 확인)로 바꾼다. categorize는 0으로 내려
 // 당분간 이 커리큘럼에서 안 쓰지만(코드/DB 값은 그대로 둔다),
 // subjective는 여전히 0이고 합계는 그대로 8(4+2+1+1=8)이다.
+// 지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구): teen(10대)의
+// 10문제를 "①~③ 직접입력(역사/목적/자격) → ④카드맞추기 → ⑤~⑥객관식
+// (전문지식/실무판단, 세트 2문제) → ⑦직접입력(노하우) → ⑧순서맞추기
+// → ⑨분류하기 → ⑩직접입력(핵심지식)"으로 다시 섞는다 — toddler가 이미
+// 쓰는 card_game/sequence_order/categorize 패턴을 그대로 재사용한다.
+// knowhow 3(①②③)+1(⑦)+1(⑩)=5, objective 2(⑤⑥), card_game 1,
+// sequence_order 1, categorize 1 → 합계 10(MISSIONS_REQUIRED_TOTAL_BY_TIER
+// .teen과 동일, 바뀌지 않음). subjective는 여전히 0 — "AI 추천 받기"
+// (스스로 공부하기)도 이 직접입력 자리와 같은 knowhow로 집계한다(PR
+// #154에서 고친 규칙을 그대로 따른다).
 const MISSIONS_REQUIRED_PER_TYPE_OVERRIDE: Partial<Record<AgeTier, Record<MissionType, number>>> = {
   toddler: { knowhow: 4, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 0 },
-  teen: { knowhow: 6, objective: 3, subjective: 0, card_game: 1, sequence_order: 0, categorize: 0 },
+  teen: { knowhow: 5, objective: 2, subjective: 0, card_game: 1, sequence_order: 1, categorize: 1 },
 }
 
 export const MISSIONS_REQUIRED_PER_TYPE_BY_TIER: Record<AgeTier, Record<MissionType, number>> = Object.fromEntries(
