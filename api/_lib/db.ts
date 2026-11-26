@@ -357,7 +357,7 @@ export function ensureCharacterTables() {
       await sql`ALTER TABLE characters DROP CONSTRAINT IF EXISTS characters_building_type_check`
       await sql`
         ALTER TABLE characters ADD CONSTRAINT characters_building_type_check
-        CHECK (building_type IS NULL OR building_type IN ('store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'other'))
+        CHECK (building_type IS NULL OR building_type IN ('store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'restaurant', 'other'))
       `
     })().catch((err) => {
       characterTablesReady = null
@@ -731,7 +731,7 @@ export interface CharacterRow {
   reset_at: string | null
   address: string | null
   building_built_at: string | null
-  building_type: 'store' | 'office' | 'school' | 'hospital' | 'pharmacy' | 'factory' | 'religious' | 'other' | null
+  building_type: 'store' | 'office' | 'school' | 'hospital' | 'pharmacy' | 'factory' | 'religious' | 'restaurant' | 'other' | null
   building_name: string | null
   building_plot_id: string | null
   created_at: string

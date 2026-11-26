@@ -6,17 +6,35 @@ import buildingFactorySrc from '../assets/grow/town/buildings/building-factory.w
 import buildingOtherSrc from '../assets/grow/town/buildings/building-other.webp'
 import buildingCommonSrc from '../assets/grow/town/buildings/building-common.webp'
 
-// 지시서(누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선)에서
-// 건물 유형 목록을 "상가, 회사, 학교, 병원, 약국, 공장, 종교시설,
-// 기타" 8종으로 다시 지정했다 — 1단계(PR #156, 아직 미병합)의 7종
-// (병원·약국 통합, 공공기관 포함)을 대체한다. api/_lib/db.ts의 CHECK
+// 지시서(건물 내부 이미지 9종 삽입)에서 "식당 및 음식점"이 새 건물
+// 유형으로 추가됐다 — 기존 8종(상가·회사·학교·병원·약국·공장·
+// 종교시설·기타)에 restaurant을 더한 9종. api/_lib/db.ts의 CHECK
 // 제약과 api/character.ts의 BUILDING_TYPES 배열과 반드시 같은 값이어야
 // 한다(이 저장소의 기존 "행 타입은 여러 파일에 리터럴로 중복 적는다"
 // 관례). PR #156이 아직 main에 없어 운영에 이 값으로 저장된 캐릭터가
 // 없으므로, 값 집합을 바꿔도 마이그레이션 문제가 없다.
-export type BuildingType = 'store' | 'office' | 'school' | 'hospital' | 'pharmacy' | 'factory' | 'religious' | 'other'
+export type BuildingType =
+  | 'store'
+  | 'office'
+  | 'school'
+  | 'hospital'
+  | 'pharmacy'
+  | 'factory'
+  | 'religious'
+  | 'restaurant'
+  | 'other'
 
-export const BUILDING_TYPES: BuildingType[] = ['store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'other']
+export const BUILDING_TYPES: BuildingType[] = [
+  'store',
+  'office',
+  'school',
+  'hospital',
+  'pharmacy',
+  'factory',
+  'religious',
+  'restaurant',
+  'other',
+]
 
 export const BUILDING_TYPE_LABEL: Record<BuildingType, string> = {
   store: '상가·개인사업장',
@@ -26,6 +44,7 @@ export const BUILDING_TYPE_LABEL: Record<BuildingType, string> = {
   pharmacy: '약국',
   factory: '공장·작업장',
   religious: '종교시설',
+  restaurant: '식당·음식점',
   other: '기타 건물',
 }
 
@@ -37,6 +56,7 @@ export const BUILDING_TYPE_ICON: Record<BuildingType, string> = {
   pharmacy: '💊',
   factory: '🏭',
   religious: '⛪',
+  restaurant: '🍽️',
   other: '🏠',
 }
 
@@ -50,6 +70,7 @@ const BUILDING_NAME_FIELD_LABEL_BY_TYPE: Record<BuildingType, string> = {
   pharmacy: '약국명',
   factory: '공장명',
   religious: '시설명',
+  restaurant: '식당명',
   other: '건물 이름',
 }
 
@@ -71,6 +92,9 @@ export const BUILDING_TYPE_IMAGE: Record<BuildingType, string> = {
   pharmacy: buildingPharmacySrc,
   factory: buildingFactorySrc,
   religious: buildingReligiousSrc,
+  // 식당 전용 외부 그래픽은 아직 없다 — 공통 건물 그래픽으로 대체
+  // (지시서: "전용 이미지가 없더라도 반드시 공통 건물이 표시되도록").
+  restaurant: buildingCommonSrc,
   other: buildingOtherSrc,
 }
 
@@ -88,6 +112,7 @@ const BUILDING_TYPE_BY_PROFESSION_CATEGORY: Record<ProfessionCategory, BuildingT
 export function suggestedBuildingType(profession: ProfessionId | null): BuildingType {
   if (!profession) return 'other'
   if (profession === 'pharmacist') return 'pharmacy'
+  if (profession === 'chef') return 'restaurant'
   const category = PROFESSION_CATEGORY[profession]
   return category ? BUILDING_TYPE_BY_PROFESSION_CATEGORY[category] : 'other'
 }

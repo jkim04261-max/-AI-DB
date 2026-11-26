@@ -780,6 +780,9 @@ test('a freshly created character with no building yet walks through the full 2.
   await expect(page.getByTestId('town-building-complete-message')).toContainText('강남약국')
   // 건물 외부 화면(입장 전)에서도 같은 건물 그래픽이 보인다.
   await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  // 건물 유형(약국)에 맞는 내부 이미지가 실제로 뜬다(지시서: "건물
+  // 내부 이미지 9종 삽입").
+  await expect(page.getByTestId('town-building-interior-image')).toHaveAttribute('data-building-type', 'pharmacy', { timeout: 5000 })
   await page.getByTestId('town-building-complete-button').click()
 
   await expect.poll(() => completeBuildingBody).toBeTruthy()
@@ -882,6 +885,89 @@ test('picking a different plot and building type (학교) sends that exact combi
   expect(completeBuildingBody?.buildingType).toBe('school')
   expect(completeBuildingBody?.buildingName).toBe('누리초등학교')
   expect(completeBuildingBody?.plotId).toBe('plot-5')
+})
+
+// 지시서("건물 내부 이미지 9종 삽입"): 새로 추가된 "식당·음식점"
+// 유형이 선택·저장되고, 입장 시 식당 전용 내부 이미지가 뜨는지 확인.
+test('building a 식당 (restaurant, the newly added 9th building type) shows the restaurant interior on entering', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let completeBuildingBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            {
+              id: 1,
+              user_id: USER.id,
+              companion_type: 'nuri',
+              stage: 'child',
+              profession: 'chef',
+              level: 1,
+              exp: 0,
+              address: '서울시 광진구 자양동',
+              building_built_at: null,
+              building_type: null,
+              building_name: null,
+              building_plot_id: null,
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    if (method === 'POST' && action === 'complete-building') {
+      completeBuildingBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: 'nuri',
+            stage: 'child',
+            profession: 'chef',
+            level: 1,
+            exp: 0,
+            address: completeBuildingBody.address,
+            building_built_at: new Date().toISOString(),
+            building_type: completeBuildingBody.buildingType,
+            building_name: completeBuildingBody.buildingName,
+            building_plot_id: completeBuildingBody.plotId,
+            age_tier: 'toddler',
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('town-building-pick-location-button').click()
+  await page.getByTestId('town-building-plot').first().click()
+  // 요리사 직업이라 기본 추천 유형이 이미 "식당"이다.
+  await expect(page.getByTestId('town-building-type-restaurant')).toHaveAttribute('class', /border-yellow-300/)
+  await page.getByTestId('town-building-name-input').fill('자양청년치킨')
+  await page.getByTestId('town-building-start-button').click()
+  await expect(page.getByTestId('town-building-walking-character')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('town-building-skip-walk-button').click()
+  await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('town-building-complete-message')).toContainText('자양청년치킨')
+  await expect(page.getByTestId('town-building-interior-image')).toHaveAttribute('data-building-type', 'restaurant', { timeout: 5000 })
+  await page.getByTestId('town-building-complete-button').click()
+
+  await expect.poll(() => completeBuildingBody).toBeTruthy()
+  expect(completeBuildingBody?.buildingType).toBe('restaurant')
+  expect(completeBuildingBody?.buildingName).toBe('자양청년치킨')
 })
 
 // 지시서 8번: 이미 건물을 완성한 사용자는 매번 건물 짓기를 반복하지

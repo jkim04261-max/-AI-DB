@@ -15,7 +15,7 @@ import {
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { walkingPortraitSrc } from '../../data/characterWalking'
 import { useImageFallback } from '../../hooks/useImageFallback'
-import { STORE_INTERIOR_SRC, CLASSROOM_INTERIOR_SRC } from '../../data/lifeEventAssets'
+import { buildingInteriorFor } from '../../data/buildingInteriors'
 import townMapSrc from '../../assets/grow/town/town-map-2.5d.webp'
 
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
@@ -23,12 +23,23 @@ const DEFAULT_ADDRESS = '우리 동네'
 
 type BuildingStep = 'intro' | 'wizard' | 'building' | 'walking' | 'entering'
 
-// 지시서(누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선)에서 쓸
-// 건물 내부 이미지 — 학교 유형만 교실(classroom-interior.webp), 나머지
-// 전부는 가게 내부(store-interior.webp)를 공유한다. 병원/약국/공장/
-// 종교시설 전용 내부 이미지는 이 저장소에 아직 없다(PR 설명 참고).
-function interiorSrcFor(type: BuildingType): string {
-  return type === 'school' ? CLASSROOM_INTERIOR_SRC : STORE_INTERIOR_SRC
+// 건물 유형별 내부 이미지(PC/모바일 두 해상도) — 건물 입장
+// 직전(entering 단계)에만 마운트되므로, 선택된 유형 1장만 실제로
+// 네트워크에서 받아온다(지시서 "9장을 한꺼번에 로딩하지 마세요").
+function BuildingInteriorImage({ type, alt }: { type: BuildingType; alt: string }) {
+  const { pc, mobile } = buildingInteriorFor(type)
+  return (
+    <img
+      data-testid="town-building-interior-image"
+      data-building-type={type}
+      src={pc}
+      srcSet={`${mobile} 768w, ${pc} 1280w`}
+      sizes="(max-width: 640px) 100vw, 1400px"
+      loading="lazy"
+      alt={alt}
+      className="absolute inset-0 h-full w-full object-cover"
+    />
+  )
 }
 
 // 지시서 1번: "향후 30~40개 이상의 건물을 배치할 수 있도록 확장
@@ -559,13 +570,18 @@ export default function TownBuildingScreen({
             {enteringPhase !== 'interior' && (
               <BuildingMarker left={walkTargetLeft} top={walkTargetTop} buildingType={buildingType} buildingName={buildingName || nameFieldLabel} />
             )}
-            <img
-              src={interiorSrcFor(buildingType)}
-              alt={`${buildingName || nameFieldLabel} 내부`}
-              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
-                enteringPhase === 'interior' ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
+            {/* 내부 이미지는 문 애니메이션이 시작되는 시점(= 실제 표시
+                직전)에야 마운트한다 — 'exterior' 단계에서는 아예 DOM에
+                없으므로 외부 화면만 보고 바로 나가는 경우 내부 이미지를
+                받아오지 않는다(지시서 "건물 입장 직전에 1장만 미리
+                로딩"). */}
+            {enteringPhase !== 'exterior' && (
+              <div
+                className={`absolute inset-0 transition-opacity duration-500 ${enteringPhase === 'interior' ? 'opacity-100' : 'opacity-0'}`}
+              >
+                <BuildingInteriorImage type={buildingType} alt={`${buildingName || nameFieldLabel} 내부`} />
+              </div>
+            )}
             {/* 문 앞까지 걸어온 캐릭터가 축소·페이드되며 안으로
                 들어가는 연출('door' 단계에서만 보인다). */}
             {enteringPhase !== 'interior' && (
