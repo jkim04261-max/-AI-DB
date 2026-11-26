@@ -26,6 +26,7 @@ import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
 import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import JobEventModal from '../components/grow/JobEventModal'
+import MinigameHub from '../components/grow/MinigameHub'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -79,6 +80,7 @@ const SHEET_TITLE: Record<GameMenuAction, string> = {
   market: '아이템 마켓',
   universalMarket: '만능마켓',
   album: '앨범 · 기록',
+  minigames: '미니게임',
 }
 // PR #49 요청 3: 텍스트 입력 폼(InteractionPanel/ExamPanel)을 대체하지는
 // 않지만("진짜로 학습 내용을 입력해야" 하는 기능이라 로직은 그대로
@@ -1447,6 +1449,7 @@ export default function GrowPage() {
           {openSheet === 'universalMarket' && (
             <UniversalMarket wallet={wallet} initialCategory={marketInitialCategory ?? undefined} onApplyEffect={handleMarketEffect} />
           )}
+          {openSheet === 'minigames' && <MinigameHub ageTier={ageTier} ageNumber={ageNumber} />}
         </BottomSheet>
       )}
 
