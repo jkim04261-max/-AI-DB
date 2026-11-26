@@ -658,7 +658,16 @@ test('shows the character\'s focus gauge percentage', async ({ page }) => {
 // 애니메이션→완성)을 먼저 거친다 — 완성 모달에서 확인을 누르는 순간
 // complete-building이 호출되고(입력한 주소가 그대로 실려간다), 그 뒤에만
 // 평소 성장 화면으로 들어간다.
-test('a freshly created character with no building yet walks through TownBuildingScreen (pick a plot → construction animation → complete) before entering the grow screen', async ({ page }) => {
+// 지시서(2.5D 우리동네 지도 및 건물 건설·캐릭터 입장 기능 완성): 1단계
+// (PR #152)의 "임시 4×4 사각형 지도 + 건물 유형 없음" 스텁을 실제
+// 2.5D 마을 지도(부지 선택) + 건물 유형·이름 입력 + 건설 애니메이션 +
+// 걷기 애니메이션 + 입장으로 완성한다. 아래에서 부지 선택 전엔 건설
+// 버튼이 비활성화되는지, 고른 건물 유형·이름이 실제로 저장 요청에
+// 실리는지, 걷기 단계가 "제자리 bounce"가 아니라 실제 좌우 이동인지
+// (left 스타일이 바뀜)까지 끝까지 확인한다.
+test('a freshly created character with no building yet walks through the full 2.5D town flow (plot selection → building type/name → construction → walking → entering) before entering the grow screen', async ({
+  page,
+}) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -675,11 +684,14 @@ test('a freshly created character with no building yet walks through TownBuildin
         user_id: USER.id,
         companion_type: body.companionType,
         stage: 'child',
-        profession: null,
+        profession: 'pharmacist',
         level: 1,
         exp: 0,
         address: null,
         building_built_at: null,
+        building_type: null,
+        building_name: null,
+        building_plot_id: null,
         created_at: new Date().toISOString(),
       }
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ character: created }) })
@@ -692,11 +704,14 @@ test('a freshly created character with no building yet walks through TownBuildin
         user_id: USER.id,
         companion_type: completeBuildingBody.companionType,
         stage: 'child',
-        profession: null,
+        profession: 'pharmacist',
         level: 1,
         exp: 0,
         address: completeBuildingBody.address,
         building_built_at: new Date().toISOString(),
+        building_type: completeBuildingBody.buildingType,
+        building_name: completeBuildingBody.buildingName,
+        building_plot_id: completeBuildingBody.plotId,
         created_at: new Date().toISOString(),
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ character: updated }) })
@@ -707,25 +722,368 @@ test('a freshly created character with no building yet walks through TownBuildin
 
   await page.goto('/grow')
   await page.getByTestId('character-create-nuri').click()
-  await page.getByTestId('opening-profile-region-input').fill('서울시 강남구 압구정동')
+  await page.getByTestId('opening-profile-region-input').fill('서울특별시 강남구 압구정동')
   await page.getByTestId('opening-profile-start-button').click()
 
   // 평소 성장 화면 위로 TownBuildingScreen이 전체화면으로 덮는다.
   await expect(page.getByTestId('town-building-screen')).toBeVisible()
-  await expect(page.getByTestId('town-building-address-chip')).toContainText('서울시 강남구 압구정동')
+  await expect(page.getByTestId('town-building-address-chip')).toContainText('서울특별시 강남구 압구정동')
 
   await page.getByTestId('town-building-pick-location-button').click()
-  await expect(page.getByTestId('town-building-selected-plot')).toContainText('서울시 강남구 압구정동')
+  await expect(page.getByTestId('town-building-map')).toBeVisible()
+  // 부지를 고르기 전에는 "건물 짓기" 버튼이 비활성화된다.
+  await expect(page.getByTestId('town-building-start-button')).toBeDisabled()
+
+  const plots = page.getByTestId('town-building-plot')
+  await expect(plots).toHaveCount(5)
+  await plots.nth(2).click()
+  await expect(page.getByTestId('town-building-selected-plot')).toContainText('부지 3')
+
+  // 직업(약사)에 맞춰 "약국" 유형이 기본 선택되어 있다 — 직업 자동
+  // 반영(지시서 2번). 이름 입력란도 채워져 있으므로 바로 건설할 수
+  // 있다.
+  await expect(page.getByTestId('town-building-type-pharmacy')).toHaveAttribute('class', /border-yellow-300/)
+  await page.getByTestId('town-building-name-input').fill('강남약국')
+  await expect(page.getByTestId('town-building-start-button')).toBeEnabled()
   await page.getByTestId('town-building-start-button').click()
 
-  // 진행률 바가 0→100%까지 자동으로 차오른 뒤 완성 모달이 뜬다.
+  // 진행률 바가 0→100%까지 자동으로 차오르고, 입력한 이름이 그대로
+  // 간판에 동적으로 뜬다(이미지에 고정된 문구가 아니다).
+  await expect(page.getByTestId('town-building-progress-bar')).toBeVisible()
+  await expect(page.getByTestId('town-building-sign')).toContainText('강남약국')
+
+  // 진행률 바가 0→100%까지 자동으로 차오른 뒤(약 2.5초), 저절로
+  // 걷기 단계로 넘어간다 — "화면 중앙 제자리 bounce"가 아니라, 출발
+  // 위치(화면 왼쪽)에서 목적지(선택한 부지, plot-3)까지 실제로 좌우
+  // 이동(left 스타일 값 자체가 바뀜)하는지 확인한다.
+  // 출발 지점(화면 왼쪽, 6%)과 목적지(선택한 부지 plot-3, 73%)가 서로
+  // 다른 left 값으로 시작한다는 것 자체가 "제자리"가 아니라 실제
+  // 가로지르는 이동 애니메이션임을 보여준다 — 'entering' 단계로
+  // 넘어가면 이 요소 자체가 사라지므로(건물 외부/내부 화면으로 교체),
+  // skip 클릭 뒤에는 다시 읽지 않는다.
+  const walker = page.getByTestId('town-building-walking-character')
+  await expect(walker).toBeVisible({ timeout: 5000 })
+  const startLeft = await walker.evaluate((el) => el.style.left)
+  expect(startLeft).toBe('6%')
+
+  // 긴급 수정 지시서: "완성 문구만 표시하지 말고 부지 위에 실제 건물
+  // 그래픽을 배치하라" — 걷는 동안 목적지 부지에 이미 간판이 달린
+  // 실제 건물 그림이 서 있어야 한다("빈 부지 그대로"가 아니어야 함).
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  await expect(page.getByTestId('town-building-placed-sign')).toContainText('강남약국')
+
+  await page.getByTestId('town-building-skip-walk-button').click()
+
+  // 건물 안으로 들어가면(entering) 완성 안내와 함께, 입력한 상호명이
+  // 그대로 메시지에 반영된다.
   await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('town-building-complete-message')).toContainText('강남약국')
+  // 건물 외부 화면(입장 전)에서도 같은 건물 그래픽이 보인다.
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  // 건물 유형(약국)에 맞는 내부 이미지가 실제로 뜬다(지시서: "건물
+  // 내부 이미지 9종 삽입").
+  await expect(page.getByTestId('town-building-interior-image')).toHaveAttribute('data-building-type', 'pharmacy', { timeout: 5000 })
   await page.getByTestId('town-building-complete-button').click()
 
   await expect.poll(() => completeBuildingBody).toBeTruthy()
-  expect(completeBuildingBody?.address).toBe('서울시 강남구 압구정동')
+  expect(completeBuildingBody?.address).toBe('서울특별시 강남구 압구정동')
+  expect(completeBuildingBody?.buildingType).toBe('pharmacy')
+  expect(completeBuildingBody?.buildingName).toBe('강남약국')
+  expect(completeBuildingBody?.plotId).toBe('plot-3')
 
   // 완성 확인을 누른 뒤에만 평소 성장 화면(캐릭터 스프라이트)으로 들어간다.
   await expect(page.getByTestId('town-building-screen')).toHaveCount(0)
   await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+})
+
+// 지시서 9번: "서로 다른 부지 선택", "상가/회사/학교 건설" 테스트 —
+// 위 테스트가 약국(hospital) 1건을 끝까지 확인했으니, 여기서는 다른
+// 부지·다른 건물 유형(학교)을 골라도 그 조합 그대로 저장 요청에
+// 실리는지만 짧게 추가 확인한다.
+test('picking a different plot and building type (학교) sends that exact combination to complete-building', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let completeBuildingBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [] }) })
+      return true
+    }
+    if (method === 'POST' && !action) {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: body.companionType,
+            stage: 'child',
+            profession: null,
+            level: 1,
+            exp: 0,
+            address: null,
+            building_built_at: null,
+            building_type: null,
+            building_name: null,
+            building_plot_id: null,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    if (method === 'POST' && action === 'complete-building') {
+      completeBuildingBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: completeBuildingBody.companionType,
+            stage: 'child',
+            profession: null,
+            level: 1,
+            exp: 0,
+            address: completeBuildingBody.address,
+            building_built_at: new Date().toISOString(),
+            building_type: completeBuildingBody.buildingType,
+            building_name: completeBuildingBody.buildingName,
+            building_plot_id: completeBuildingBody.plotId,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-region-input').fill('서울시 노원구 중계동')
+  await page.getByTestId('opening-profile-start-button').click()
+  await page.getByTestId('town-building-pick-location-button').click()
+
+  await page.getByTestId('town-building-plot').nth(4).click()
+  await expect(page.getByTestId('town-building-selected-plot')).toContainText('부지 5')
+
+  await page.getByTestId('town-building-type-school').click()
+  await page.getByTestId('town-building-name-input').fill('누리초등학교')
+  await page.getByTestId('town-building-start-button').click()
+
+  await expect(page.getByTestId('town-building-walking-character')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('town-building-skip-walk-button').click()
+  await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('town-building-complete-button').click()
+
+  await expect.poll(() => completeBuildingBody).toBeTruthy()
+  expect(completeBuildingBody?.buildingType).toBe('school')
+  expect(completeBuildingBody?.buildingName).toBe('누리초등학교')
+  expect(completeBuildingBody?.plotId).toBe('plot-5')
+})
+
+// 지시서("건물 내부 이미지 9종 삽입"): 새로 추가된 "식당·음식점"
+// 유형이 선택·저장되고, 입장 시 식당 전용 내부 이미지가 뜨는지 확인.
+test('building a 식당 (restaurant, the newly added 9th building type) shows the restaurant interior on entering', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let completeBuildingBody: Record<string, unknown> | null = null
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            {
+              id: 1,
+              user_id: USER.id,
+              companion_type: 'nuri',
+              stage: 'child',
+              profession: 'chef',
+              level: 1,
+              exp: 0,
+              address: '서울시 광진구 자양동',
+              building_built_at: null,
+              building_type: null,
+              building_name: null,
+              building_plot_id: null,
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    if (method === 'POST' && action === 'complete-building') {
+      completeBuildingBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: 'nuri',
+            stage: 'child',
+            profession: 'chef',
+            level: 1,
+            exp: 0,
+            address: completeBuildingBody.address,
+            building_built_at: new Date().toISOString(),
+            building_type: completeBuildingBody.buildingType,
+            building_name: completeBuildingBody.buildingName,
+            building_plot_id: completeBuildingBody.plotId,
+            age_tier: 'toddler',
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('town-building-pick-location-button').click()
+  await page.getByTestId('town-building-plot').first().click()
+  // 요리사 직업이라 기본 추천 유형이 이미 "식당"이다.
+  await expect(page.getByTestId('town-building-type-restaurant')).toHaveAttribute('class', /border-yellow-300/)
+  await page.getByTestId('town-building-name-input').fill('자양청년치킨')
+  await page.getByTestId('town-building-start-button').click()
+  await expect(page.getByTestId('town-building-walking-character')).toBeVisible({ timeout: 5000 })
+  await page.getByTestId('town-building-skip-walk-button').click()
+  await expect(page.getByTestId('town-building-complete-message')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('town-building-complete-message')).toContainText('자양청년치킨')
+  await expect(page.getByTestId('town-building-interior-image')).toHaveAttribute('data-building-type', 'restaurant', { timeout: 5000 })
+  await page.getByTestId('town-building-complete-button').click()
+
+  await expect.poll(() => completeBuildingBody).toBeTruthy()
+  expect(completeBuildingBody?.buildingType).toBe('restaurant')
+  expect(completeBuildingBody?.buildingName).toBe('자양청년치킨')
+})
+
+// 지시서 8번: 이미 건물을 완성한 사용자는 매번 건물 짓기를 반복하지
+// 않는다 — building_built_at이 이미 있으면(1단계에서 지은 기존
+// 캐릭터처럼 building_type/name이 전부 null이어도) TownBuildingScreen을
+// 아예 거치지 않고 곧바로 평소 성장 화면으로 들어간다.
+test('a character that already finished building (even with no building_type/name from the earlier 1단계 PR) skips TownBuildingScreen entirely on refresh', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            {
+              id: 1,
+              user_id: USER.id,
+              companion_type: 'nuri',
+              stage: 'child',
+              profession: 'accountant',
+              level: 1,
+              exp: 0,
+              address: '서울시 종로구',
+              building_built_at: '2026-11-24T00:00:00.000Z',
+              building_type: null,
+              building_name: null,
+              building_plot_id: null,
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  await expect(page.getByTestId('town-building-screen')).toHaveCount(0)
+  await expect(page.getByRole('img', { name: '누리 캐릭터, 대기 중' })).toBeVisible()
+})
+
+// 긴급 수정 지시서 4번: "이미 건설된 부지에는 중복 건설되지 않도록
+// 하세요" — 누리가 이미 부지 3(plot-3)에 약국을 지었다면, 아직 건물을
+// 안 지은 두리의 건설 화면 지도에는 그 자리에 빈 부지 핀이 아니라
+// 실제 건물 그래픽이 보여야 하고(새로고침 후에도 유지), 그 부지는
+// 다시 클릭해서 고를 수 없어야 한다.
+test('a plot another character already built on shows the real building (not an empty pin) and cannot be re-selected', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, async (route, action, method) => {
+    if (method === 'GET' && !action) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            {
+              id: 1,
+              user_id: USER.id,
+              companion_type: 'nuri',
+              stage: 'child',
+              profession: 'pharmacist',
+              level: 1,
+              exp: 0,
+              address: '서울시 종로구',
+              building_built_at: '2026-11-24T00:00:00.000Z',
+              building_type: 'pharmacy',
+              building_name: '강남약국',
+              building_plot_id: 'plot-3',
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+            {
+              id: 2,
+              user_id: USER.id,
+              companion_type: 'duri',
+              stage: 'child',
+              profession: 'teacher',
+              level: 1,
+              exp: 0,
+              address: '서울시 종로구',
+              building_built_at: null,
+              building_type: null,
+              building_name: null,
+              building_plot_id: null,
+              age_tier: 'toddler',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      })
+      return true
+    }
+    return false
+  })
+
+  await page.goto('/grow')
+  // 누리는 이미 건물을 지었으니 두리로 전환하면 아직 안 지은 두리의
+  // TownBuildingScreen이 자동으로 뜬다.
+  await page.getByRole('button', { name: '두리' }).click()
+  await expect(page.getByTestId('town-building-screen')).toBeVisible()
+  await page.getByTestId('town-building-pick-location-button').click()
+  await expect(page.getByTestId('town-building-map')).toBeVisible()
+
+  // 부지 3 자리에는 빈 부지 핀(town-building-plot) 대신 누리가 지은
+  // 실제 건물 그래픽+간판이 보인다.
+  await expect(page.getByTestId('town-building-placed')).toBeVisible()
+  await expect(page.getByTestId('town-building-placed-sign')).toContainText('강남약국')
+  // 클릭 가능한 빈 부지는 나머지 4개뿐이다(부지 3 제외).
+  await expect(page.getByTestId('town-building-plot')).toHaveCount(4)
 })

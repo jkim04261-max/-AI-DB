@@ -186,6 +186,8 @@ export default function GameStage({
         <img
           data-testid="illustrated-scene-background"
           src={scene.backgroundImageSrc}
+          srcSet={scene.backgroundImageSrcSet}
+          sizes={scene.backgroundImageSrcSet ? scene.backgroundImageSizes ?? '100vw' : undefined}
           alt=""
           aria-hidden
           className="absolute inset-0 z-0 h-full w-full object-cover"

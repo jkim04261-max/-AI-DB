@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import type { ProfessionId } from '../data/characterProfessions'
+import type { BuildingType } from '../data/buildingTypes'
 import type { AgeTier } from '../data/characterAge'
 import type { MissionType, MissionProgress } from '../data/characterMissions'
 import type { KnowledgeCategory } from '../data/knowledgeCategories'
@@ -94,6 +95,13 @@ export interface Character {
   // 수 있다.
   address: string | null
   buildingBuilt: boolean
+  // 지시서(2.5D 우리동네 지도 및 건물 건설·캐릭터 입장 기능 완성):
+  // 1단계(PR #152)가 미뤘던 건물 유형·이름·부지 — buildingBuilt가
+  // true여도 1단계에서만 건물을 지은 기존 캐릭터는 이 셋이 전부
+  // null일 수 있다(화면은 그 경우 범용 라벨로 대체한다).
+  buildingType: BuildingType | null
+  buildingName: string | null
+  buildingPlotId: string | null
   createdAt: string
 }
 
@@ -204,7 +212,11 @@ interface GrowthContextValue {
   purchaseKnowledgeValidationTicket: () => Promise<TicketBalances>
   createCharacter: (companionType: CompanionType) => Promise<Character>
   setProfession: (companionType: CompanionType, profession: ProfessionId, customProfessionLabel?: string) => Promise<Character>
-  completeBuilding: (companionType: CompanionType, address?: string) => Promise<void>
+  completeBuilding: (
+    companionType: CompanionType,
+    address?: string,
+    building?: { buildingType: BuildingType; buildingName: string; plotId: string },
+  ) => Promise<void>
   verifyKnowledge: (
     companionType: CompanionType,
     title: string,
@@ -365,6 +377,9 @@ interface CharacterApiRow {
   focus_percent: number
   address?: string | null
   building_built_at?: string | null
+  building_type?: BuildingType | null
+  building_name?: string | null
+  building_plot_id?: string | null
   created_at: string
 }
 
@@ -385,6 +400,9 @@ function fromApiRow(row: CharacterApiRow): Character {
     // 항상 이 키를 명시적으로 포함하므로(생성 직후엔 null), 진짜 "아직
     // 안 지음"은 명시적 null로만 구분된다.
     buildingBuilt: row.building_built_at === undefined ? true : row.building_built_at !== null,
+    buildingType: row.building_type ?? null,
+    buildingName: row.building_name ?? null,
+    buildingPlotId: row.building_plot_id ?? null,
     createdAt: row.created_at,
   }
 }
@@ -537,11 +555,22 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
   // 건설 애니메이션을 마친 뒤 한 번 호출된다 — 서버가 멱등하게 처리하므로
   // (이미 지었으면 building_built_at을 덮어쓰지 않음) 여러 번 불려도
   // 안전하다.
-  const completeBuilding = useCallback(async (companionType: CompanionType, address?: string) => {
+  const completeBuilding = useCallback(
+    async (
+      companionType: CompanionType,
+      address?: string,
+      building?: { buildingType: BuildingType; buildingName: string; plotId: string },
+    ) => {
     const res = await fetch('/api/character?action=complete-building', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companionType, address }),
+      body: JSON.stringify({
+        companionType,
+        address,
+        buildingType: building?.buildingType,
+        buildingName: building?.buildingName,
+        plotId: building?.plotId,
+      }),
     })
     const data = (await res.json().catch(() => ({}))) as { character?: CharacterApiRow; error?: string }
     if (!res.ok || !data.character) {
@@ -549,7 +578,9 @@ export function GrowthProvider({ children }: { children: ReactNode }) {
     }
     const updated = fromApiRow(data.character)
     setCharacters((prev) => prev.map((c) => (c.companionType === companionType ? updated : c)))
-  }, [])
+    },
+    [],
+  )
 
   // Ephemeral — never persists anything, just runs the Gemini check. Only
   // saveKnowledge below writes to the DB, and only once the user confirms.

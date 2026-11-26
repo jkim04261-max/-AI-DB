@@ -30,6 +30,12 @@ export interface SceneTheme {
   // 두리가 이미 한 장에 같이 그려진 완성본이라, 캐릭터 SVG는 이 모드에서
   // 렌더링하지 않고 그림 위에 선택 표시·말풍선·기분 이모지만 얹는다.
   backgroundImageSrc?: string
+  // 지시서("누리AI 키우기 메인 화면 직업별 내부 배경 연동"): PC/모바일
+  // 두 해상도로 최적화된 자산이 있을 때만 설정 — GameStage가 <img
+  // srcSet>으로 화면 크기에 맞는 파일만 받게 한다(미지정 시 기존처럼
+  // backgroundImageSrc 한 장만 쓴다).
+  backgroundImageSrcSet?: string
+  backgroundImageSizes?: string
 }
 
 // PR #50 긴급 재작업: 사용자가 제공한 실제 고품질 일러스트를 기본(로비)

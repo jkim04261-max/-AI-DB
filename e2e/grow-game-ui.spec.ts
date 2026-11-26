@@ -855,6 +855,36 @@ test('the default stage shows the real illustrated image, not a CSS-drawn room w
   await expect(page.locator('svg.grow-sprite-pose-idle')).toHaveCount(0)
 })
 
+// 지시서("누리AI 키우기 메인 화면 직업별 내부 배경 연동"): 건물을 지은
+// 캐릭터는 기본 화면 배경이 마법진 도서관이 아니라 그 건물의 내부
+// 이미지여야 한다 — 건물 완성 화면(TownBuildingScreen)과 같은 자산을
+// 재사용하는지는 srcSet에 담긴 파일명으로 확인한다.
+test('a character who has built a pharmacy sees the pharmacy interior as the default stage background, not the fantasy library', async ({
+  page,
+}) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  await mockCharacterApi(page, {
+    characters: [
+      {
+        ...NURI_SINGER,
+        profession: 'pharmacist',
+        building_built_at: '2026-11-24T00:00:00.000Z',
+        building_type: 'pharmacy',
+        building_name: '한강약국',
+        building_plot_id: 'plot-1',
+      },
+    ],
+  })
+
+  await page.goto('/grow')
+
+  const bg = page.getByTestId('illustrated-scene-background')
+  await expect(bg).toBeVisible()
+  await expect(bg).toHaveAttribute('srcset', /pharmacy-interior/)
+})
+
 // PR #50 긴급 재작업: 기본(로비) 배경은 이제 제공받은 실제 일러스트라
 // 소품 자체가 없다(그림 안에 이미 다 그려져 있음) — 소품 클릭 인터랙션은
 // 전용 아트가 없는 마켓 구매 배경(사무실 등 CSS 기반 8곳)에서만

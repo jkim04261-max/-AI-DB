@@ -329,6 +329,36 @@ export function ensureCharacterTables() {
       await sql`
         ALTER TABLE characters ADD COLUMN IF NOT EXISTS building_built_at TIMESTAMPTZ
       `
+
+      // 지시서(2.5D 우리동네 지도 및 건물 건설·캐릭터 입장 기능 완성):
+      // 1단계(PR #152)가 미루었던 "직업별 건물 유형 분기·상호명 저장"을
+      // 이번에 추가한다. building_plot_id는 지도 위 어느 부지를
+      // 골랐는지(클라이언트가 정의한 고정 부지 id 문자열, 예:
+      // "plot-3") — 서버는 그 값을 그대로 신뢰해 저장만 하고 의미를
+      // 해석하지 않는다(부지 배치 자체는 지도 쪽 상수라 DB가 몰라도
+      // 된다). building_type은 8종 중 하나로 CHECK 제약을 건다(지시서
+      // "누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선"에서
+      // 병원·약국을 분리하고 공공기관 대신 종교시설을 추가 — 이 컬럼이
+      // 아직 PR #156으로만 존재하고 main에 병합되지 않아 운영에 저장된
+      // 값이 없으므로 마이그레이션 없이 값 집합만 바꿔도 안전하다).
+      // building_name은 상호명/회사명/학교명 등 사용자 입력 간판
+      // 문구 — 자유 텍스트라 제약 없음. 셋 다 nullable이라 기존
+      // (이미 건물을 지은) 캐릭터 행에는 영향이 없다 — 1단계에서 이미
+      // 건물을 지은 캐릭터는 이 세 값이 전부 NULL인 채로 계속
+      // "건물을 지었다"(building_built_at not null)로 남고, 화면은
+      // 건물 유형/이름이 없을 때 범용 라벨로 대체한다.
+      await sql`ALTER TABLE characters ADD COLUMN IF NOT EXISTS building_type TEXT`
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS building_name TEXT
+      `
+      await sql`
+        ALTER TABLE characters ADD COLUMN IF NOT EXISTS building_plot_id TEXT
+      `
+      await sql`ALTER TABLE characters DROP CONSTRAINT IF EXISTS characters_building_type_check`
+      await sql`
+        ALTER TABLE characters ADD CONSTRAINT characters_building_type_check
+        CHECK (building_type IS NULL OR building_type IN ('store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'restaurant', 'other'))
+      `
     })().catch((err) => {
       characterTablesReady = null
       throw err
@@ -701,6 +731,9 @@ export interface CharacterRow {
   reset_at: string | null
   address: string | null
   building_built_at: string | null
+  building_type: 'store' | 'office' | 'school' | 'hospital' | 'pharmacy' | 'factory' | 'religious' | 'restaurant' | 'other' | null
+  building_name: string | null
+  building_plot_id: string | null
   created_at: string
 }
 

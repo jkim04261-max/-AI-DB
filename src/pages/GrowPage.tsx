@@ -4,6 +4,7 @@ import { Briefcase, BookOpen } from 'lucide-react'
 import GrowGuideSheet from '../components/grow/GrowGuideSheet'
 import { useAuth } from '../context/AuthContext'
 import { useGrowth, type CompanionType } from '../context/GrowthContext'
+import type { BuildingType } from '../data/buildingTypes'
 import { PROFESSION_LABEL, EXAM_SUPPORTED_PROFESSIONS, type ProfessionId } from '../data/characterProfessions'
 import type { CharacterPose } from '../components/grow/CharacterSprite'
 import GameStage from '../components/grow/GameStage'
@@ -31,6 +32,7 @@ import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
+import { sceneForBuilding } from '../data/buildingInteriors'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
@@ -658,13 +660,13 @@ export default function GrowPage() {
   // 이 있으면(방금 온보딩을 마친 신규 캐릭터) 기존 "캐릭터 인사말
   // 말풍선"을 그대로 띄우고, 없으면(아직 건물을 안 지은 기존 캐릭터를
   // 나중에 다시 선택한 경우) 말풍선 없이 조용히 들어간다.
-  const handleBuildingComplete = async () => {
+  const handleBuildingComplete = async (building?: { buildingType: BuildingType; buildingName: string; plotId: string }) => {
     if (!buildingFor) return
     const companionType = buildingFor
     setBuildingSubmitting(true)
     setBuildingError(null)
     try {
-      await completeBuilding(companionType, buildingAddress)
+      await completeBuilding(companionType, buildingAddress, building)
       selectCompanion(companionType)
       setBuildingFor(null)
 
@@ -1183,11 +1185,19 @@ export default function GrowPage() {
                     ageTier={ageTier}
                     ageNumber={ageNumber}
                     outfitId={inventory.equippedOutfit[character.companionType]}
-                    // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
-                    // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
-                    // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
-                    // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
-                    backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
+                    // 지시서("누리AI 키우기 메인 화면 직업별 내부 배경
+                    // 연동"): 마켓에서 다른 배경을 사서 장착하지 않은
+                    // 기본 상태('lobby')에서만, 이 캐릭터가 지은 건물의
+                    // 내부 이미지로 바꿔 보여준다 — 건물 정보가 없으면
+                    // sceneForBuilding(null)이 그대로 기존 마법진 도서관
+                    // (DEFAULT_SCENE)을 돌려주므로 기존 사용자는 화면이
+                    // 전혀 바뀌지 않는다. 마켓에서 산 배경을 장착한
+                    // 경우는 기존처럼 그 배경을 우선한다(이 기능과 무관).
+                    backgroundOverride={
+                      inventory.equippedBackground === 'lobby'
+                        ? sceneForBuilding(character.buildingType)
+                        : BACKGROUND_SCENES[inventory.equippedBackground]
+                    }
                   />
                   {xpPopup !== null && (
                     <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl">
@@ -1465,7 +1475,17 @@ export default function GrowPage() {
           address={buildingAddress}
           submitting={buildingSubmitting}
           error={buildingError}
-          onComplete={() => void handleBuildingComplete()}
+          profession={characters.find((c) => c.companionType === buildingFor)?.profession ?? null}
+          customProfessionLabel={characters.find((c) => c.companionType === buildingFor)?.customProfessionLabel ?? null}
+          ageTier={characters.find((c) => c.companionType === buildingFor)?.ageTier ?? 'toddler'}
+          occupiedPlots={characters
+            .filter((c) => c.companionType !== buildingFor && c.buildingPlotId && c.buildingType && c.buildingName)
+            .map((c) => ({
+              plotId: c.buildingPlotId as string,
+              buildingType: c.buildingType as BuildingType,
+              buildingName: c.buildingName as string,
+            }))}
+          onComplete={(building) => void handleBuildingComplete(building)}
         />
       )}
     </div>
