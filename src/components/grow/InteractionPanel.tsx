@@ -288,29 +288,59 @@ export default function InteractionPanel({
   // 자리까지 함께 가리킨다.
   const toddlerQuestionNumber = Math.min((missionProgress?.confirmedTotal ?? 0) + 1, 8)
 
-  // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)도 toddler와
-  // 같은 원리의 고정 순서 흐름이다 — "①직접입력 3 → ②직업 카드 맞추기
-  // 1 → ③직접입력 1 → ④객관식 3 → ⑤개인 꿀팁/노하우 2"(합계 10,
-  // characterAge.ts의 teen override와 동일). ①·③·⑤는 모두 같은
-  // knowhow 버킷을 나눠 채우므로, 그 안에서 몇 번째 구간인지는
-  // knowhow.confirmed의 누적값(0→3→4→6)으로만 구분한다 — 토글 상태를
-  // 따로 저장하지 않으므로(toddler와 동일한 설계) 새로고침·패널
-  // 재오픈 후에도 항상 정확한 단계로 복원된다.
+  // 지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구): teen(10대)
+  // 10문제를 toddler와 똑같은 "고정 위치 순서 + 유형별 발생 횟수" 알고리즘
+  // 으로 다시 섞는다 — "①~③직접입력(역사·목적·자격) → ④카드맞추기 →
+  // ⑤~⑥객관식(전문지식·실무판단 세트) → ⑦직접입력(노하우) → ⑧순서맞추기
+  // → ⑨분류하기 → ⑩직접입력(핵심지식)"(합계 10, characterAge.ts의 teen
+  // override와 동일). toddlerStep과 완전히 같은 이유로(토글 상태를
+  // 따로 저장하지 않음) 새로고침·재로그인 후에도 missionProgress만으로
+  // 항상 정확한 단계로 복원된다.
   const isTeenStagedFlow = characterAgeTier === 'teen'
-  type TeenStep = 'direct1' | 'card_game' | 'direct2' | 'objective' | 'direct3' | 'complete'
-  const TEEN_DIRECT1_COUNT = 3
-  const TEEN_DIRECT1_PLUS_DIRECT2_COUNT = 4
+  type TeenStep = 'direct' | 'multiple' | 'card_game' | 'sequence_order' | 'categorize' | 'complete'
+  const TEEN_STEP_SEQUENCE: Exclude<TeenStep, 'complete'>[] = [
+    'direct',
+    'direct',
+    'direct',
+    'card_game',
+    'multiple',
+    'multiple',
+    'direct',
+    'sequence_order',
+    'categorize',
+    'direct',
+  ]
+  const TEEN_STEP_MISSION_TYPE: Record<Exclude<TeenStep, 'complete'>, MissionType> = {
+    direct: 'knowhow',
+    multiple: 'objective',
+    card_game: 'card_game',
+    sequence_order: 'sequence_order',
+    categorize: 'categorize',
+  }
   const teenStep: TeenStep = (() => {
-    if (!missionProgress) return 'direct1'
-    const { knowhow, objective, card_game } = missionProgress.byType
-    if (knowhow.confirmed < TEEN_DIRECT1_COUNT) return 'direct1'
-    if (card_game.confirmed < card_game.required) return 'card_game'
-    if (knowhow.confirmed < TEEN_DIRECT1_PLUS_DIRECT2_COUNT) return 'direct2'
-    if (objective.confirmed < objective.required) return 'objective'
-    if (knowhow.confirmed < knowhow.required) return 'direct3'
+    if (!missionProgress) return 'direct'
+    const fallback = { confirmed: 0, required: 0 }
+    const occurrenceSoFar: Partial<Record<MissionType, number>> = {}
+    for (const step of TEEN_STEP_SEQUENCE) {
+      const missionType = TEEN_STEP_MISSION_TYPE[step]
+      const occurrence = (occurrenceSoFar[missionType] ?? 0) + 1
+      occurrenceSoFar[missionType] = occurrence
+      const progress = missionProgress.byType[missionType] ?? fallback
+      if (occurrence > progress.required) continue
+      if (occurrence > progress.confirmed) return step
+    }
     return 'complete'
   })()
-  const isTeenDirectStep = isTeenStagedFlow && (teenStep === 'direct1' || teenStep === 'direct2' || teenStep === 'direct3')
+  const isTeenDirectStep = isTeenStagedFlow && teenStep === 'direct'
+  // 직접입력 단계(①②③⑦⑩)마다 주제가 다르므로(역사→목적→자격→노하우→
+  // 핵심지식), 지금이 knowhow의 몇 번째 확정인지(1~5)로 그 주제를
+  // 고른다 — TEEN_STEP_SEQUENCE에서 knowhow가 등장하는 순서와 정확히
+  // 같은 순서다.
+  const TEEN_DIRECT_TOPIC_LABELS = ['직업의 역사', '직업의 목적', '필요한 능력과 자격', '실무 경험과 노하우', '직업 핵심 지식']
+  const teenDirectTopicIndex = Math.min(Math.max((missionProgress?.byType.knowhow.confirmed ?? 0), 0), TEEN_DIRECT_TOPIC_LABELS.length - 1)
+  const teenDirectTopicLabel = TEEN_DIRECT_TOPIC_LABELS[teenDirectTopicIndex]
+  // toddlerQuestionNumber와 같은 원리 — 지금이 10문제 중 몇 번째인지.
+  const teenQuestionNumber = Math.min((missionProgress?.confirmedTotal ?? 0) + 1, 10)
   // 선택지에서 고르기(칩)/직접 입력하기 카드를 보여줄지 — toddler는
   // 직접입력 하위 단계(①)에서만, teen은 직접입력 하위 단계(①·③·⑤)
   // 에서만.
@@ -832,18 +862,17 @@ export default function InteractionPanel({
           금지, PR #62 요청 2번). 지시서: 버튼 문구를 "{name} 스스로
           공부하기"에서 "✨ 예시 만들어주기"로 바꾸고, 버튼 스타일도 더
           차분한 톤으로 바꿨다 — 기능(disabled 조건, handleSelfStudy
-          호출)은 그대로다. 지시서(10대 커리큘럼: 직업 카드 맞추기
-          통합): teen의 고정 10단계 커리큘럼에는 이 카드(AI 추천 받기/
-          subjective)가 없으므로 teen에서는 계속 숨긴다 — junior_20s
-          이후는 범위 밖이라 그대로 보인다.
+          호출)은 그대로다.
           지시서(8세 학습 창 AI 추천 버튼 복구): toddler(8~9살)는 1단계
           (direct, 직접 입력 카드와 같은 자리)에서만 다시 보이게
-          한다 — 2단계(객관식)·3단계(주관식 전용 컴포넌트)는 그대로
-          둔다(showDirectInputCards와 같은 원리로, 거기에 teen 제외
-          조건만 더했다). handleSelfStudy가 이미 missionType을
-          'subjective'로 태깅하므로 1단계에서 저장해도 toddler의
-          subjective(1개) 미션 진행도가 그대로 올라간다. */}
-      {(!isToddlerStagedFlow || toddlerStep === 'direct') && !isTeenStagedFlow && (
+          한다 — 2단계(객관식)·3단계(미니게임)는 그대로 숨긴다.
+          지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구): teen
+          도 직접입력 단계(①②③⑦⑩)에서는 이 카드를 다시 보여준다 —
+          showDirectInputCards와 정확히 같은 자리다. handlePickStudyDraft
+          (PR #154)가 toddler/teen 직접입력 단계에서는 knowhow로
+          태깅하므로, 이 카드로 저장해도 8/10문제 진행도에 정확히
+          반영된다. */}
+      {showDirectInputCards && (
         <div className="flex flex-col gap-2.5 rounded-2xl border border-purple-400/25 bg-purple-400/5 p-4 shadow-[0_0_14px_rgba(192,132,252,0.08)]">
           <p className="text-lg font-extrabold text-purple-200 sm:text-xl">✨ AI 추천 받기</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -1060,16 +1089,18 @@ export default function InteractionPanel({
         />
       )}
 
-      {/* 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)의 고정
-          10단계 커리큘럼 — ①③⑤ 직접입력 단계는 아래 기존 "직접 입력
-          하기" 카드(③)를 그대로 재사용하고(showDirectInputCards),
-          ②카드맞추기·④객관식만 이 자리에서 전용으로 렌더링한다. */}
+      {/* 지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구): teen
+          (10대)의 고정 10단계 커리큘럼 — ①②③⑦⑩ 직접입력 단계는 아래
+          기존 "직접 입력하기" 카드를 그대로 재사용하고(showDirectInputCards),
+          ④카드맞추기·⑤~⑥객관식·⑧순서맞추기·⑨분류하기는 toddler가 쓰는
+          것과 완전히 같은 컴포넌트(CardMatchGame/ObjectiveQuizStep/
+          SequenceOrderGame/CategorizeGame)를 이 자리에서 재사용한다. */}
       {isTeenStagedFlow && teenStep === 'card_game' && (
         <div
           data-testid="teen-card-game-step"
           className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
         >
-          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 ②단계 · 직업 카드 맞추기</p>
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 {teenQuestionNumber}번째 문제 · 직업 카드 맞추기</p>
           <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
             직업 카드와 도구 카드를 전부 맞추면 다음 단계로 넘어가요.
           </p>
@@ -1078,20 +1109,47 @@ export default function InteractionPanel({
           {cardGameError && <p className="text-base font-bold text-rose-300">{cardGameError}</p>}
         </div>
       )}
-      {isTeenStagedFlow && teenStep === 'objective' && (
+      {isTeenStagedFlow && teenStep === 'multiple' && (
         <ObjectiveQuizStep
           companionType={character.companionType}
-          title="🎯 ④단계 · 객관식 3문제"
-          description="세 문제 모두 맞혀야 다음 단계로 넘어가요."
+          title={`🎯 ${teenQuestionNumber}~${teenQuestionNumber + 1}번째 문제 · 객관식 2문제(전문지식·실무판단)`}
+          description="두 문제 모두 맞혀야 다음 단계로 넘어가요."
           onAllCorrect={(progress) => {
             setMissionProgress(progress)
             onKnowledgeSaved?.()
             onKnowledgeSaved?.()
-            onKnowledgeSaved?.()
-            pushLine('character', '정답이에요! 3문제 모두 맞혔어요. 🎉')
+            pushLine('character', '정답이에요! 2문제 모두 맞혔어요. 🎉')
             flashPose('happy', 2500)
           }}
         />
+      )}
+      {isTeenStagedFlow && teenStep === 'sequence_order' && (
+        <div
+          data-testid="teen-sequence-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🔢 {teenQuestionNumber}번째 문제 · 순서 맞추기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            업무 절차를 올바른 순서대로 눌러서 전부 맞히면 다음 단계로 넘어가요.
+          </p>
+          <SequenceOrderGame onCleared={() => void handleSequenceGameCleared()} />
+          {sequenceGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {sequenceGameError && <p className="text-base font-bold text-rose-300">{sequenceGameError}</p>}
+        </div>
+      )}
+      {isTeenStagedFlow && teenStep === 'categorize' && (
+        <div
+          data-testid="teen-categorize-game-step"
+          className="flex flex-col gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4"
+        >
+          <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🗂️ {teenQuestionNumber}번째 문제 · 분류하기</p>
+          <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
+            물건들을 올바른 무리로 전부 나누면 오늘 학습이 끝나요.
+          </p>
+          <CategorizeGame onCleared={() => void handleCategorizeGameCleared()} />
+          {categorizeGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
+          {categorizeGameError && <p className="text-base font-bold text-rose-300">{categorizeGameError}</p>}
+        </div>
       )}
       {isTeenStagedFlow && teenStep === 'complete' && (
         <p data-testid="teen-staged-flow-complete" className="text-base font-bold text-emerald-300">
@@ -1099,22 +1157,19 @@ export default function InteractionPanel({
         </p>
       )}
 
-      {/* 미션 ③ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
+      {/* 미션 ①②③⑦⑩ 직접 입력하기 — 타이핑 비중이 제일 작은, 자유 입력
           경로. toddler 단계에서는 직접입력 하위 단계(①)일 때만, teen
-          단계에서는 직접입력 하위 단계(①·③·⑤)일 때만 보인다. */}
+          단계에서는 직접입력 하위 단계(①②③⑦⑩)일 때만 보인다. */}
       {showDirectInputCards && (
       <div className="flex flex-col gap-3 rounded-2xl border border-cyan-400/15 bg-slate-900/30 p-4">
-        {/* 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen만 지금
-            몇 번째 직접입력 하위 단계인지 알려준다(①③은 같은 "직접
-            입력하기"지만 ⑤는 요청하신 "개인 꿀팁/노하우" 라벨) — 아래
-            고정 헤더 문구는 그대로 둔 채 그 위에만 추가한다.
+        {/* 지시서(누리AI 10대 성장 커리큘럼 개선): teen은 지금이 몇
+            번째 문제인지와 그 자리의 주제(역사/목적/자격/노하우/
+            핵심지식)를 함께 보여준다.
             지시서(8세 학습 커리큘럼 순서 및 유형 강제 고정): toddler는
             같은 자리에 지금이 몇 번째 문제인지(1·2·6번) 보여준다. */}
         {isTeenStagedFlow && (
           <p data-testid="teen-direct-step-label" className="text-sm font-bold text-cyan-300/80">
-            {teenStep === 'direct1' && '①단계 · 직접 입력하기 3문제'}
-            {teenStep === 'direct2' && '③단계 · 직접 입력하기 1문제'}
-            {teenStep === 'direct3' && '⑤단계 · 개인 꿀팁/노하우 2문제'}
+            {teenStep === 'direct' && `${teenQuestionNumber}번째 문제 · 직접 입력하기 — ${teenDirectTopicLabel}`}
           </p>
         )}
         {isToddlerStagedFlow && (

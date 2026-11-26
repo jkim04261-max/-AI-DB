@@ -1102,34 +1102,34 @@ async function run() {
       teenMissions.body.missionProgress.ageTier === 'teen' &&
         teenMissions.body.missionProgress.confirmedTotal === 0 &&
         teenMissions.body.missionProgress.requiredTotal === 10,
-      '지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen 단계는 toddler 때 저장을 재사용하지 않고 0/10(유형별 객관식3+카드맞추기1+직접입력6)부터 새로 시작한다',
+      '지시서(누리AI 10대 성장 커리큘럼 개선): teen 단계는 toddler 때 저장을 재사용하지 않고 0/10(유형별 직접입력5+객관식2+카드맞추기1+순서맞추기1+분류하기1)부터 새로 시작한다',
     )
 
-    // 5) 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen은 고정
-    // 커리큘럼(①③⑤직접입력=knowhow6, ②카드맞추기=card_game1,
-    // ④객관식=objective3, subjective는 0)으로 10개를 요구한다. 지금까지
-    // 이미 지식 검증을 여러 번 썼으므로(하루 10회 제한, toddler 8문제
-    // 완료로 2026-03-02도 이미 6회 소비), 이 구간에서 더 쓰기 전에 또
-    // 한 번 날짜를 넘겨 리셋한다 — 하루 제한 자체를 테스트하는 게
-    // 아니라 진화 로직을 테스트하는 구간이므로 teachOnce(5)/(7~8)의
-    // 1회성 제한 소비 테스트(요청 2번)와는 무관하다.
-    // teachCardGame은 위(toddler card_game 단계)에서 이미 정의했으므로
-    // 재사용한다. toddler 구간이 n=112(knowhow 3번째)까지, 종합 최종
-    // 시험 합격까지 requestId를 썼으므로, 여기서는 n=11부터 시작해도
-    // 겹치지 않는다.
+    // 5) 지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구): teen은
+    // 고정 커리큘럼(①②③⑦⑩직접입력=knowhow5, ④카드맞추기=card_game1,
+    // ⑤⑥객관식=objective2, ⑧순서맞추기=sequence_order1,
+    // ⑨분류하기=categorize1, subjective는 0)으로 10개를 요구한다.
+    // 지금까지 이미 지식 검증을 여러 번 썼으므로(하루 10회 제한,
+    // toddler 8문제 완료로 2026-03-02도 이미 6회 소비), 이 구간에서
+    // 더 쓰기 전에 또 한 번 날짜를 넘겨 리셋한다 — 하루 제한 자체를
+    // 테스트하는 게 아니라 진화 로직을 테스트하는 구간이므로
+    // teachOnce(5)/(7~8)의 1회성 제한 소비 테스트(요청 2번)와는 무관
+    // 하다. teachCardGame은 위(toddler card_game 단계)에서 이미
+    // 정의했으므로 재사용한다. toddler 구간이 n=112(knowhow 3번째)까지,
+    // 종합 최종 시험 합격까지 requestId를 썼으므로, 여기서는 n=11부터
+    // 시작해도 겹치지 않는다.
     mock.setFakeDate('2026-03-03')
-    await teachOnce(11, 'objective')
-    await teachOnce(12, 'objective')
-    await teachOnce(13, 'objective')
-    await teachOnce(14, 'objective')
-    await teachCardGame(15)
-    await teachOnce(16, 'knowhow')
+    await teachOnce(11, 'knowhow')
+    await teachOnce(12, 'knowhow')
+    await teachOnce(13, 'knowhow')
+    await teachCardGame(14)
+    await teachOnce(15, 'objective')
+    await teachOnce(16, 'objective')
     await teachOnce(17, 'knowhow')
-    await teachOnce(18, 'knowhow')
-    await teachOnce(19, 'knowhow')
-    await teachOnce(20, 'knowhow')
-    const tenthTeenMission = await teachOnce(21, 'knowhow')
-    t.assert(tenthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 10미션(객관식3+카드맞추기1+직접입력6)도 모두 채웠다')
+    await teachOnce(18, 'sequence_order')
+    await teachOnce(19, 'categorize')
+    const tenthTeenMission = await teachOnce(20, 'knowhow')
+    t.assert(tenthTeenMission.body.missionProgress.allConfirmed === true, 'teen 단계 10미션(직접입력5+객관식2+카드맞추기1+순서맞추기1+분류하기1)도 모두 채웠다')
     t.assert(tenthTeenMission.body.evolved === false, '레벨(5)이 junior_20s 기준(10)에 못 미쳐 아직 진화하지 않는다')
     t.assert(kateNuri.mission_unlocked_tier === 'teen', '미션은 끝났지만 레벨이 부족해 teen에 고정된 채다')
 
@@ -1917,14 +1917,15 @@ async function run() {
     teenNuri.level = 5
     teenNuri.exp = 1000
 
-    // 1) teen 캐릭터는 객관식 퀴즈를 3문제 받는다(toddler는 2문제 —
-    // 위 mina 블록에서 이미 확인됨 — 회귀 없음). 선택지도 toddler(3개)가
-    // 아니라 teen 기준 5개씩이다(연령대별 선택지 개수).
-    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(3, 5, [0, 1, 2]) }
+    // 1) 지시서(누리AI 10대 성장 커리큘럼 개선): teen 캐릭터의 객관식
+    // 퀴즈 요구치가 3→2로 바뀌었다(⑤~⑥번, 전문지식·실무판단 세트).
+    // 선택지는 그대로 toddler(3개)가 아니라 teen 기준 5개씩이다(연령대별
+    // 선택지 개수, 이번 지시서 범위 밖).
+    geminiBehavior = { kind: 'json', result: makeObjectiveQuizMock(2, 5, [0, 1]) }
     const teenQuizRes = mockRes()
     await characterHandler(teenReq({ method: 'GET', query: { action: 'objective-quiz', companionType: 'nuri' } }), teenQuizRes)
     t.assert(teenQuizRes.statusCode === 200, 'teen 캐릭터도 객관식 퀴즈를 받을 수 있다')
-    t.assert(Array.isArray(teenQuizRes.body.questions) && teenQuizRes.body.questions.length === 3, 'teen은 2문제가 아니라 3문제를 받는다')
+    t.assert(Array.isArray(teenQuizRes.body.questions) && teenQuizRes.body.questions.length === 2, 'teen은 3문제가 아니라 2문제를 받는다')
     t.assert(teenQuizRes.body.questions.every((q) => q.choices.length === 5), '10대(teen) 단계는 보기 5개가 출제된다')
 
     // 2) 직업을 아직 안 고른 캐릭터는 카드 맞추기 완료도 막힌다(다른
@@ -2007,25 +2008,26 @@ async function run() {
         sum === expectedTotal,
         `${tier} 단계의 유형별 필요 개수 합도 정확히 ${expectedTotal}개다(현재 objective${perType.objective}+subjective${perType.subjective}+knowhow${perType.knowhow}+card_game${perType.card_game}+sequence_order${perType.sequence_order}+categorize${perType.categorize})`,
       )
-      // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합/8세 학습 커리큘럼
-      // 순서 강제 고정): teen과 toddler 둘 다 고정 순서 커리큘럼(teen:
-      // ①③⑤직접입력=knowhow6, ②카드맞추기=card_game1, ④객관식=
-      // objective3; toddler: 1·2·6·8번직접입력=knowhow4, 4·5번객관식=
-      // objective2, 3번카드맞추기=card_game1, 7번신유형 미니게임=
-      // sequence_order1(categorize는 신유형 미니게임 자리가 하나뿐이라
-      // 0 — 사용자 확인))이라 subjective가 의도적으로 0이고 다른
-      // 티어와 모양이 다르다 — junior_20s 이상은 이 변경의 영향을
+      // 지시서(누리AI 10대 성장 커리큘럼 개선 및 학습 기능 복구/8세
+      // 학습 커리큘럼 순서 강제 고정): teen과 toddler 둘 다 고정 순서
+      // 커리큘럼(teen: ①②③⑦⑩직접입력=knowhow5, ④카드맞추기=
+      // card_game1, ⑤⑥객관식=objective2, ⑧순서맞추기=sequence_order1,
+      // ⑨분류하기=categorize1; toddler: 1·2·6·8번직접입력=knowhow4,
+      // 4·5번객관식=objective2, 3번카드맞추기=card_game1, 7번신유형
+      // 미니게임=sequence_order1(categorize는 신유형 미니게임 자리가
+      // 하나뿐이라 0 — 사용자 확인))이라 subjective가 의도적으로 0이고
+      // 다른 티어와 모양이 다르다 — junior_20s 이상은 이 변경의 영향을
       // 받지 않았는지(card_game/신유형 미니게임은 항상 0) 그대로
       // 확인한다.
       if (tier === 'teen') {
         t.assert(
-          perType.knowhow === 6 &&
-            perType.objective === 3 &&
+          perType.knowhow === 5 &&
+            perType.objective === 2 &&
             perType.subjective === 0 &&
             perType.card_game === 1 &&
-            perType.sequence_order === 0 &&
-            perType.categorize === 0,
-          'teen 단계는 고정 커리큘럼(직접입력6+객관식3+카드맞추기1, subjective·신유형 미니게임은 0)을 요구한다',
+            perType.sequence_order === 1 &&
+            perType.categorize === 1,
+          'teen 단계는 고정 커리큘럼(직접입력5+객관식2+카드맞추기1+순서맞추기1+분류하기1, subjective는 0)을 요구한다',
         )
       } else if (tier === 'toddler') {
         t.assert(
