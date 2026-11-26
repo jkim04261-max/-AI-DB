@@ -1,4 +1,5 @@
-import type { BuildingType } from './buildingTypes'
+import { BUILDING_TYPE_LABEL, type BuildingType } from './buildingTypes'
+import { DEFAULT_SCENE, type SceneTheme } from './growthScenes'
 import storePc from '../assets/grow/town/interiors/store-interior-pc.webp'
 import storeMobile from '../assets/grow/town/interiors/store-interior-mobile.webp'
 import officePc from '../assets/grow/town/interiors/office-interior-pc.webp'
@@ -43,4 +44,24 @@ export const BUILDING_TYPE_INTERIOR: Record<BuildingType, BuildingInterior> = {
 
 export function buildingInteriorFor(type: BuildingType): BuildingInterior {
   return BUILDING_TYPE_INTERIOR[type]
+}
+
+// 지시서("누리AI 키우기 메인 화면 직업별 내부 배경 연동"): 건물을 지은
+// 캐릭터는 AI 키우기 기본 화면(GameStage)도 건물 완성 화면과 같은
+// 내부 이미지를 쓴다 — 같은 자산을 재사용할 뿐 새 파일을 만들지
+// 않는다. 건물 정보가 없는(1단계 PR #156 이전부터 있던) 기존
+// 캐릭터는 null을 받아 호출부가 기존 DEFAULT_SCENE(마법진 도서관)을
+// 그대로 쓰게 한다.
+export function sceneForBuilding(buildingType: BuildingType | null): SceneTheme {
+  if (!buildingType) return DEFAULT_SCENE
+  const { pc, mobile } = buildingInteriorFor(buildingType)
+  return {
+    label: `${BUILDING_TYPE_LABEL[buildingType]} 내부`,
+    layers: [],
+    props: [],
+    floorClassName: '',
+    backgroundImageSrc: pc,
+    backgroundImageSrcSet: `${mobile} 960w, ${pc} 1600w`,
+    backgroundImageSizes: '100vw',
+  }
 }

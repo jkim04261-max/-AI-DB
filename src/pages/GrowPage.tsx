@@ -32,6 +32,7 @@ import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
 import { computeActiveQuest } from '../data/characterQuests'
 import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
+import { sceneForBuilding } from '../data/buildingInteriors'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
 import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
@@ -1184,11 +1185,19 @@ export default function GrowPage() {
                     ageTier={ageTier}
                     ageNumber={ageNumber}
                     outfitId={inventory.equippedOutfit[character.companionType]}
-                    // PR #50 긴급 재작업: 'lobby'도 이제 BACKGROUND_SCENES에서
-                    // growthScenes.ts의 실제 일러스트 장면을 그대로 가리키므로
-                    // (sceneForProfession의 기본값과 동일), 더 이상 특별 취급이
-                    // 필요 없다 — 항상 inventory가 장착한 배경을 그대로 쓴다.
-                    backgroundOverride={BACKGROUND_SCENES[inventory.equippedBackground]}
+                    // 지시서("누리AI 키우기 메인 화면 직업별 내부 배경
+                    // 연동"): 마켓에서 다른 배경을 사서 장착하지 않은
+                    // 기본 상태('lobby')에서만, 이 캐릭터가 지은 건물의
+                    // 내부 이미지로 바꿔 보여준다 — 건물 정보가 없으면
+                    // sceneForBuilding(null)이 그대로 기존 마법진 도서관
+                    // (DEFAULT_SCENE)을 돌려주므로 기존 사용자는 화면이
+                    // 전혀 바뀌지 않는다. 마켓에서 산 배경을 장착한
+                    // 경우는 기존처럼 그 배경을 우선한다(이 기능과 무관).
+                    backgroundOverride={
+                      inventory.equippedBackground === 'lobby'
+                        ? sceneForBuilding(character.buildingType)
+                        : BACKGROUND_SCENES[inventory.equippedBackground]
+                    }
                   />
                   {xpPopup !== null && (
                     <span className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl">
