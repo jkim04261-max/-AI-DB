@@ -181,17 +181,32 @@ export default function InteractionPanel({
   // 상태 — 패널이 열릴 때 한 번 불러오고, 저장이 성공할 때마다 그 응답에
   // 실려 오는 최신 값으로 갱신한다(별도 재조회 없이).
   const [missionProgress, setMissionProgress] = useState<MissionProgress | null>(null)
+  // 지시서(긴급 버그 재현 확인 — 8살 문제 유형 전환 오류) 2·3번: 이 호출이
+  // 실패하면(네트워크 오류, 인증 만료 등) missionProgress가 영원히
+  // null로 남고, toddlerStep 계산(아래, "if (!missionProgress) return
+  // 'direct'")이 그걸 "아직 안 불러왔다"가 아니라 "그냥 1번 문제"로
+  // 오해해 계속 직접입력 화면만 보여줄 수 있다 — 조용히 삼키지 않고
+  // 에러 상태를 남겨 화면에 안내+재시도를 보여준다(아래 mission-progress-
+  // error UI). missionProgressRequestId를 올려 재시도 버튼이 같은
+  // useEffect를 다시 돌게 한다.
+  const [missionProgressError, setMissionProgressError] = useState<string | null>(null)
+  const [missionProgressRequestId, setMissionProgressRequestId] = useState(0)
   useEffect(() => {
     let cancelled = false
+    setMissionProgressError(null)
     getMissionProgress(character.companionType)
       .then((p) => {
         if (!cancelled) setMissionProgress(p)
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (!cancelled) {
+          setMissionProgressError(err instanceof Error ? err.message : '성장 미션 정보를 불러오는 중 오류가 발생했어요.')
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [character.companionType, getMissionProgress])
+  }, [character.companionType, getMissionProgress, missionProgressRequestId])
 
   // 지시서(/grow 화면 최신 반영 및 리셋(#151) 동작 점검): "처음부터 다시
   // 키우기"는 FinalExamModal 안에서 일어나는데, 이 missionProgress/
@@ -299,7 +314,16 @@ export default function InteractionPanel({
   // 선택지에서 고르기(칩)/직접 입력하기 카드를 보여줄지 — toddler는
   // 직접입력 하위 단계(①)에서만, teen은 직접입력 하위 단계(①·③·⑤)
   // 에서만.
-  const showDirectInputCards = (!isToddlerStagedFlow || isToddlerDirectStep) && (!isTeenStagedFlow || isTeenDirectStep)
+  // 지시서(긴급 버그 재현 확인 — 8살 문제 유형 전환 오류) 3번: toddler/
+  // teen 고정 순서 흐름은 missionProgress가 있어야만 몇 번째 문제인지
+  // 알 수 있다 — 그게 에러로 끝내 못 불러와졌는데도(missionProgressError
+  // && !missionProgress) 기본값 'direct'로 조용히 1번 문제처럼 보여주면
+  // 안 된다(위 mission-progress-error 안내로 대체). 로딩 중(에러 없이
+  // missionProgress가 아직 null인 순간)에는 기존처럼 'direct' 기본값을
+  // 그대로 쓴다.
+  const missionProgressBlockedByError = (isToddlerStagedFlow || isTeenStagedFlow) && missionProgressError !== null && !missionProgress
+  const showDirectInputCards =
+    !missionProgressBlockedByError && (!isToddlerStagedFlow || isToddlerDirectStep) && (!isTeenStagedFlow || isTeenDirectStep)
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -666,6 +690,26 @@ export default function InteractionPanel({
       <p className="text-base font-bold text-cyan-200/80 sm:text-lg">
         {name} · {professionLabel}와 상호작용하기
       </p>
+
+      {/* 지시서(긴급 버그 재현 확인 — 8살 문제 유형 전환 오류) 2·3번: 성장
+          미션 진행도를 못 불러왔으면, 그걸 숨기고 조용히 1번(직접입력)
+          문제로 보여주지 않는다 — 실패를 명시하고 재시도를 준다. */}
+      {missionProgressError && !missionProgress && (
+        <div
+          data-testid="mission-progress-error"
+          className="flex flex-col gap-2 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-3.5"
+        >
+          <p className="text-base font-bold text-rose-300">{missionProgressError}</p>
+          <button
+            type="button"
+            data-testid="mission-progress-retry-button"
+            onClick={() => setMissionProgressRequestId((n) => n + 1)}
+            className="self-start rounded-xl border border-rose-300/50 bg-rose-500/20 px-4 py-2 text-sm font-bold text-rose-100 hover:bg-rose-500/30"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
 
       {/* PR #63, 지시서(연령대별 스테이지 볼륨업): 카드형 미션 진행
           현황 — 유형별(객관식/주관식/노하우)로 고르게 확정해야 다음

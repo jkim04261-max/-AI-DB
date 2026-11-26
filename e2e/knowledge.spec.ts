@@ -3366,6 +3366,70 @@ test('resetting via 처음부터 다시 키우기 refreshes stale mission progre
   await expect(page.getByText('예전 지식 1')).not.toBeVisible()
 })
 
+// 지시서(긴급 버그 재현 확인 — 8살 문제 유형 전환 오류) 3번: missions
+// API가 실패하면(인증 만료, 서버 오류 등) missionProgress가 null로
+// 남는데, 예전 코드는 이걸 "1번째 문제"와 구분하지 못해 그냥 조용히
+// 직접입력 화면을 보여줬다(오류를 숨기고 틀린 화면을 정상처럼 보여줌).
+// 지금은 에러 배너+재시도 버튼을 보여주고, 재시도가 성공하면 그제서야
+// 실제 진행 단계(여기서는 1번째 문제)가 뜬다.
+test('a failed missionProgress fetch shows an error with a retry button instead of silently defaulting to the direct-input step', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+
+  let missionsCallCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onMissions: async (route) => {
+      missionsCallCount += 1
+      // React 18 StrictMode(개발 모드)는 마운트 시 effect를 한 번 더
+      // 돌려본다(mount→unmount→remount) — 그래서 최초 로드는 호출이 2번
+      // 일어날 수 있다. 둘 다 실패하게 해야 "로딩 중 우연히 성공"으로
+      // 테스트가 거짓 통과하지 않는다.
+      if (missionsCallCount <= 2) {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: '성장 미션 정보를 불러오는 중 오류가 발생했어요.' }) })
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: 0, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+              sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+              categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
+            },
+            confirmedTotal: 0,
+            requiredTotal: 8,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  await expect(page.getByTestId('mission-progress-error')).toBeVisible()
+  await expect(page.getByTestId('knowledge-content-textarea')).not.toBeVisible()
+  await expect(page.getByTestId('toddler-card-game-step')).not.toBeVisible()
+
+  await page.getByTestId('mission-progress-retry-button').click()
+
+  await expect(page.getByTestId('mission-progress-error')).not.toBeVisible()
+  await expect(page.getByText('1번째 문제 · 직접 입력하기')).toBeVisible()
+  await expect(page.getByTestId('knowledge-content-textarea')).toBeVisible()
+})
+
 // 지시서(10대 커리큘럼: 직업 카드 맞추기 통합): teen(10대)은 더 이상
 // 균등분배가 아니라 "①직접입력 3 → ②직업 카드 맞추기 1 → ③직접입력 1
 // → ④객관식 3 → ⑤개인 꿀팁/노하우 2"(합계 10)의 고정 순서다. 사이드바에
