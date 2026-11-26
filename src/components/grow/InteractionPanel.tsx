@@ -465,7 +465,18 @@ export default function InteractionPanel({
   const handlePickStudyDraft = (draft: StudyDraft) => {
     setTitle(draft.knowledge.title)
     setContent(draft.knowledge.content)
-    setMissionType('subjective')
+    // 지시서(긴급 버그 수정 — 8세 학습 미션 진행 횟수 불일치): toddler/
+    // teen의 고정 순서 커리큘럼(PR #130/#150/#118)은 더 이상 'subjective'
+    // 유형을 쓰지 않는다(MISSIONS_REQUIRED_PER_TYPE_OVERRIDE에서 둘 다
+    // required:0) — 그런데 이 카드는 항상 'subjective'로 태깅해서
+    // 저장했으므로, "스스로 공부하기"로 저장한 지식은 학습 기록에는
+    // 남지만(원인: required:0이라 complete가 항상 true로 계산되어
+    // byType 집계에는 안 잡힘) 8문제/10단계 진행도에는 전혀 반영되지
+    // 않았다 — "학습 기록 4개인데 confirmedTotal은 1"의 실제 원인.
+    // 이 카드는 toddler/teen 둘 다 "직접 입력하기" 단계(①)에서만 보이므로
+    // (showDirectInputCards와 같은 자리), 그 단계가 실제로 쓰는 유형과
+    // 똑같이 태깅한다 — handleSave의 기존 기본값(knowhow) 규칙과 동일.
+    setMissionType(isToddlerDirectStep || isTeenDirectStep ? 'knowhow' : 'subjective')
     setVerification(draft.verification)
     setVerifiedSnapshot({ title: draft.knowledge.title, content: draft.knowledge.content })
     setVerificationToken(draft.verificationToken)

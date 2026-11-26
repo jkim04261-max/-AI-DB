@@ -1098,13 +1098,18 @@ test('filling the form from a topic suggestion chip at the toddler direct-input 
 // 때 toddler(8~9살) 전체 구간에서 "AI 추천 받기" 카드가 사라졌는데,
 // 실제로는 1단계(direct, 직접 입력 카드와 같은 자리)에서는 다시
 // 보여야 한다는 요청 — 선택예시하기(3개) 버튼을 되돌린 것과 같은
-// 범위(showDirectInputCards)다. 지시서(8세 학습 총 8문제 제한 및
-// 10대 강제 레벨업 로직 수정) 이후 toddler의 subjective 필요 개수는
-// 0(항상 "완료" 처리)이라 더 이상 미션 진행도를 올리는 입력 경로가
-// 아니지만, 저장 자체는 여전히 missionType='subjective'로 태깅된다
-// (이 태깅 자체는 분류용으로 남아 있다) — 버튼 클릭 → 저장까지 그
-// 흐름이 그대로 동작하는지 확인한다.
-test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-input stage, and saving it still tags missionType=subjective', async ({ page }) => {
+// 범위(showDirectInputCards)다.
+//
+// 지시서(긴급 버그 수정 — 8세 학습 미션 진행 횟수 불일치): 이 카드는
+// 한동안 저장을 항상 missionType='subjective'로 태깅했는데, 8세 학습
+// 총 8문제 제한(PR #130/#150) 이후 toddler의 subjective 필요 개수가
+// 0으로 내려가면서(항상 "완료" 처리) 이 경로로 저장한 지식은 학습
+// 기록에는 남지만 8문제 진행도(confirmedTotal)에는 전혀 반영되지
+// 않는 구멍이 됐다 — 운영에서 실제로 "학습 기록 4개인데 confirmedTotal은
+// 1"로 재현된 버그. 이제 이 카드는 toddler/teen의 "직접 입력하기"
+// 단계(①)와 완전히 같은 자리이므로, 그 단계가 쓰는 유형(knowhow)과
+// 똑같이 태깅해 실제로 진행도에 반영되도록 고쳤다.
+test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-input stage, and saving it tags missionType=knowhow so it actually counts toward the 8-question progress', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -1160,7 +1165,106 @@ test('the AI 추천 받기 card is visible again at the toddler (8~9살) direct-
   await page.getByRole('button', { name: '저장' }).click()
 
   await expect.poll(() => saveRequestBody).toBeTruthy()
-  expect(saveRequestBody?.missionType).toBe('subjective')
+  expect(saveRequestBody?.missionType).toBe('knowhow')
+})
+
+// 지시서(긴급 버그 수정 — 8세 학습 미션 진행 횟수 불일치): 운영에서
+// 재현된 정확한 증상 — "학습 기록 4개, confirmedTotal 1개, 카드 맞추기·
+// 객관식으로 전환 안 됨" — 을 끝까지 재현한다. 1·2번(직접입력)을 둘 다
+// "스스로 공부하기"(AI 추천)로 저장해도(사용자가 타이핑 대신 예시를
+// 고르는 경로), knowhow로 집계되어 두 번째 저장 직후 3번(카드 맞추기)
+// 으로 정확히 넘어가야 한다 — 수정 전에는 missionType이 항상
+// 'subjective'로 태깅돼 byType.subjective(required:0)에만 쌓이고
+// knowhow.confirmed는 0에서 멈춰, 영원히 1번 문제만 반복됐다.
+test('completing 1~2번 via 스스로 공부하기 (AI 추천) counts toward knowhow and advances to 3번 카드 맞추기, matching the confirmedTotal the server reports', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [NURI_ACCOUNTANT],
+    onStudyGenerate: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          drafts: [
+            {
+              knowledge: { title: '복식부기', content: '거래를 차변과 대변에 기록한다.' },
+              verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+              verificationToken: 'tok-ai-rec',
+              ageBlocked: false,
+              requiredAgeTier: 'toddler',
+            },
+          ],
+          characterReply: '예시를 만들었어요!',
+          remaining: 2,
+          dailyStudyLimit: 3,
+          exampleCount: 1,
+          characterAgeTier: 'toddler',
+          focusPercent: 90,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      const body = route.request().postDataJSON() as { missionType?: string }
+      // knowhow로 태깅된 저장만 knowhow.confirmed를 올린다 — 수정 전
+      // 버그를 그대로 흉내내려면 여기서 body.missionType이 'subjective'
+      // 였다면 confirmed를 그대로 둬야 하지만, 고친 코드는 항상
+      // 'knowhow'를 보내야 하므로 이 모의 서버는 그 가정(knowhow)만
+      // 지원한다 — 'subjective'가 오면 아래 toBe assertion이 그 자리에서
+      // 실패해 바로 드러난다.
+      const knowhowConfirmed = body.missionType === 'knowhow' ? saveCount : 0
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'accountant', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'ai_generated', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: 10 * saveCount,
+          level: 1,
+          leveledUp: false,
+          missionProgress: {
+            ageTier: 'toddler',
+            ageTierLabel: '8~9살',
+            byType: {
+              objective: { type: 'objective', confirmed: 0, required: 2, complete: false },
+              subjective: { type: 'subjective', confirmed: 0, required: 0, complete: true },
+              knowhow: { type: 'knowhow', confirmed: knowhowConfirmed, required: 4, complete: false },
+              card_game: { type: 'card_game', confirmed: 0, required: 1, complete: false },
+              sequence_order: { type: 'sequence_order', confirmed: 0, required: 1, complete: false },
+              categorize: { type: 'categorize', confirmed: 0, required: 0, complete: true },
+            },
+            confirmedTotal: knowhowConfirmed,
+            requiredTotal: 8,
+            allConfirmed: false,
+            nextAgeTier: 'teen',
+            nextAgeTierLabel: '10대',
+          },
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByRole('button', { name: '가르치기' }).click()
+
+  // 1번: AI 추천으로 저장
+  await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await page.getByTestId('study-draft-card').filter({ hasText: '복식부기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+  await expect(page.getByText('2번째 문제 · 직접 입력하기')).toBeVisible()
+
+  // 2번: 또 AI 추천으로 저장 — 이번에도 knowhow로 집계돼야 3번(카드
+  // 맞추기)으로 넘어간다.
+  await page.getByRole('button', { name: '✨ 예시 만들어주기' }).click()
+  await page.getByTestId('study-draft-card').filter({ hasText: '복식부기' }).click()
+  await page.getByRole('button', { name: '저장' }).click()
+
+  await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
+  await expect(page.getByText('3번째 문제 · 직업 카드 맞추기')).toBeVisible()
 })
 
 // 위 복구가 toddler의 2단계(객관식)까지 건드리지 않았는지 — 지시서의
