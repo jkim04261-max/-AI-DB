@@ -597,6 +597,83 @@ export function ensureGrowthTables() {
   return growthTablesReady
 }
 
+let personalKnowledgeLogTablesReady: Promise<unknown> | null = null
+
+// 지시서(실제 업무·연구·비법·노하우 기록 시스템): 유저 본인이 직접 쓰는
+// "지식 기록장" — AI 캐릭터(누리/두리)를 가르치는 character_knowledge_
+// entries와는 완전히 다른 테이블이다. 그쪽은 character_id로 캐릭터에
+// 묶이지만, 이 기록은 캐릭터와 무관하게 user_id로만 묶인 유저 개인
+// 자산이다(지시서 4번: "유저별로 분리된 DB에 저장"). 사진/동영상은
+// message_attachments와 같은 원칙(파일 자체는 Postgres에 안 두고 Vercel
+// Blob URL만 저장)으로 별도 1:N 테이블에 둔다.
+export function ensurePersonalKnowledgeLogTables() {
+  if (!personalKnowledgeLogTablesReady) {
+    personalKnowledgeLogTablesReady = (async () => {
+      await ensureUsersTable()
+      await sql`
+        CREATE TABLE IF NOT EXISTS personal_knowledge_logs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          entry_date DATE NOT NULL,
+          business_name TEXT,
+          category TEXT NOT NULL CHECK (category IN ('work_log', 'research_note', 'success_case', 'failure_case', 'tip')),
+          tags TEXT,
+          content TEXT NOT NULL,
+          visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'partial', 'public')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS personal_knowledge_logs_user_id_created_idx
+          ON personal_knowledge_logs (user_id, created_at DESC)
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS personal_knowledge_log_attachments (
+          id SERIAL PRIMARY KEY,
+          log_id INTEGER NOT NULL REFERENCES personal_knowledge_logs(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL DEFAULT 0,
+          url TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          name TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS personal_knowledge_log_attachments_log_id_position_idx
+          ON personal_knowledge_log_attachments (log_id, position)
+      `
+    })().catch((err) => {
+      personalKnowledgeLogTablesReady = null
+      throw err
+    })
+  }
+  return personalKnowledgeLogTablesReady
+}
+
+export interface PersonalKnowledgeLogRow {
+  id: number
+  user_id: number
+  entry_date: string
+  business_name: string | null
+  category: 'work_log' | 'research_note' | 'success_case' | 'failure_case' | 'tip'
+  tags: string | null
+  content: string
+  visibility: 'private' | 'partial' | 'public'
+  created_at: string
+  updated_at: string
+}
+
+export interface PersonalKnowledgeLogAttachmentRow {
+  id: number
+  log_id: number
+  position: number
+  url: string
+  mime_type: string
+  name: string | null
+  created_at: string
+}
+
 export { sql }
 
 export interface UserRow {
