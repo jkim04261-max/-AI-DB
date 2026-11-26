@@ -71,7 +71,7 @@ export default function OpeningProfileScreen({
         </div>
 
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-cyan-200/80">이름</span>
+          <span className="text-xs font-semibold text-cyan-200/80">이름(가명 가능):</span>
           <input
             data-testid="opening-profile-name-input"
             value={name}
@@ -83,7 +83,7 @@ export default function OpeningProfileScreen({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-cyan-200/80">생일 (선택)</span>
+          <span className="text-xs font-semibold text-cyan-200/80">생일:</span>
           <input
             data-testid="opening-profile-birthday-input"
             type="date"
@@ -98,7 +98,7 @@ export default function OpeningProfileScreen({
               사용자에게는 와닿지 않는다는 지적에 따라 라벨·플레이스홀더
               문구만 바꾼다 — state 변수명(region)·저장 안 함 원칙은
               그대로다. */}
-          <span className="text-xs font-semibold text-cyan-200/80">일하는/공부하는 지역 (선택)</span>
+          <span className="text-xs font-semibold text-cyan-200/80">일하는/공부하는 지역:</span>
           <input
             data-testid="opening-profile-region-input"
             value={region}
@@ -110,13 +110,13 @@ export default function OpeningProfileScreen({
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-cyan-200/80">직업 (선택, 자유 입력)</span>
+          <span className="text-xs font-semibold text-cyan-200/80">직업:</span>
           <input
             data-testid="opening-profile-profession-input"
             value={profession}
             onChange={(e) => setProfession(e.target.value)}
             maxLength={30}
-            placeholder="예: 숲해설가 (비워두면 나중에 고를 수 있어요)"
+            placeholder="예: 변호사"
             className="rounded-xl border border-cyan-400/25 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/60 focus:outline-none"
           />
         </label>
