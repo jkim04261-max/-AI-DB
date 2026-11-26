@@ -1,5 +1,12 @@
 import type { BuildingType } from './buildingTypes'
-import { STORE_INTERIOR_SRC, CLASSROOM_INTERIOR_SRC } from './lifeEventAssets'
+import storePc from '../assets/grow/town/interiors/store-interior-pc.webp'
+import storeMobile from '../assets/grow/town/interiors/store-interior-mobile.webp'
+import officePc from '../assets/grow/town/interiors/office-interior-pc.webp'
+import officeMobile from '../assets/grow/town/interiors/office-interior-mobile.webp'
+import schoolPc from '../assets/grow/town/interiors/school-interior-pc.webp'
+import schoolMobile from '../assets/grow/town/interiors/school-interior-mobile.webp'
+import hospitalPc from '../assets/grow/town/interiors/hospital-interior-pc.webp'
+import hospitalMobile from '../assets/grow/town/interiors/hospital-interior-mobile.webp'
 import pharmacyPc from '../assets/grow/town/interiors/pharmacy-interior-pc.webp'
 import pharmacyMobile from '../assets/grow/town/interiors/pharmacy-interior-mobile.webp'
 import factoryPc from '../assets/grow/town/interiors/factory-interior-pc.webp'
@@ -16,18 +23,17 @@ export interface BuildingInterior {
   mobile: string
 }
 
-// 지시서("건물 내부 이미지 9종 삽입 및 초경량 최적화"): 건물 유형별
-// 내부 이미지 — PC(최대 1280px 가로)/모바일(최대 768px 가로) 두
-// 해상도로 미리 최적화해 둔(WebP, cwebp 품질 65~72) 자산을 srcset으로
-// 제공해 화면 크기에 맞는 파일만 받게 한다. 상가(store)·학교(school)는
-// 기존 lifeEventAssets의 store/classroom 내부 이미지(식사·심부름
-// 이벤트에서도 재사용 중)를 그대로 쓰고, 전용 이미지가 없는
-// 회사·병원은 "공통 건물" 원칙과 동일하게 상가 내부로 대체한다.
+// 지시서("누리AI 건물 내부 이미지 9종 적용 및 초경량 최적화"): 9종
+// 건물 유형 전부 전용 내부 이미지를 쓴다 — PC(최대 1600×900)/
+// 모바일(최대 960×540) 두 해상도로 미리 최적화해 둔(WebP, cwebp 품질
+// 72~80) 자산을 srcset으로 제공해 화면 크기에 맞는 파일만 받게 한다.
+// 이 9장은 식사·심부름 이벤트가 쓰는 lifeEventAssets의 store/classroom
+// 이미지와는 별개 파일이다(건물 내부 전용, 서로 영향 없음).
 export const BUILDING_TYPE_INTERIOR: Record<BuildingType, BuildingInterior> = {
-  store: { pc: STORE_INTERIOR_SRC, mobile: STORE_INTERIOR_SRC },
-  office: { pc: STORE_INTERIOR_SRC, mobile: STORE_INTERIOR_SRC },
-  hospital: { pc: STORE_INTERIOR_SRC, mobile: STORE_INTERIOR_SRC },
-  school: { pc: CLASSROOM_INTERIOR_SRC, mobile: CLASSROOM_INTERIOR_SRC },
+  store: { pc: storePc, mobile: storeMobile },
+  office: { pc: officePc, mobile: officeMobile },
+  school: { pc: schoolPc, mobile: schoolMobile },
+  hospital: { pc: hospitalPc, mobile: hospitalMobile },
   pharmacy: { pc: pharmacyPc, mobile: pharmacyMobile },
   factory: { pc: factoryPc, mobile: factoryMobile },
   religious: { pc: religiousPc, mobile: religiousMobile },
