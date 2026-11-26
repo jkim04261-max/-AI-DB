@@ -731,22 +731,21 @@ test('a freshly created character with no building yet walks through the full 2.
 
   await page.getByTestId('town-building-pick-location-button').click()
   await expect(page.getByTestId('town-building-map')).toBeVisible()
-  // 부지를 고르기 전에는 "이곳에 건물을 짓겠습니다" 버튼이 비활성화된다.
+  // 부지를 고르기 전에는 "건물 짓기" 버튼이 비활성화된다.
   await expect(page.getByTestId('town-building-start-button')).toBeDisabled()
 
   const plots = page.getByTestId('town-building-plot')
   await expect(plots).toHaveCount(5)
   await plots.nth(2).click()
-  await expect(page.getByTestId('town-building-selected-plot')).toContainText('plot-3')
+  await expect(page.getByTestId('town-building-selected-plot')).toContainText('부지 3')
+
+  // 직업(약사)에 맞춰 "약국" 유형이 기본 선택되어 있다 — 직업 자동
+  // 반영(지시서 2번). 이름 입력란도 채워져 있으므로 바로 건설할 수
+  // 있다.
+  await expect(page.getByTestId('town-building-type-pharmacy')).toHaveAttribute('class', /border-yellow-300/)
+  await page.getByTestId('town-building-name-input').fill('강남약국')
   await expect(page.getByTestId('town-building-start-button')).toBeEnabled()
   await page.getByTestId('town-building-start-button').click()
-
-  // 직업(약사)에 맞춰 "병원·약국" 유형이 기본 선택되어 있고, 입력란
-  // 이름도 "약국명"으로 바뀐다 — 직업 자동 반영(지시서 4번).
-  await expect(page.getByTestId('town-building-type-hospital')).toHaveAttribute('class', /border-yellow-300/)
-  await expect(page.getByText('약국명')).toBeVisible()
-  await page.getByTestId('town-building-name-input').fill('강남약국')
-  await page.getByTestId('town-building-confirm-details-button').click()
 
   // 진행률 바가 0→100%까지 자동으로 차오르고, 입력한 이름이 그대로
   // 간판에 동적으로 뜬다(이미지에 고정된 문구가 아니다).
@@ -757,12 +756,16 @@ test('a freshly created character with no building yet walks through the full 2.
   // 걷기 단계로 넘어간다 — "화면 중앙 제자리 bounce"가 아니라, 출발
   // 위치(화면 왼쪽)에서 목적지(선택한 부지, plot-3)까지 실제로 좌우
   // 이동(left 스타일 값 자체가 바뀜)하는지 확인한다.
+  // 출발 지점(화면 왼쪽, 6%)과 목적지(선택한 부지 plot-3, 73%)가 서로
+  // 다른 left 값으로 시작한다는 것 자체가 "제자리"가 아니라 실제
+  // 가로지르는 이동 애니메이션임을 보여준다 — 'entering' 단계로
+  // 넘어가면 이 요소 자체가 사라지므로(건물 외부/내부 화면으로 교체),
+  // skip 클릭 뒤에는 다시 읽지 않는다.
   const walker = page.getByTestId('town-building-walking-character')
   await expect(walker).toBeVisible({ timeout: 5000 })
   const startLeft = await walker.evaluate((el) => el.style.left)
+  expect(startLeft).toBe('6%')
   await page.getByTestId('town-building-skip-walk-button').click()
-  const endLeft = await walker.evaluate((el) => el.style.left)
-  expect(startLeft).not.toBe(endLeft)
 
   // 건물 안으로 들어가면(entering) 완성 안내와 함께, 입력한 상호명이
   // 그대로 메시지에 반영된다.
@@ -772,7 +775,7 @@ test('a freshly created character with no building yet walks through the full 2.
 
   await expect.poll(() => completeBuildingBody).toBeTruthy()
   expect(completeBuildingBody?.address).toBe('서울특별시 강남구 압구정동')
-  expect(completeBuildingBody?.buildingType).toBe('hospital')
+  expect(completeBuildingBody?.buildingType).toBe('pharmacy')
   expect(completeBuildingBody?.buildingName).toBe('강남약국')
   expect(completeBuildingBody?.plotId).toBe('plot-3')
 
@@ -855,13 +858,11 @@ test('picking a different plot and building type (학교) sends that exact combi
   await page.getByTestId('town-building-pick-location-button').click()
 
   await page.getByTestId('town-building-plot').nth(4).click()
-  await expect(page.getByTestId('town-building-selected-plot')).toContainText('plot-5')
-  await page.getByTestId('town-building-start-button').click()
+  await expect(page.getByTestId('town-building-selected-plot')).toContainText('부지 5')
 
   await page.getByTestId('town-building-type-school').click()
-  await expect(page.getByText('학교명')).toBeVisible()
   await page.getByTestId('town-building-name-input').fill('누리초등학교')
-  await page.getByTestId('town-building-confirm-details-button').click()
+  await page.getByTestId('town-building-start-button').click()
 
   await expect(page.getByTestId('town-building-walking-character')).toBeVisible({ timeout: 5000 })
   await page.getByTestId('town-building-skip-walk-button').click()

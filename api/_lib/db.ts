@@ -336,7 +336,11 @@ export function ensureCharacterTables() {
       // 골랐는지(클라이언트가 정의한 고정 부지 id 문자열, 예:
       // "plot-3") — 서버는 그 값을 그대로 신뢰해 저장만 하고 의미를
       // 해석하지 않는다(부지 배치 자체는 지도 쪽 상수라 DB가 몰라도
-      // 된다). building_type은 7종 중 하나로 CHECK 제약을 건다.
+      // 된다). building_type은 8종 중 하나로 CHECK 제약을 건다(지시서
+      // "누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선"에서
+      // 병원·약국을 분리하고 공공기관 대신 종교시설을 추가 — 이 컬럼이
+      // 아직 PR #156으로만 존재하고 main에 병합되지 않아 운영에 저장된
+      // 값이 없으므로 마이그레이션 없이 값 집합만 바꿔도 안전하다).
       // building_name은 상호명/회사명/학교명 등 사용자 입력 간판
       // 문구 — 자유 텍스트라 제약 없음. 셋 다 nullable이라 기존
       // (이미 건물을 지은) 캐릭터 행에는 영향이 없다 — 1단계에서 이미
@@ -353,7 +357,7 @@ export function ensureCharacterTables() {
       await sql`ALTER TABLE characters DROP CONSTRAINT IF EXISTS characters_building_type_check`
       await sql`
         ALTER TABLE characters ADD CONSTRAINT characters_building_type_check
-        CHECK (building_type IS NULL OR building_type IN ('store', 'office', 'school', 'hospital', 'public', 'factory', 'other'))
+        CHECK (building_type IS NULL OR building_type IN ('store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'other'))
       `
     })().catch((err) => {
       characterTablesReady = null
@@ -727,7 +731,7 @@ export interface CharacterRow {
   reset_at: string | null
   address: string | null
   building_built_at: string | null
-  building_type: 'store' | 'office' | 'school' | 'hospital' | 'public' | 'factory' | 'other' | null
+  building_type: 'store' | 'office' | 'school' | 'hospital' | 'pharmacy' | 'factory' | 'religious' | 'other' | null
   building_name: string | null
   building_plot_id: string | null
   created_at: string

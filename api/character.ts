@@ -2056,11 +2056,11 @@ async function handleResetCharacterProgress(req: VercelRequest, res: VercelRespo
   }
 }
 
-// 지시서(2.5D 우리동네 지도 및 건물 건설·캐릭터 입장 기능 완성)에서
-// 추가 — 1단계(PR #152)가 미뤘던 건물 유형 7종. src/data/buildingTypes.ts
+// 지시서(누리AI 우리동네 2.5D 지도 적용 및 건물 입장 화면 개선)에서
+// 병원·약국 분리 + 종교시설 추가로 8종이 됐다. src/data/buildingTypes.ts
 // 의 BuildingType과 반드시 같은 값이어야 한다(이 파일의 기존 "행 타입은
 // 여기서 직접 리터럴로 적는다" 관례).
-const BUILDING_TYPES = ['store', 'office', 'school', 'hospital', 'public', 'factory', 'other'] as const
+const BUILDING_TYPES = ['store', 'office', 'school', 'hospital', 'pharmacy', 'factory', 'religious', 'other'] as const
 const MAX_BUILDING_NAME_LENGTH = 30
 const MAX_PLOT_ID_LENGTH = 40
 
