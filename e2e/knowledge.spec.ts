@@ -1,7 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test'
 import { failUnmockedApiCalls, mockMe } from './fixtures/mock-api'
 import { ageTierForLevel } from '../src/data/characterAge'
-import { HOUSEWORK_QUIZ_QUESTIONS } from '../src/data/householdQuizzes'
 import { ALL_PART_TIME_JOB_QUESTIONS } from '../src/data/partTimeJobQuizzes'
 
 // 지식 가르치기 + Gemini 검증 (PR #44) — all mocked, no real DB/Gemini call.
@@ -2789,7 +2788,7 @@ test('a second round of 3 saves (6 total) triggers the part-time job event and a
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-accept-button').click()
   await expect(page.getByTestId('money-popup')).toContainText('10,000원')
-  await expect(page.getByTestId('speech-bubble')).toContainText('심부름 성공')
+  await expect(page.getByTestId('speech-bubble')).toContainText('심부름 완료')
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
 })
 
@@ -2885,18 +2884,19 @@ test('accepting the errand event fades the background from the town square to th
   await teachThreeTimes('round1')
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await expect(page.getByTestId('errand-event-town-bg')).toBeVisible()
-  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '0')
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveClass(/opacity-0\b/)
 
   await page.getByTestId('errand-event-accept-button').click()
-  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '1')
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveClass(/opacity-100/)
 })
 
-// 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트) "거절하기"
-// 경로 — 심부름 모달을 닫고 집에서 숙제하기(퀴즈) 모달이 뜬다. 오답은
-// 새 문제로 재도전시키고(페널티 취지상 건너뛰기 버튼이 없다), 정답을
-// 맞히면 모달이 닫혀 학습 화면으로 돌아간다. 숙제 자체는 보상도
-// 차감도 없으므로 가상 용돈은 심부름을 거절하기 전과 그대로다.
-test('declining the errand event opens a homework quiz; a wrong answer re-rolls a new question, and a correct one closes it and returns to the game with the allowance unchanged', async ({ page }) => {
+// 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지) "거절하기"
+// 경로 — PR #121이 넣었던 숙제 퀴즈 페널티를 사용자 확인 후 제거했다
+// (지시서 7번: "거절 선택 시: 보상 없이 모달을 닫고 즉시 학습 화면으로
+// 복귀합니다. 어떠한 페널티도 없음"). 거절은 이제 모달을 닫는 것
+// 외에 아무 일도 일으키지 않는다 — 용돈도 그대로, 숙제 퀴즈도 뜨지
+// 않는다.
+test('declining the errand event closes the modal immediately with no penalty and no reward', async ({ page }) => {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
@@ -2991,24 +2991,126 @@ test('declining the errand event opens a homework quiz; a wrong answer re-rolls 
   await expect(page.getByTestId('errand-event-modal')).toBeVisible()
   await page.getByTestId('errand-event-decline-button').click()
 
-  await expect(page.getByTestId('homework-quiz-modal')).toBeVisible()
-  // 문제은행의 어떤 문제가 나오든 항상 틀리도록, 이 문제은행에서 한
-  // 번도 정답(correctIndex)이 아닌 3번째 선택지(index 2)를 고른다.
-  await page.getByTestId('homework-quiz-choice').nth(2).click()
-  await expect(page.getByTestId('homework-quiz-feedback-wrong')).toBeVisible()
-  await page.getByTestId('homework-quiz-retry-button').click()
+  // 모달이 닫히고, 그 외에는 아무 일도 일어나지 않는다 — 숙제 퀴즈
+  // 없이 바로 학습 화면(메뉴)으로 돌아가고, 용돈도 식사(-10,000원)
+  // 뒤 그대로 90,000원이다.
+  await expect(page.getByTestId('errand-event-modal')).not.toBeVisible()
+  await expect(page.getByTestId('homework-quiz-modal')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '가르치기' })).toBeVisible()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+})
 
-  // 새 문제가 나왔다 — 이번엔 실제 정답을 찾아서 고른다.
-  const questionText = await page.getByTestId('homework-quiz-question').textContent()
-  const matched = HOUSEWORK_QUIZ_QUESTIONS.find((q) => q.question === questionText?.trim())
-  expect(matched).toBeTruthy()
-  await page.getByTestId('homework-quiz-choice').nth(matched!.correctIndex).click()
-  await expect(page.getByTestId('homework-quiz-feedback-correct')).toBeVisible()
+// 지시서(8세 엄마 심부름 이벤트 구현 및 중복 보상 방지) 3번 — "동일한
+// 유저가 하루에 여러 번 이벤트를 발생시켜 용돈을 중복으로 받지
+// 못하도록" — 오늘 한 번 보상을 받고 나면, 같은 날 안에는 심부름
+// 이벤트 자체가 다시 뜨지 않아야 한다(모달이 아예 안 뜨므로 중복
+// 수락도 구조적으로 불가능하다).
+test('accepting the errand event once blocks it from firing again the same day (no duplicate reward)', async ({ page }) => {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() },
+        }),
+      })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: body.companionType,
+            stage: 'child',
+            profession: body.profession,
+            custom_profession_label: body.customProfessionLabel ?? null,
+            level: 1,
+            exp: 0,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-dedup',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
 
-  await page.getByTestId('homework-quiz-complete-button').click()
-  await expect(page.getByTestId('homework-quiz-modal')).not.toBeVisible()
-  await expect(page.getByTestId('speech-bubble')).toContainText('숙제를 다 했어요')
-  // 숙제는 보상도 차감도 없다 — 식사(-10,000원) 뒤 그대로 90,000원.
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'AI검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  await teachThreeTimes('round0') // 배고픔 이벤트
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원', { timeout: 8000 })
+
+  await teachThreeTimes('round1') // 심부름 이벤트 1회차 — 수락해서 오늘치를 받는다.
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  await teachThreeTimes('round2') // 배고픔 이벤트가 다시 번갈아 뜬다.
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await page.getByTestId('hungry-event-feed-button').click()
+  // 걷기 → 식사 연출(최대 6초) 뒤 모달이 닫히며 차감된다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원', { timeout: 8000 })
+
+  // 심부름 차례가 다시 와도, 오늘 이미 받았으므로 모달 자체가 뜨지
+  // 않는다(용돈도 그대로) — "이미 보상을 받은 상태라면 이벤트가 다시
+  // 발생하지 않도록 처리하세요".
+  await teachThreeTimes('round3')
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
 })
 
