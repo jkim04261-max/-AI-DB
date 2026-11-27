@@ -779,3 +779,64 @@ export interface CharacterExamAttemptRow {
   exp_awarded: number
   created_at: string
 }
+
+// 서버 지갑(캐릭터별 가상 용돈) — 신규 테이블 3개만 추가한다(기존 테이블·행은
+// 건드리지 않음). WALLET_API_ENABLED=true일 때만 호출된다(api/_lib/wallet.ts).
+let walletTablesReady: Promise<unknown> | null = null
+
+export function ensureWalletTables() {
+  if (!walletTablesReady) {
+    walletTablesReady = (async () => {
+      await ensureCharacterTables()
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_wallets (
+          character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          balance_won INTEGER NOT NULL CHECK (balance_won >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS character_wallet_ledger (
+          id BIGSERIAL PRIMARY KEY,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          reason TEXT NOT NULL,
+          delta_won INTEGER NOT NULL,
+          balance_after INTEGER NOT NULL,
+          event_id TEXT,
+          idempotency_key TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (character_id, idempotency_key)
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS character_wallet_ledger_char_idx
+          ON character_wallet_ledger (character_id, created_at DESC)
+      `
+      await sql`
+        CREATE TABLE IF NOT EXISTS job_quiz_challenges (
+          id TEXT PRIMARY KEY,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          context TEXT NOT NULL CHECK (context IN ('meal', 'errand')),
+          profession TEXT NOT NULL,
+          age_tier TEXT NOT NULL,
+          question_ids TEXT[] NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'settled', 'expired')),
+          correct_count SMALLINT,
+          delta_won INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          settled_at TIMESTAMPTZ
+        )
+      `
+      await sql`
+        CREATE INDEX IF NOT EXISTS job_quiz_challenges_char_idx
+          ON job_quiz_challenges (character_id, created_at DESC)
+      `
+    })().catch((err) => {
+      walletTablesReady = null
+      throw err
+    })
+  }
+  return walletTablesReady
+}
