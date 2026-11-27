@@ -27,6 +27,8 @@ import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
 import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import JobEventModal from '../components/grow/JobEventModal'
+import JobQuizChallengeModal, { type MoneyHistoryEntry } from '../components/grow/JobQuizChallengeModal'
+import { applyJobQuizSettlement, canAttemptJobQuizChallenge, type JobQuizSettlement } from '../services/jobQuizChallenge'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -243,6 +245,16 @@ export default function GrowPage() {
   // 남은 문제 풀기 시도 횟수(null=페널티 없음), feedError=잔액 부족
   // 안내(모달 안에서만 보임, 다음에 열 때 자동으로 사라짐).
   const [hungryEventOpen, setHungryEventOpen] = useState(false)
+  // 직업 퀴즈 도전(밥 먹이기/엄마 심부름 공통) — 어느 이벤트에서 열렸는지,
+  // 그리고 가상 용돈 변동 내역(이번 접속 동안만 보관, DB 미저장).
+  const [quizChallenge, setQuizChallenge] = useState<'meal' | 'errand' | null>(null)
+  const [moneyHistory, setMoneyHistory] = useState<MoneyHistoryEntry[]>([])
+  const moneyHistoryIdRef = useRef(0)
+  const recordMoney = (label: string, deltaWon: number) => {
+    moneyHistoryIdRef.current += 1
+    const id = moneyHistoryIdRef.current
+    setMoneyHistory((prev) => [{ id, label, deltaWon }, ...prev].slice(0, 20))
+  }
   const [isHungry, setIsHungry] = useState(false)
   const [hungryQuizRemaining, setHungryQuizRemaining] = useState<number | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
@@ -750,7 +762,10 @@ export default function GrowPage() {
       setFeedError('잔액이 부족하여 밥을 사줄 수 없어요. 문제를 더 풀어주세요!')
       return
     }
-    if (wallet.balanceWon !== null) charge(wallet, MEAL_COST_WON, 'meal')
+    if (wallet.balanceWon !== null) {
+      charge(wallet, MEAL_COST_WON, 'meal')
+      recordMoney('밥 먹이기', -MEAL_COST_WON)
+    }
     setHungryEventOpen(false)
     setFeedError(null)
     setIsHungry(false)
@@ -770,6 +785,36 @@ export default function GrowPage() {
     setFeedError(null)
     setIsHungry(true)
     setHungryQuizRemaining(HUNGRY_QUIZ_PENALTY_COUNT)
+  }
+
+  // 직업 퀴즈 도전 — 밥 먹이기는 이 선택과 상관없이 나중에 계속 가능하다
+  // (배고픈 상태를 유지해 기존 "나중에 먹기" 흐름으로 이어진다).
+  const handleHungryChallenge = () => {
+    if (!canAttemptJobQuizChallenge(wallet.balanceWon)) return
+    handleFeedLater()
+    setQuizChallenge('meal')
+  }
+
+  const handleErrandChallenge = () => {
+    if (!canAttemptJobQuizChallenge(wallet.balanceWon)) return
+    setErrandEventOpen(false)
+    setQuizChallenge('errand')
+  }
+
+  // 최종 결과로 단 한 번만 호출된다(JobQuizChallengeModal의 settledRef).
+  const handleChallengeSettle = (settlement: JobQuizSettlement) => {
+    applyJobQuizSettlement(wallet, settlement)
+    if (settlement.deltaWon !== 0) {
+      recordMoney(quizChallenge === 'meal' ? '직업 퀴즈(밥 먹이기)' : '직업 퀴즈(엄마 심부름)', settlement.deltaWon)
+      setMoneyPopup(settlement.deltaWon)
+      const t = setTimeout(() => setMoneyPopup(null), 1800)
+      outingTimeoutsRef.current.push(t)
+    }
+  }
+
+  const handleChallengeClose = () => {
+    setQuizChallenge(null)
+    showBubble('직업 퀴즈 도전을 마쳤어요!')
   }
 
   // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 패널을 닫고 짧게
@@ -809,7 +854,10 @@ export default function GrowPage() {
   // 온보딩 전)는 알바/식사 이벤트와 같은 이유로 금액 변화를 건너뛴다.
   const handleErrandAccept = () => {
     setErrandEventOpen(false)
-    if (wallet.balanceWon !== null) reward(wallet, ERRAND_EARNING_WON, 'errand')
+    if (wallet.balanceWon !== null) {
+      reward(wallet, ERRAND_EARNING_WON, 'errand')
+      recordMoney('엄마 심부름', ERRAND_EARNING_WON)
+    }
     setMoneyPopup(ERRAND_EARNING_WON)
     const t = setTimeout(() => setMoneyPopup(null), 1800)
     outingTimeoutsRef.current.push(t)
@@ -1209,7 +1257,7 @@ export default function GrowPage() {
                       data-testid="money-popup"
                       className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl"
                     >
-                      +{moneyPopup.toLocaleString('ko-KR')}원 💰
+                      {moneyPopup >= 0 ? '+' : '-'}{Math.abs(moneyPopup).toLocaleString('ko-KR')}원 💰
                     </span>
                   )}
                   {leveledUpTo !== null && (
@@ -1239,6 +1287,8 @@ export default function GrowPage() {
                       errorMessage={feedError}
                       onFeed={handleFeedCharacter}
                       onLater={handleFeedLater}
+                      onChallenge={handleHungryChallenge}
+                      challengeDisabled={!canAttemptJobQuizChallenge(wallet.balanceWon)}
                     />
                   )}
                   {errandEventOpen && (
@@ -1248,6 +1298,19 @@ export default function GrowPage() {
                       ageNumber={ageNumber}
                       onAccept={handleErrandAccept}
                       onDecline={handleErrandDecline}
+                      onChallenge={handleErrandChallenge}
+                      challengeDisabled={!canAttemptJobQuizChallenge(wallet.balanceWon)}
+                    />
+                  )}
+                  {quizChallenge && (
+                    <JobQuizChallengeModal
+                      companionType={character.companionType}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      balanceWon={wallet.balanceWon}
+                      history={moneyHistory}
+                      onSettle={handleChallengeSettle}
+                      onClose={handleChallengeClose}
                     />
                   )}
                   {homeworkQuizOpen && <HomeworkQuizModal onComplete={handleHomeworkComplete} />}

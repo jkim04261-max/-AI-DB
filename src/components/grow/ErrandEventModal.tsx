@@ -28,12 +28,16 @@ export default function ErrandEventModal({
   ageNumber,
   onAccept,
   onDecline,
+  onChallenge,
+  challengeDisabled,
 }: {
   companionType: CompanionType
   ageTier: AgeTier
   ageNumber?: number
   onAccept: () => void
   onDecline: () => void
+  onChallenge: () => void
+  challengeDisabled: boolean
 }) {
   const { src: walkingSrc, onError: handleWalkingPortraitError } = useImageFallback(
     walkingPortraitSrc(companionType, ageTier, ageNumber),
@@ -96,6 +100,7 @@ export default function ErrandEventModal({
         type="button"
         onClick={onDecline}
         disabled={departing}
+        data-testid="errand-event-decline-button"
         aria-label="거절하기"
         className="absolute right-3 top-3 z-20 text-lg font-bold text-white/80 hover:text-white disabled:opacity-40"
       >
@@ -115,7 +120,7 @@ export default function ErrandEventModal({
               src={walkingSrc}
               onError={handleWalkingPortraitError}
               alt=""
-              className="h-28 w-28 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]"
+              className="h-44 w-44 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)] sm:h-56 sm:w-56"
             />
           </div>
           {departing && (
@@ -137,17 +142,22 @@ export default function ErrandEventModal({
             disabled={departing}
             className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-bold text-white shadow-[0_2px_0_rgba(146,64,14,0.4)] hover:from-amber-600 hover:to-yellow-600 disabled:opacity-70"
           >
-            심부름 하러 가기 (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
+            심부름하기 (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
           </button>
           <button
             type="button"
-            data-testid="errand-event-decline-button"
-            onClick={onDecline}
-            disabled={departing}
-            className="rounded-xl bg-white/20 px-4 py-2 text-xs font-bold text-white hover:bg-white/30 disabled:opacity-40"
+            data-testid="errand-event-quiz-button"
+            onClick={onChallenge}
+            disabled={departing || challengeDisabled}
+            className="rounded-xl bg-white/25 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/35 disabled:opacity-40"
           >
-            거절하기
+            직업 퀴즈 도전하기
           </button>
+          {challengeDisabled && (
+            <p data-testid="errand-event-quiz-disabled-note" className="text-center text-[11px] font-semibold text-amber-200">
+              가상 용돈이 20,000원 이상일 때 도전할 수 있어요.
+            </p>
+          )}
         </div>
       </div>
     </div>

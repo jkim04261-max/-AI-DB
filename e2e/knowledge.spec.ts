@@ -4004,3 +4004,142 @@ test('objective quiz choices render in a 2-column grid once there are 10+ option
   await expect(page.locator('[data-testid="objective-quiz-choices-1"] button')).toHaveCount(3)
   await expect(page.getByTestId('objective-quiz-choices-1')).not.toHaveClass(/sm:grid-cols-2/)
 })
+
+// 지시서(선택형 직업 퀴즈 보상·패널티) — 밥 먹이기/엄마 심부름 이벤트의
+// "직업 퀴즈 도전하기": 2문제 전부 정답 +20,000원, 하나라도 오답 -20,000원
+// (부분 보상 없음), 최종 결과로 한 번만 정산한다.
+async function setupChallengeScenario(page: Page) {
+  await failUnmockedApiCalls(page)
+  await mockMe(page, { user: USER })
+  await mockEmptyConversations(page)
+  let saveCount = 0
+  await mockCharacterApi(page, {
+    characters: [],
+    onCreate: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: { id: 1, user_id: USER.id, companion_type: body.companionType, stage: 'child', profession: null, level: 1, exp: 0, created_at: new Date().toISOString() },
+        }),
+      })
+    },
+    onSetProfession: async (route) => {
+      const body = route.request().postDataJSON() as { companionType: string; profession: string; customProfessionLabel?: string }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          character: {
+            id: 1,
+            user_id: USER.id,
+            companion_type: body.companionType,
+            stage: 'child',
+            profession: body.profession,
+            custom_profession_label: body.customProfessionLabel ?? null,
+            level: 1,
+            exp: 0,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      })
+    },
+    onVerify: async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          verification: { status: 'appropriate', explanation: 'ok', relevance: 'ok', issues: '', suggestion: '' },
+          verificationToken: 'tok-challenge',
+          characterReply: '알려주셔서 고마워요!',
+          remaining: 9,
+          dailyTeachLimit: 10,
+        }),
+      })
+    },
+    onSave: async (route) => {
+      saveCount += 1
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entry: { id: saveCount, character_id: 1, profession: 'custom', title: 'x', original_content: 'y', final_content: 'y', verification_status: 'appropriate', source: 'user_taught', created_at: new Date().toISOString() },
+          savedReply: '배웠어요!',
+          expAwarded: 10,
+          exp: saveCount * 10,
+          level: 1,
+          leveledUp: false,
+        }),
+      })
+    },
+  })
+
+  await page.goto('/grow')
+  await page.getByTestId('character-create-nuri').click()
+  await page.getByTestId('opening-profile-profession-input').fill('숲해설가')
+  await page.getByTestId('opening-profile-start-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+
+  const teachThreeTimes = async (roundLabel: string) => {
+    await page.getByRole('button', { name: '가르치기' }).click()
+    for (let i = 0; i < 3; i++) {
+      await page.getByPlaceholder('지식 제목').fill(`${roundLabel} ${i}`)
+      await page.getByTestId('knowledge-content-textarea').fill(`내용 ${roundLabel} ${i}`)
+      await page.getByRole('button', { name: 'AI검증하기' }).click()
+      await page.getByRole('button', { name: '저장' }).click()
+      if (i < 2) await expect(page.getByPlaceholder('지식 제목')).toHaveValue('')
+    }
+  }
+
+  return { teachThreeTimes }
+}
+
+async function answerChallenge(page: Page, mode: 'allCorrect' | 'oneWrong' | 'allWrong') {
+  await expect(page.getByTestId('job-quiz-challenge-modal')).toBeVisible()
+  for (let i = 0; i < 2; i++) {
+    const text = (await page.getByTestId('job-quiz-question').textContent())?.trim()
+    const q = ALL_PART_TIME_JOB_QUESTIONS.find((x) => x.question === text)
+    expect(q).toBeTruthy()
+    const wrongIndex = q!.choices.findIndex((_, idx) => idx !== q!.correctIndex)
+    const pick = mode === 'allCorrect' || (mode === 'oneWrong' && i === 0) ? q!.correctIndex : wrongIndex
+    await page.getByTestId('job-quiz-choice').nth(pick).click()
+    await page.getByTestId('job-quiz-next-button').click()
+  }
+}
+
+test('meal event: job quiz challenge with one wrong answer deducts 20,000 once, shows answers/balance/history, and the meal stays possible', async ({ page }) => {
+  const { teachThreeTimes } = await setupChallengeScenario(page)
+  await teachThreeTimes('round0')
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-feed-button')).toBeVisible()
+  await page.getByTestId('hungry-event-quiz-button').click()
+  await answerChallenge(page, 'oneWrong')
+  await expect(page.getByTestId('job-quiz-result')).toHaveAttribute('data-outcome', 'fail')
+  await expect(page.getByTestId('job-quiz-result-message')).toContainText('가상 용돈 20,000원이 차감되었습니다')
+  await expect(page.getByTestId('job-quiz-balance')).toContainText('80,000원')
+  await expect(page.getByTestId('job-quiz-review')).toHaveCount(2)
+  await expect(page.getByTestId('job-quiz-history')).toContainText('-20,000원')
+  await page.getByTestId('job-quiz-return-button').click()
+  await expect(page.getByTestId('job-quiz-challenge-modal')).toHaveCount(0)
+  // 정산은 한 번 — 80,000원 그대로. 배고픈 상태(경고 배너)도 유지돼 밥은 계속 가능하다.
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('80,000원')
+})
+
+test('errand event: job quiz challenge with both correct adds 20,000 once; accepting the errand alone still adds 10,000', async ({ page }) => {
+  const { teachThreeTimes } = await setupChallengeScenario(page)
+  await teachThreeTimes('round0')
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+
+  await teachThreeTimes('round1')
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-quiz-button').click()
+  await answerChallenge(page, 'allCorrect')
+  await expect(page.getByTestId('job-quiz-result')).toHaveAttribute('data-outcome', 'success')
+  await expect(page.getByTestId('job-quiz-result-message')).toContainText('가상 용돈 20,000원이 적립되었습니다')
+  await expect(page.getByTestId('job-quiz-balance')).toContainText('110,000원')
+  await page.getByTestId('job-quiz-return-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('110,000원')
+})

@@ -87,19 +87,19 @@ function BuildingMarker({
     <div
       data-testid="town-building-placed"
       data-plot-building-type={buildingType}
-      className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-full flex-col items-center ${dimmed ? 'opacity-80' : ''}`}
+      className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-[62%] flex-col items-center ${dimmed ? 'opacity-80' : ''}`}
       style={{ left: `${left}%`, top: `${top}%` }}
     >
       <div
         data-testid="town-building-placed-sign"
-        className="mb-0.5 max-w-[7rem] truncate rounded-md border border-amber-300/70 bg-amber-100/95 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 shadow sm:text-xs"
+        className="mb-0.5 max-w-[9rem] truncate rounded-md border border-amber-300/70 bg-amber-100/95 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow sm:max-w-[11rem] sm:text-sm"
       >
         {buildingName}
       </div>
       <img
         src={BUILDING_TYPE_IMAGE[buildingType]}
         alt={`${buildingName} 건물`}
-        className="h-16 w-20 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)] sm:h-20 sm:w-24"
+        className="h-24 w-[7.5rem] object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)] sm:h-32 sm:w-40"
       />
     </div>
   )
