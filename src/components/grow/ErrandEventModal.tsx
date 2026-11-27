@@ -20,7 +20,12 @@ const ERRAND_EARNING_WON = 10_000
 // "심부름 하러 가기" 클릭 후 장보러 가는 연출을 보여주는 시간 —
 // HungryEventModal의 FEED_ANIMATION_MS와 같은 원칙(연출이 끝나야
 // 실제 onAccept를 불러 모달을 닫는다).
-const ERRAND_ANIMATION_MS = 900
+//
+// 간헐 실패 수정: 가게 내부 배경은 0.7초(duration-700) 동안 페이드인되는데,
+// 예전엔 0.9초 만에 모달을 닫아 페이드가 끝난 뒤 보이는 시간이 0.2초뿐이었다
+// — 느린 환경에선 "배경이 가게 내부로 바뀐 상태"를 사용자도, E2E도 놓칠 수
+// 있었다. 페이드(0.7초) 뒤에 가게 내부를 약 0.9초 더 보여주도록 늘렸다.
+const ERRAND_ANIMATION_MS = 1600
 
 export default function ErrandEventModal({
   companionType,
