@@ -4143,3 +4143,27 @@ test('errand event: job quiz challenge with both correct adds 20,000 once; accep
   await page.getByTestId('job-quiz-return-button').click()
   await expect(page.getByTestId('mock-wallet-balance')).toContainText('110,000원')
 })
+
+// 신규 엄마 심부름 장면(두부·콩나물 시장 → 엄마께 전달): 심부름을 수락하기
+// 전에는 해당 WebP를 내려받지 않고, 수락 후 시장 → 전달 장면 순서로 바뀐다.
+test('errand scenes (market → delivery to mom) are only downloaded after accepting the errand and appear in order', async ({ page }) => {
+  const sceneRequests: string[] = []
+  page.on('request', (req) => {
+    if (req.resourceType() === 'image' && /errand-(market|delivery)-(pc|mobile)/.test(req.url())) sceneRequests.push(req.url())
+  })
+  const { teachThreeTimes } = await setupChallengeScenario(page)
+  await teachThreeTimes('round0')
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
+  await teachThreeTimes('round1')
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  expect(sceneRequests).toHaveLength(0)
+
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-store-bg')).toHaveCSS('opacity', '1')
+  await expect.poll(() => sceneRequests.some((u) => u.includes('errand-market'))).toBe(true)
+  expect(sceneRequests.some((u) => u.includes('errand-delivery'))).toBe(false)
+  await expect(page.getByTestId('errand-event-delivery-bg')).toHaveCSS('opacity', '1')
+  await expect.poll(() => sceneRequests.some((u) => u.includes('errand-delivery'))).toBe(true)
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0, { timeout: 8000 })
+})

@@ -2,6 +2,10 @@ import townSquare from '../assets/grow/life-events/town-square.webp'
 import restaurantInterior from '../assets/grow/life-events/restaurant-interior.webp'
 import storeInterior from '../assets/grow/life-events/store-interior.webp'
 import classroomInterior from '../assets/grow/life-events/classroom-interior.webp'
+import errandMarketPc from '../assets/grow/life-events/errand-market-pc.webp'
+import errandMarketMobile from '../assets/grow/life-events/errand-market-mobile.webp'
+import errandDeliveryPc from '../assets/grow/life-events/errand-delivery-pc.webp'
+import errandDeliveryMobile from '../assets/grow/life-events/errand-delivery-mobile.webp'
 
 // 지시서(이벤트별(밥 먹기/심부름/알바) 2.5D 배경 이미지 매핑 및 입장
 // 연출 구현): 사용자가 채팅에 붙여넣은 4장의 이미지를 실제 파일로
@@ -31,3 +35,12 @@ export const TOWN_SQUARE_BG_SRC = townSquare
 export const RESTAURANT_INTERIOR_SRC = restaurantInterior
 export const STORE_INTERIOR_SRC = storeInterior
 export const CLASSROOM_INTERIOR_SRC = classroomInterior
+
+// 엄마 심부름 신규 장면 2종(두부·콩나물 시장 구매 / 엄마께 전달). 출처:
+// 사용자(제임스)가 직접 제공한 이미지(2026-11-28), 누리·두리 기존 캐릭터
+// 디자인과 동일 — 외부 서비스·AI 호출 없이 정적 파일만 사용한다.
+// 원본 PNG(각 약 2.7MB)는 저장소·배포 자산에 넣지 않고, WebP로만 변환해
+// 넣었다(PC 1280px ≤200KB, 모바일 720px ≤100KB). 심부름 수락 이후
+// 해당 장면이 나올 때에만 URL이 사용되어 그때 내려받는다.
+export const ERRAND_MARKET_SCENE_SRC = { pc: errandMarketPc, mobile: errandMarketMobile }
+export const ERRAND_DELIVERY_SCENE_SRC = { pc: errandDeliveryPc, mobile: errandDeliveryMobile }
