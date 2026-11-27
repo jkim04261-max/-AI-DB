@@ -79,6 +79,9 @@ async function mockCharacterApi(
     // knowledgeValidationTickets)로 호출마다 쌓인 값을 유지한다.
     onPurchaseAiRecommendTicket?: (route: Route) => Promise<void>
     onPurchaseKnowledgeValidationTicket?: (route: Route) => Promise<void>
+    // 서버 지갑 모드 전용 — wallet/wallet-tx/quiz-challenge-* 4개 액션을 모두
+    // 이 함수가 처리한다(지정하지 않으면 지갑 꺼짐 {enabled:false}).
+    walletServer?: (route: Route, action: string) => Promise<void>
   },
 ) {
   // 지시서(만능마켓 구매 즉시 이용권 실시간 연동): 기본 동작은 실제
@@ -122,6 +125,15 @@ async function mockCharacterApi(
     // "not passed yet" since these tests aren't about the exam flow.
     if (method === 'GET' && action === 'exam') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
+      return
+    }
+    // 서버 지갑(PR: wallet-server): 기본은 꺼짐 — 기존 체험판 지갑을 그대로 쓴다.
+    if (options.walletServer && (action === 'wallet' || action === 'wallet-tx' || action === 'quiz-challenge-start' || action === 'quiz-challenge-submit')) {
+      await options.walletServer(route, action)
+      return
+    }
+    if (method === 'GET' && action === 'wallet') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false }) })
       return
     }
     // PR #49: 상단 리소스 바의 "행동력"용 GET ?action=usage 기본값 —
@@ -4008,13 +4020,14 @@ test('objective quiz choices render in a 2-column grid once there are 10+ option
 // 지시서(선택형 직업 퀴즈 보상·패널티) — 밥 먹이기/엄마 심부름 이벤트의
 // "직업 퀴즈 도전하기": 2문제 전부 정답 +20,000원, 하나라도 오답 -20,000원
 // (부분 보상 없음), 최종 결과로 한 번만 정산한다.
-async function setupChallengeScenario(page: Page) {
+async function setupChallengeScenario(page: Page, walletServer?: (route: Route, action: string) => Promise<void>) {
   await failUnmockedApiCalls(page)
   await mockMe(page, { user: USER })
   await mockEmptyConversations(page)
   let saveCount = 0
   await mockCharacterApi(page, {
     characters: [],
+    walletServer,
     onCreate: async (route) => {
       const body = route.request().postDataJSON() as { companionType: string }
       await route.fulfill({
@@ -4166,4 +4179,102 @@ test('errand scenes (market → delivery to mom) are only downloaded after accep
   await expect(page.getByTestId('errand-event-delivery-bg')).toHaveCSS('opacity', '1')
   await expect.poll(() => sceneRequests.some((u) => u.includes('errand-delivery'))).toBe(true)
   await expect(page.getByTestId('errand-event-modal')).toHaveCount(0, { timeout: 8000 })
+})
+
+// ── 서버 지갑 모드(WALLET_API_ENABLED=true) ─────────────────────────────
+// 가짜 서버가 잔액·중복 방지·채점을 서버처럼 처리한다. 화면은 서버 값을 따른다.
+function createFakeWalletServer() {
+  const state = { balance: 100_000, txKeys: new Set<string>(), txCalls: 0, startCalls: 0, submitCalls: 0, submitted: false }
+  const history: { reason: string; deltaWon: number; balanceAfterWon: number; createdAt: string }[] = []
+  const questions = [
+    { id: 'q1', text: '서버 문제 1', choices: ['가', '나', '다', '라'], correctIndex: 0, explanation: '가가 정답이에요.' },
+    { id: 'q2', text: '서버 문제 2', choices: ['가', '나', '다', '라'], correctIndex: 1, explanation: '나가 정답이에요.' },
+  ]
+  const FIXED: Record<string, number> = { meal: -10_000, errand: 10_000, part_time_job: 20_000, job_event: 30_000, quiz_reward: 30_000, quiz_snack: -20_000 }
+  const json = (route: Route, body: unknown, status = 200) =>
+    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  const handler = async (route: Route, action: string) => {
+    if (action === 'wallet') return json(route, { enabled: true, balanceWon: state.balance, history })
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>
+    if (action === 'wallet-tx') {
+      state.txCalls += 1
+      const key = `${body.reason}:${body.eventId}`
+      if (state.txKeys.has(key)) return json(route, { enabled: true, status: 'duplicate', balanceWon: state.balance })
+      const delta = FIXED[String(body.reason)] ?? 0
+      if (state.balance + delta < 0) return json(route, { enabled: true, status: 'insufficient', balanceWon: state.balance })
+      state.txKeys.add(key)
+      state.balance += delta
+      history.unshift({ reason: String(body.reason), deltaWon: delta, balanceAfterWon: state.balance, createdAt: new Date().toISOString() })
+      return json(route, { enabled: true, status: 'applied', balanceWon: state.balance })
+    }
+    if (action === 'quiz-challenge-start') {
+      state.startCalls += 1
+      if (state.balance < 20_000) return json(route, { error: '가상 용돈이 부족해서 도전할 수 없어요.' }, 409)
+      return json(route, { enabled: true, challengeId: 'ch-1', balanceWon: state.balance, questions: questions.map(({ id, text, choices }) => ({ id, text, choices })) })
+    }
+    // quiz-challenge-submit
+    state.submitCalls += 1
+    const answers = (body.answers as number[]) ?? []
+    const correctCount = answers.filter((a, i) => a === questions[i].correctIndex).length
+    if (!state.submitted) {
+      state.submitted = true
+      const delta = correctCount === 2 ? 20_000 : -20_000
+      state.balance += delta
+      history.unshift({ reason: delta > 0 ? 'job_quiz_reward' : 'job_quiz_penalty', deltaWon: delta, balanceAfterWon: state.balance, createdAt: new Date().toISOString() })
+    }
+    const last = history[0]
+    return json(route, {
+      outcome: correctCount === 2 ? 'success' : 'fail',
+      correctCount,
+      deltaWon: last.deltaWon,
+      balanceWon: state.balance,
+      review: questions.map((q, i) => ({ ...q, myAnswer: answers[i] })),
+      history,
+    })
+  }
+  return { state, handler }
+}
+
+test('server wallet: server balance is authoritative and the meal charge is sent to the server exactly once', async ({ page }) => {
+  const fake = createFakeWalletServer()
+  const { teachThreeTimes } = await setupChallengeScenario(page, fake.handler)
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('100,000원')
+  await teachThreeTimes('round0')
+  await page.getByTestId('hungry-event-feed-button').click()
+  await expect(page.getByTestId('hungry-event-modal')).toHaveCount(0, { timeout: 8000 })
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('90,000원')
+  await expect.poll(() => fake.state.balance).toBe(90_000)
+  expect(fake.state.txCalls).toBe(1)
+})
+
+test('server wallet: job quiz challenge is graded and settled by the server once, with explanations and server history', async ({ page }) => {
+  const fake = createFakeWalletServer()
+  const { teachThreeTimes } = await setupChallengeScenario(page, fake.handler)
+  await teachThreeTimes('round0')
+  await page.getByTestId('hungry-event-quiz-button').click()
+  await expect(page.getByTestId('job-quiz-challenge-modal')).toBeVisible()
+  await expect(page.getByTestId('job-quiz-question')).toHaveText('서버 문제 1')
+  await page.getByTestId('job-quiz-choice').nth(0).click()
+  await page.getByTestId('job-quiz-next-button').click()
+  await page.getByTestId('job-quiz-choice').nth(0).click() // 두 번째는 일부러 오답(정답 1번)
+  await page.getByTestId('job-quiz-next-button').dblclick()
+  await expect(page.getByTestId('job-quiz-result')).toHaveAttribute('data-outcome', 'fail')
+  await expect(page.getByTestId('job-quiz-balance')).toContainText('80,000원')
+  await expect(page.getByTestId('job-quiz-explanation')).toHaveCount(2)
+  await expect(page.getByTestId('job-quiz-history')).toContainText('-20,000원')
+  expect(fake.state.balance).toBe(80_000)
+  expect(fake.state.startCalls).toBe(1)
+  await page.getByTestId('job-quiz-return-button').click()
+  await expect(page.getByTestId('mock-wallet-balance')).toContainText('80,000원')
+})
+
+test('server wallet: when the server refuses to start a challenge (insufficient balance) the modal does not open', async ({ page }) => {
+  const fake = createFakeWalletServer()
+  const { teachThreeTimes } = await setupChallengeScenario(page, fake.handler)
+  await teachThreeTimes('round0')
+  fake.state.balance = 10_000 // 다른 기기에서 사용해 서버 잔액이 더 적은 경우
+  await page.getByTestId('hungry-event-quiz-button').click()
+  await expect(page.getByTestId('job-quiz-challenge-modal')).toHaveCount(0)
+  await expect(page.getByText('가상 용돈이 부족해서 도전할 수 없어요.')).toBeVisible()
+  await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
 })

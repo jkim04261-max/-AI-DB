@@ -75,6 +75,11 @@ async function mockCharacterApi(
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ questions: [], alreadyPassed: false }) })
       return
     }
+    // 서버 지갑(PR: wallet-server): 기본은 꺼짐 — 기존 체험판 지갑을 그대로 쓴다.
+    if (method === 'GET' && action === 'wallet') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false }) })
+      return
+    }
     if (method === 'GET' && action === 'usage') {
       if (options.onUsage) {
         await options.onUsage(route)

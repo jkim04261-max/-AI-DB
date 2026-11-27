@@ -5,6 +5,7 @@ import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { walkingPortraitSrc } from '../../data/characterWalking'
 import { useImageFallback } from '../../hooks/useImageFallback'
 import { TOWN_SQUARE_BG_SRC } from '../../data/lifeEventAssets'
+import type { ChallengeQuestion, ChallengeResult } from '../../services/walletApi'
 import {
   computeJobQuizSettlement,
   JOB_QUIZ_PENALTY_WON,
@@ -12,6 +13,21 @@ import {
   pickJobQuizQuestions,
   type JobQuizSettlement,
 } from '../../services/jobQuizChallenge'
+
+// 서버 지갑 모드: 문제·채점·정산을 모두 서버가 한다(정답은 제출 전까지 내려오지 않는다).
+export interface RemoteChallenge {
+  questions: ChallengeQuestion[]
+  submit: (answers: number[]) => Promise<ChallengeResult>
+}
+
+interface ReviewItem {
+  id: string
+  question: string
+  choices: string[]
+  correctIndex: number
+  myAnswer: number | undefined
+  explanation?: string
+}
 
 export interface MoneyHistoryEntry {
   id: number
@@ -32,6 +48,7 @@ export default function JobQuizChallengeModal({
   history,
   onSettle,
   onClose,
+  remote,
 }: {
   companionType: CompanionType
   ageTier: AgeTier
@@ -40,12 +57,20 @@ export default function JobQuizChallengeModal({
   history: MoneyHistoryEntry[]
   onSettle: (settlement: JobQuizSettlement) => void
   onClose: () => void
+  remote?: RemoteChallenge
 }) {
   const { src: walkingSrc, onError: handlePortraitError } = useImageFallback(
     walkingPortraitSrc(companionType, ageTier, ageNumber),
     fullBodyPortraitSrc(companionType, ageTier, ageNumber),
   )
-  const [questions] = useState(() => pickJobQuizQuestions())
+  const [questions] = useState<{ id: string; question: string; choices: string[]; correctIndex?: number }[]>(() =>
+    remote
+      ? remote.questions.map((q) => ({ id: q.id, question: q.text, choices: q.choices }))
+      : pickJobQuizQuestions(),
+  )
+  const [remoteReview, setRemoteReview] = useState<ReviewItem[] | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const startBalanceRef = useRef(balanceWon)
   const settledRef = useRef(false)
   const [index, setIndex] = useState(0)
@@ -64,15 +89,32 @@ export default function JobQuizChallengeModal({
 
   const handleNext = () => {
     if (selected === null || settledRef.current) return
-    const nextPicks = [...picks, selected]
+    const nextPicks = picks.length > index ? picks : [...picks, selected]
     if (!isLast) {
       setPicks(nextPicks)
       setIndex((i) => i + 1)
       setSelected(null)
       return
     }
-    settledRef.current = true
     setPicks(nextPicks)
+    if (remote) {
+      if (submitting) return
+      setSubmitting(true)
+      setSubmitError(null)
+      remote
+        .submit(nextPicks)
+        .then((res) => {
+          settledRef.current = true
+          setRemoteReview(res.review.map((r, i) => ({ ...r, question: r.text, myAnswer: nextPicks[i] })))
+          const result: JobQuizSettlement = { outcome: res.outcome, deltaWon: res.deltaWon, balanceAfterWon: res.balanceWon }
+          setSettlement(result)
+          onSettle(result)
+        })
+        .catch((e: unknown) => setSubmitError(e instanceof Error ? e.message : '결과를 처리하지 못했어요. 다시 눌러 주세요.'))
+        .finally(() => setSubmitting(false))
+      return
+    }
+    settledRef.current = true
     const correctCount = nextPicks.filter((p, i) => p === questions[i].correctIndex).length
     const result = computeJobQuizSettlement(correctCount, questions.length, startBalanceRef.current)
     setSettlement(result)
@@ -80,6 +122,9 @@ export default function JobQuizChallengeModal({
   }
 
   const success = settlement?.outcome === 'success'
+  const reviewItems: ReviewItem[] =
+    remoteReview ??
+    questions.map((q, i) => ({ id: q.id, question: q.question, choices: q.choices, correctIndex: q.correctIndex ?? 0, myAnswer: picks[i] }))
 
   return (
     <div
@@ -121,10 +166,16 @@ export default function JobQuizChallengeModal({
                 type="button"
                 data-testid="job-quiz-next-button"
                 onClick={handleNext}
-                className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-bold text-white"
+                disabled={submitting}
+                className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
               >
-                {isLast ? '결과 보기' : '다음 문제'}
+                {submitting ? '확인하는 중...' : isLast ? '결과 보기' : '다음 문제'}
               </button>
+            )}
+            {submitError && (
+              <p data-testid="job-quiz-error" role="alert" className="text-center text-xs font-bold text-red-200">
+                {submitError}
+              </p>
             )}
           </div>
         )}
@@ -137,14 +188,20 @@ export default function JobQuizChallengeModal({
                 : `아쉽게도 도전에 실패했어요. 가상 용돈 ${formatWon(JOB_QUIZ_PENALTY_WON)}이 차감되었습니다. 정답과 해설을 확인해 보세요.`}
             </p>
             <ul className="flex flex-col gap-1 text-xs">
-              {questions.map((q, i) => {
-                const ok = picks[i] === q.correctIndex
+              {reviewItems.map((q) => {
+                const ok = q.myAnswer === q.correctIndex
                 return (
                   <li key={q.id} data-testid="job-quiz-review" className="rounded-lg bg-white/10 px-2 py-1.5">
                     <span className="font-bold">{ok ? '⭕' : '❌'} {q.question}</span>
                     <br />
                     정답: {q.choices[q.correctIndex]}
-                    {!ok && picks[i] !== undefined && <> (내 답: {q.choices[picks[i]]})</>}
+                    {!ok && q.myAnswer !== undefined && <> (내 답: {q.choices[q.myAnswer]})</>}
+                    {q.explanation && (
+                      <>
+                        <br />
+                        <span data-testid="job-quiz-explanation" className="text-white/80">💡 {q.explanation}</span>
+                      </>
+                    )}
                   </li>
                 )
               })}

@@ -48,6 +48,11 @@ async function mockCharacterApi(
       return
     }
     // PR #49: 상단 리소스 바의 "행동력"용 GET ?action=usage 기본값.
+    // 서버 지갑(PR: wallet-server): 기본은 꺼짐 — 기존 체험판 지갑을 그대로 쓴다.
+    if (method === 'GET' && action === 'wallet') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false }) })
+      return
+    }
     if (method === 'GET' && action === 'usage') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ teachRemaining: 10, teachLimit: 10, studyRemaining: 3, studyLimit: 3 }) })
       return
