@@ -30,6 +30,7 @@ import {
   addAiRecommendTickets,
   addKnowledgeValidationTickets,
 } from './_lib/ticketLimit'
+import { handleWalletGet, handleWalletTx, handleQuizChallengeStart, handleQuizChallengeSubmit } from './_lib/walletHandlers'
 import { signKnowledgeVerification, verifyKnowledgeVerificationToken } from './_lib/knowledgeToken'
 import {
   buildTeachReply,
@@ -242,6 +243,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = typeof req.query?.action === 'string' ? req.query.action : undefined
 
   if (req.method === 'GET') {
+    if (action === 'wallet') {
+      await handleWalletGet(req, res, session.sub)
+      return
+    }
     if (action === 'knowledge') {
       await handleListKnowledge(req, res, session.sub)
       return
@@ -333,6 +338,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (action === 'purchase-ai-recommend-ticket') {
       await handlePurchaseAiRecommendTicket(res, session.sub)
+      return
+    }
+    if (action === 'wallet-tx') {
+      await handleWalletTx(req, res, session.sub)
+      return
+    }
+    if (action === 'quiz-challenge-start') {
+      await handleQuizChallengeStart(req, res, session.sub)
+      return
+    }
+    if (action === 'quiz-challenge-submit') {
+      await handleQuizChallengeSubmit(req, res, session.sub)
       return
     }
     if (action === 'purchase-knowledge-validation-ticket') {

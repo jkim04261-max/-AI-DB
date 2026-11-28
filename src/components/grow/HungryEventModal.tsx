@@ -58,6 +58,8 @@ export default function HungryEventModal({
   errorMessage,
   onFeed,
   onLater,
+  onChallenge,
+  challengeDisabled,
 }: {
   companionType: CompanionType
   companionName: string
@@ -67,6 +69,8 @@ export default function HungryEventModal({
   errorMessage: string | null
   onFeed: () => void
   onLater: () => void
+  onChallenge: () => void
+  challengeDisabled: boolean
 }) {
   // 지시서(걷는 중 전신 그림): 평소엔 걷는 포즈, "밥 먹이기" 연출
   // 중에는 식사 포즈로 바꿔 보여준다 — 둘 다 에셋 로드 실패 시
@@ -153,6 +157,7 @@ export default function HungryEventModal({
         type="button"
         onClick={onLater}
         disabled={feeding}
+        data-testid="hungry-event-later-button"
         aria-label="나중에 먹기"
         className="absolute right-3 top-3 z-20 text-lg font-bold text-white/80 hover:text-white disabled:opacity-40"
       >
@@ -193,7 +198,7 @@ export default function HungryEventModal({
                 src={portraitSrc}
                 onError={handlePortraitError}
                 alt=""
-                className="h-28 w-28 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]"
+                className="h-44 w-44 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)] sm:h-56 sm:w-56"
               />
             </div>
             {eating && (
@@ -228,13 +233,18 @@ export default function HungryEventModal({
           </button>
           <button
             type="button"
-            data-testid="hungry-event-later-button"
-            onClick={onLater}
-            disabled={feeding}
-            className="rounded-xl bg-white/20 px-4 py-2 text-xs font-bold text-white hover:bg-white/30 disabled:opacity-40"
+            data-testid="hungry-event-quiz-button"
+            onClick={onChallenge}
+            disabled={feeding || challengeDisabled}
+            className="rounded-xl bg-white/25 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/35 disabled:opacity-40"
           >
-            나중에 먹기
+            직업 퀴즈 도전하기
           </button>
+          {challengeDisabled && (
+            <p data-testid="hungry-event-quiz-disabled-note" className="text-center text-[11px] font-semibold text-amber-200">
+              가상 용돈이 20,000원 이상일 때 도전할 수 있어요.
+            </p>
+          )}
         </div>
       </div>
     </div>

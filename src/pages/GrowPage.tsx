@@ -27,6 +27,8 @@ import HungryEventModal from '../components/grow/HungryEventModal'
 import ErrandEventModal from '../components/grow/ErrandEventModal'
 import HomeworkQuizModal from '../components/grow/HomeworkQuizModal'
 import JobEventModal from '../components/grow/JobEventModal'
+import JobQuizChallengeModal, { type MoneyHistoryEntry, type RemoteChallenge } from '../components/grow/JobQuizChallengeModal'
+import { applyJobQuizSettlement, canAttemptJobQuizChallenge, type JobQuizSettlement } from '../services/jobQuizChallenge'
 import { computeStatGauges, dominantStatLabel } from '../data/characterStats'
 import { appearanceTierForLevel } from '../data/characterAppearance'
 import { AGE_TIER_STAGE_LABEL, toddlerProfessionGreeting, openingGreeting, ageNumberForTier, type AgeTier } from '../data/characterAge'
@@ -35,7 +37,9 @@ import { BACKGROUND_SCENES } from '../data/backgroundCatalog'
 import { sceneForBuilding } from '../data/buildingInteriors'
 import { FULL_BODY_PORTRAIT_SRC } from '../data/characterFullBody'
 import { useMockInventory } from '../hooks/useMockInventory'
-import { useMockWallet, GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
+import { GROW_INITIAL_ALLOWANCE_WON } from '../hooks/useMockWallet'
+import { useGrowWallet } from '../hooks/useGrowWallet'
+import { startQuizChallenge, submitQuizChallenge } from '../services/walletApi'
 import { useAccountTier } from '../hooks/useAccountTier'
 import { charge, reward } from '../services/paymentService'
 import type { MarketCategoryId, MarketItemEffect } from '../data/universalMarketCatalog'
@@ -168,6 +172,25 @@ const QUIZ_SNACK_COST_WON = 20_000
 // 이 파일은 그 기능들을 어떻게 보여줄지(레이아웃·전환·연출)만 바꾼다.
 // PR #49: 스테이지+HUD+스탯+퀘스트+메뉴를 하나의 목재 프레임으로
 // 합쳐서, 흰/크림색 카드가 줄줄이 쌓인 웹페이지 느낌에서 벗어났다.
+const WALLET_REASON_LABEL: Record<string, string> = {
+  initial: '처음 용돈',
+  meal: '밥 먹이기',
+  errand: '엄마 심부름',
+  part_time_job: '아르바이트',
+  job_event: '알바 이벤트',
+  quiz_reward: '퀴즈 보상',
+  quiz_snack: '간식 사기',
+  market_purchase: '만능마켓 구매',
+  market_refund: '만능마켓 환불',
+  job_quiz_challenge: '직업 퀴즈 도전',
+  job_quiz_reward: '직업 퀴즈 성공',
+  job_quiz_penalty: '직업 퀴즈 실패',
+}
+
+function toMoneyHistoryEntry(h: { reason: string; deltaWon: number }, index: number): MoneyHistoryEntry {
+  return { id: index, label: WALLET_REASON_LABEL[h.reason] ?? '용돈 변동', deltaWon: h.deltaWon }
+}
+
 export default function GrowPage() {
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
@@ -243,6 +266,19 @@ export default function GrowPage() {
   // 남은 문제 풀기 시도 횟수(null=페널티 없음), feedError=잔액 부족
   // 안내(모달 안에서만 보임, 다음에 열 때 자동으로 사라짐).
   const [hungryEventOpen, setHungryEventOpen] = useState(false)
+  // 직업 퀴즈 도전(밥 먹이기/엄마 심부름 공통) — 어느 이벤트에서 열렸는지,
+  // 그리고 가상 용돈 변동 내역(이번 접속 동안만 보관, DB 미저장).
+  const [quizChallenge, setQuizChallenge] = useState<'meal' | 'errand' | null>(null)
+  const [moneyHistory, setMoneyHistory] = useState<MoneyHistoryEntry[]>([])
+  // 서버 지갑 모드의 도전 상태 — 서버가 낸 문제·채점 함수를 모달에 넘긴다.
+  const [remoteChallenge, setRemoteChallenge] = useState<RemoteChallenge | null>(null)
+  const [challengeStarting, setChallengeStarting] = useState(false)
+  const moneyHistoryIdRef = useRef(0)
+  const recordMoney = (label: string, deltaWon: number) => {
+    moneyHistoryIdRef.current += 1
+    const id = moneyHistoryIdRef.current
+    setMoneyHistory((prev) => [{ id, label, deltaWon }, ...prev].slice(0, 20))
+  }
   const [isHungry, setIsHungry] = useState(false)
   const [hungryQuizRemaining, setHungryQuizRemaining] = useState<number | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
@@ -269,7 +305,15 @@ export default function GrowPage() {
   // (useMockWallet.ts 참고). Preview/Production DB 분리가 아직 검증되지
   // 않은 상태라, 이번 단계에서는 새 DB 쓰기를 하나도 추가하지 않기로
   // 했다.
-  const wallet = useMockWallet()
+  // 서버 지갑(WALLET_API_ENABLED)이 켜져 있으면 캐릭터별 서버 잔액이 기준이
+  // 되고(새로고침·재로그인·기기 변경에도 유지), 꺼져 있으면 위 체험판 설명
+  // 그대로 동작한다(useGrowWallet.ts 참고).
+  const {
+    wallet,
+    serverMode: walletServerMode,
+    serverHistory,
+    refresh: refreshWallet,
+  } = useGrowWallet(characters.some((c) => c.companionType === selected) ? selected : null)
   // 지시서(한도 소진 시 구매 유도 UI + 향후 구독 확장 설계): userTier/
   // isUnlimited...(구독 등급 placeholder)만 담는 상태 — 자세한 설계
   // 의도는 useAccountTier.ts 참고. 충전권 보너스는 더 이상 여기 없다
@@ -750,7 +794,10 @@ export default function GrowPage() {
       setFeedError('잔액이 부족하여 밥을 사줄 수 없어요. 문제를 더 풀어주세요!')
       return
     }
-    if (wallet.balanceWon !== null) charge(wallet, MEAL_COST_WON, 'meal')
+    if (wallet.balanceWon !== null) {
+      charge(wallet, MEAL_COST_WON, 'meal')
+      recordMoney('밥 먹이기', -MEAL_COST_WON)
+    }
     setHungryEventOpen(false)
     setFeedError(null)
     setIsHungry(false)
@@ -770,6 +817,74 @@ export default function GrowPage() {
     setFeedError(null)
     setIsHungry(true)
     setHungryQuizRemaining(HUNGRY_QUIZ_PENALTY_COUNT)
+  }
+
+  // 직업 퀴즈 도전 — 밥 먹이기는 이 선택과 상관없이 나중에 계속 가능하다
+  // (배고픈 상태를 유지해 기존 "나중에 먹기" 흐름으로 이어진다).
+  // 서버 지갑 모드에서는 문제를 서버에서 받아 온다(잔액 부족·하루 횟수 소진
+  // 등은 서버가 안내 문구로 거절). 준비에 실패하면 이벤트 창을 그대로 둔다.
+  const prepareRemoteChallenge = async (context: 'meal' | 'errand'): Promise<boolean> => {
+    if (!walletServerMode) {
+      setRemoteChallenge(null)
+      return true
+    }
+    if (challengeStarting) return false
+    setChallengeStarting(true)
+    try {
+      const started = await startQuizChallenge(selected, context)
+      if (!started) {
+        setRemoteChallenge(null)
+        return true
+      }
+      setRemoteChallenge({
+        questions: started.questions,
+        submit: (answers) => submitQuizChallenge(started.challengeId, answers),
+      })
+      return true
+    } catch (e) {
+      showBubble(e instanceof Error ? e.message : '퀴즈를 준비하지 못했어요.')
+      void refreshWallet()
+      return false
+    } finally {
+      setChallengeStarting(false)
+    }
+  }
+
+  const handleHungryChallenge = async () => {
+    if (!canAttemptJobQuizChallenge(wallet.balanceWon)) return
+    if (!(await prepareRemoteChallenge('meal'))) return
+    handleFeedLater()
+    setQuizChallenge('meal')
+  }
+
+  const handleErrandChallenge = async () => {
+    if (!canAttemptJobQuizChallenge(wallet.balanceWon)) return
+    if (!(await prepareRemoteChallenge('errand'))) return
+    setErrandEventOpen(false)
+    setQuizChallenge('errand')
+  }
+
+  // 최종 결과로 단 한 번만 호출된다(JobQuizChallengeModal의 settledRef).
+  const handleChallengeSettle = (settlement: JobQuizSettlement) => {
+    if (remoteChallenge) {
+      // 서버가 이미 정산했다 — 화면 잔액만 서버 값으로 맞춘다.
+      if (settlement.balanceAfterWon !== null) wallet.setBalance(settlement.balanceAfterWon)
+      void refreshWallet()
+    } else {
+      applyJobQuizSettlement(wallet, settlement)
+    }
+    if (settlement.deltaWon !== 0) {
+      recordMoney(quizChallenge === 'meal' ? '직업 퀴즈(밥 먹이기)' : '직업 퀴즈(엄마 심부름)', settlement.deltaWon)
+      setMoneyPopup(settlement.deltaWon)
+      const t = setTimeout(() => setMoneyPopup(null), 1800)
+      outingTimeoutsRef.current.push(t)
+    }
+  }
+
+  const handleChallengeClose = () => {
+    setQuizChallenge(null)
+    setRemoteChallenge(null)
+    showBubble('직업 퀴즈 도전을 마쳤어요!')
   }
 
   // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 패널을 닫고 짧게
@@ -809,7 +924,10 @@ export default function GrowPage() {
   // 온보딩 전)는 알바/식사 이벤트와 같은 이유로 금액 변화를 건너뛴다.
   const handleErrandAccept = () => {
     setErrandEventOpen(false)
-    if (wallet.balanceWon !== null) reward(wallet, ERRAND_EARNING_WON, 'errand')
+    if (wallet.balanceWon !== null) {
+      reward(wallet, ERRAND_EARNING_WON, 'errand')
+      recordMoney('엄마 심부름', ERRAND_EARNING_WON)
+    }
     setMoneyPopup(ERRAND_EARNING_WON)
     const t = setTimeout(() => setMoneyPopup(null), 1800)
     outingTimeoutsRef.current.push(t)
@@ -1209,7 +1327,7 @@ export default function GrowPage() {
                       data-testid="money-popup"
                       className="motion-safe:animate-[grow-xp-pop_1.8s_ease-out_forwards] pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 text-xl font-extrabold text-amber-300 drop-shadow-[0_0_10px_rgba(252,211,77,0.8)] sm:text-2xl"
                     >
-                      +{moneyPopup.toLocaleString('ko-KR')}원 💰
+                      {moneyPopup >= 0 ? '+' : '-'}{Math.abs(moneyPopup).toLocaleString('ko-KR')}원 💰
                     </span>
                   )}
                   {leveledUpTo !== null && (
@@ -1239,6 +1357,8 @@ export default function GrowPage() {
                       errorMessage={feedError}
                       onFeed={handleFeedCharacter}
                       onLater={handleFeedLater}
+                      onChallenge={handleHungryChallenge}
+                      challengeDisabled={!canAttemptJobQuizChallenge(wallet.balanceWon)}
                     />
                   )}
                   {errandEventOpen && (
@@ -1248,6 +1368,20 @@ export default function GrowPage() {
                       ageNumber={ageNumber}
                       onAccept={handleErrandAccept}
                       onDecline={handleErrandDecline}
+                      onChallenge={handleErrandChallenge}
+                      challengeDisabled={!canAttemptJobQuizChallenge(wallet.balanceWon)}
+                    />
+                  )}
+                  {quizChallenge && (
+                    <JobQuizChallengeModal
+                      companionType={character.companionType}
+                      ageTier={ageTier}
+                      ageNumber={ageNumber}
+                      balanceWon={wallet.balanceWon}
+                      history={remoteChallenge ? serverHistory.map(toMoneyHistoryEntry) : moneyHistory}
+                      remote={remoteChallenge ?? undefined}
+                      onSettle={handleChallengeSettle}
+                      onClose={handleChallengeClose}
                     />
                   )}
                   {homeworkQuizOpen && <HomeworkQuizModal onComplete={handleHomeworkComplete} />}

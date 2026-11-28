@@ -4,7 +4,7 @@ import type { AgeTier } from '../../data/characterAge'
 import { fullBodyPortraitSrc } from '../../data/characterFullBody'
 import { walkingPortraitSrc } from '../../data/characterWalking'
 import { useImageFallback } from '../../hooks/useImageFallback'
-import { TOWN_SQUARE_BG_SRC, STORE_INTERIOR_SRC } from '../../data/lifeEventAssets'
+import { TOWN_SQUARE_BG_SRC, ERRAND_MARKET_SCENE_SRC, ERRAND_DELIVERY_SCENE_SRC } from '../../data/lifeEventAssets'
 
 // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 기존
 // HungryEventModal(배고픔 이벤트)과 똑같은 자리(GameStage 위,
@@ -20,7 +20,14 @@ const ERRAND_EARNING_WON = 10_000
 // "심부름 하러 가기" 클릭 후 장보러 가는 연출을 보여주는 시간 —
 // HungryEventModal의 FEED_ANIMATION_MS와 같은 원칙(연출이 끝나야
 // 실제 onAccept를 불러 모달을 닫는다).
-const ERRAND_ANIMATION_MS = 900
+//
+// 간헐 실패 수정: 가게 내부 배경은 0.7초(duration-700) 동안 페이드인되는데,
+// 예전엔 0.9초 만에 모달을 닫아 페이드가 끝난 뒤 보이는 시간이 0.2초뿐이었다
+// — 느린 환경에선 "배경이 가게 내부로 바뀐 상태"를 사용자도, E2E도 놓칠 수
+// 있었다. 페이드(0.7초) 뒤에 가게 내부를 약 0.9초 더 보여주도록 늘렸다.
+const ERRAND_ANIMATION_MS = 1900 + 700 + 1600
+// 시장 장면(두부·콩나물 사기)을 보여준 뒤 엄마께 전달하는 장면으로 바꾸는 시점.
+const DELIVERY_SCENE_AT_MS = 1900
 
 export default function ErrandEventModal({
   companionType,
@@ -28,12 +35,16 @@ export default function ErrandEventModal({
   ageNumber,
   onAccept,
   onDecline,
+  onChallenge,
+  challengeDisabled,
 }: {
   companionType: CompanionType
   ageTier: AgeTier
   ageNumber?: number
   onAccept: () => void
   onDecline: () => void
+  onChallenge: () => void
+  challengeDisabled: boolean
 }) {
   const { src: walkingSrc, onError: handleWalkingPortraitError } = useImageFallback(
     walkingPortraitSrc(companionType, ageTier, ageNumber),
@@ -41,17 +52,21 @@ export default function ErrandEventModal({
   )
 
   const [departing, setDeparting] = useState(false)
+  const [delivering, setDelivering] = useState(false)
   const departTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const deliveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     return () => {
       if (departTimeoutRef.current) clearTimeout(departTimeoutRef.current)
+      if (deliveryTimeoutRef.current) clearTimeout(deliveryTimeoutRef.current)
     }
   }, [])
 
   const handleAcceptClick = () => {
     if (departing) return
     setDeparting(true)
+    deliveryTimeoutRef.current = setTimeout(() => setDelivering(true), DELIVERY_SCENE_AT_MS)
     departTimeoutRef.current = setTimeout(onAccept, ERRAND_ANIMATION_MS)
   }
 
@@ -81,41 +96,62 @@ export default function ErrandEventModal({
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${TOWN_SQUARE_BG_SRC})` }}
         />
-        <div
-          aria-hidden
-          data-testid="errand-event-store-bg"
-          className={`absolute inset-0 bg-cover bg-center transition-opacity duration-700 ${
-            departing ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{ backgroundImage: `url(${STORE_INTERIOR_SRC})` }}
-        />
       </div>
-      <div aria-hidden className="absolute inset-0 bg-black/45" />
+      <div aria-hidden className={`absolute inset-0 transition-colors duration-700 ${departing ? 'bg-black/70' : 'bg-black/45'}`} />
+      {/* 장면은 확대(zoom) 없이 bg-contain으로 전체가 잘리지 않게 보여준다. */}
+      {/* 심부름 장면 — 수락(departing) 전에는 이미지 URL을 아예 넣지 않아
+          내려받지 않는다. PC/모바일은 서로 다른 해상도 파일을 쓴다(작은 화면은
+          display:none이라 PC용 파일은 받지 않는다). */}
+      <div
+        aria-hidden
+        data-testid="errand-event-store-bg"
+        className={`absolute inset-0 transition-opacity duration-700 ${departing ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {departing && (
+          <>
+            <div className="absolute inset-0 hidden bg-contain bg-center bg-no-repeat sm:block" style={{ backgroundImage: `url(${ERRAND_MARKET_SCENE_SRC.pc})` }} />
+            <div className="absolute inset-0 bg-contain bg-center bg-no-repeat sm:hidden" style={{ backgroundImage: `url(${ERRAND_MARKET_SCENE_SRC.mobile})` }} />
+          </>
+        )}
+      </div>
+      <div
+        aria-hidden
+        data-testid="errand-event-delivery-bg"
+        className={`absolute inset-0 transition-opacity duration-700 ${delivering ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {delivering && (
+          <>
+            <div className="absolute inset-0 hidden bg-contain bg-center bg-no-repeat sm:block" style={{ backgroundImage: `url(${ERRAND_DELIVERY_SCENE_SRC.pc})` }} />
+            <div className="absolute inset-0 bg-contain bg-center bg-no-repeat sm:hidden" style={{ backgroundImage: `url(${ERRAND_DELIVERY_SCENE_SRC.mobile})` }} />
+          </>
+        )}
+      </div>
 
       <button
         type="button"
         onClick={onDecline}
         disabled={departing}
+        data-testid="errand-event-decline-button"
         aria-label="거절하기"
         className="absolute right-3 top-3 z-20 text-lg font-bold text-white/80 hover:text-white disabled:opacity-40"
       >
         ✕
       </button>
 
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-between gap-3 p-4">
+      <div className={`absolute inset-0 z-10 flex flex-col items-center justify-between gap-3 p-4 transition-opacity duration-500 ${departing ? 'pointer-events-none opacity-0' : ''}`}>
         <p className="text-center text-sm font-bold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.85)] sm:text-base">
           엄마가 심부름을 부탁하셨어요! 두부를 사오면 용돈 {ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 줄게요.
         </p>
 
         <div className="relative flex flex-1 items-end justify-center pb-2">
           <div
-            className={!departing ? 'motion-safe:animate-[grow-hungry-walk-bounce_0.6s_ease-in-out_infinite]' : undefined}
+            className={!departing ? 'motion-safe:animate-[grow-hungry-walk-bounce_0.6s_ease-in-out_infinite]' : 'invisible'}
           >
             <img
               src={walkingSrc}
               onError={handleWalkingPortraitError}
               alt=""
-              className="h-28 w-28 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]"
+              className="h-44 w-44 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)] sm:h-56 sm:w-56"
             />
           </div>
           {departing && (
@@ -137,17 +173,22 @@ export default function ErrandEventModal({
             disabled={departing}
             className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-bold text-white shadow-[0_2px_0_rgba(146,64,14,0.4)] hover:from-amber-600 hover:to-yellow-600 disabled:opacity-70"
           >
-            심부름 하러 가기 (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
+            심부름하기 (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
           </button>
           <button
             type="button"
-            data-testid="errand-event-decline-button"
-            onClick={onDecline}
-            disabled={departing}
-            className="rounded-xl bg-white/20 px-4 py-2 text-xs font-bold text-white hover:bg-white/30 disabled:opacity-40"
+            data-testid="errand-event-quiz-button"
+            onClick={onChallenge}
+            disabled={departing || challengeDisabled}
+            className="rounded-xl bg-white/25 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/35 disabled:opacity-40"
           >
-            거절하기
+            직업 퀴즈 도전하기
           </button>
+          {challengeDisabled && (
+            <p data-testid="errand-event-quiz-disabled-note" className="text-center text-[11px] font-semibold text-amber-200">
+              가상 용돈이 20,000원 이상일 때 도전할 수 있어요.
+            </p>
+          )}
         </div>
       </div>
     </div>

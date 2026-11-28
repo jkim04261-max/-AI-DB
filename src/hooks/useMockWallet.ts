@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import type { PaymentReason } from '../services/paymentService'
 
 // Stage 1(오프닝 프로필): 캐릭터 생성 시 지급되는 "초기 가상 용돈"의 체험판
 // 전용 상태 — useMockInventory.ts(PR #50)와 완전히 같은 원칙이다.
@@ -61,7 +62,16 @@ export function useMockWallet() {
     setBalanceWon((prev) => (prev === null ? prev : prev + amountWon))
   }, [])
 
-  return { balanceWon, grantInitialAllowance, resetWallet, spend, earn }
+  // 서버 지갑이 켜져 있을 때 서버가 알려준 잔액을 그대로 반영한다(서버가 기준).
+  const setBalance = useCallback((amountWon: number) => {
+    setBalanceWon(amountWon)
+  }, [])
+
+  return { balanceWon, grantInitialAllowance, resetWallet, spend, earn, setBalance }
 }
 
-export type MockWallet = ReturnType<typeof useMockWallet>
+// onTransaction은 서버 지갑 모드(useGrowWallet)에서만 채워진다 — paymentService의
+// charge/reward가 성공한 거래를 서버에 알려 잔액·내역을 서버 기준으로 맞춘다.
+export type MockWallet = ReturnType<typeof useMockWallet> & {
+  onTransaction?: (reason: PaymentReason, deltaWon: number) => void
+}

@@ -28,18 +28,22 @@ export type PaymentReason =
   | 'job_quiz_reward'
   | 'errand'
   | 'job_event'
+  | 'job_quiz_challenge'
 
 // 가상용돈을 차감한다(= 결제). 지갑이 아직 없거나(온보딩 전) 잔액이
 // 모자라면 아무것도 바꾸지 않고 false를 돌려준다 — useMockWallet.spend와
 // 동일한 계약.
-export function charge(wallet: MockWallet, amountWon: number, _reason: PaymentReason): boolean {
-  return wallet.spend(amountWon)
+export function charge(wallet: MockWallet, amountWon: number, reason: PaymentReason): boolean {
+  const ok = wallet.spend(amountWon)
+  if (ok) wallet.onTransaction?.(reason, -amountWon)
+  return ok
 }
 
 // 가상용돈을 지급한다(= 보상/수입). 지갑이 아직 없으면 그대로 건너뛴다 —
 // useMockWallet.earn과 동일한 계약.
-export function reward(wallet: MockWallet, amountWon: number, _reason: PaymentReason): void {
+export function reward(wallet: MockWallet, amountWon: number, reason: PaymentReason): void {
   wallet.earn(amountWon)
+  wallet.onTransaction?.(reason, amountWon)
 }
 
 export interface PurchaseResult {

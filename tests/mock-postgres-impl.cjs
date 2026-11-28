@@ -34,6 +34,11 @@ const state = {
   nextConversationId: 1,
   nextTokenId: 1,
   fakeDateKST: '2026-01-01',
+  wallets: new Map(), // characterId -> { character_id, user_id, balance_won }
+  ledger: [], // { id, character_id, reason, delta_won, balance_after, event_id, idempotency_key, created_at }
+  nextLedgerId: 1,
+  challenges: new Map(), // id -> row
+  failNextWalletTx: false,
   calls: [],
 }
 
@@ -81,6 +86,11 @@ function reset() {
   state.nextConversationId = 1
   state.nextTokenId = 1
   state.fakeDateKST = '2026-01-01'
+  state.wallets.clear()
+  state.ledger = []
+  state.nextLedgerId = 1
+  state.challenges.clear()
+  state.failNextWalletTx = false
   state.calls = []
 }
 
@@ -1166,6 +1176,103 @@ function sql(strings, ...values) {
     }
     state.examAttempts.push(entry)
     return Promise.resolve({ rows: [{ ...entry }] })
+  }
+
+
+  // --- api/_lib/wallet.ts + walletHandlers.ts (서버 지갑) ---
+  if (has(text, 'INSERT INTO character_wallets')) {
+    const [characterId, userId, initial] = values
+    if (!state.wallets.has(characterId)) {
+      state.wallets.set(characterId, { character_id: characterId, user_id: userId, balance_won: initial })
+      state.ledger.push({ id: state.nextLedgerId++, character_id: characterId, reason: 'initial', delta_won: initial, balance_after: initial, event_id: null, idempotency_key: 'initial', created_at: new Date().toISOString() })
+    }
+    return Promise.resolve({ rows: [] })
+  }
+  if (has(text, 'SELECT balance_won FROM character_wallets')) {
+    const w = state.wallets.get(values[0])
+    return Promise.resolve({ rows: w ? [{ balance_won: w.balance_won }] : [] })
+  }
+  if (has(text, 'SELECT id FROM character_wallet_ledger')) {
+    const [characterId, key] = values
+    const row = state.ledger.find((l) => l.character_id === characterId && l.idempotency_key === key)
+    return Promise.resolve({ rows: row ? [{ id: row.id }] : [] })
+  }
+  if (has(text, 'SELECT COUNT(*)::int AS n FROM character_wallet_ledger')) {
+    const [characterId, reason] = values
+    return Promise.resolve({ rows: [{ n: state.ledger.filter((l) => l.character_id === characterId && l.reason === reason).length }] })
+  }
+  if (has(text, 'WITH claim AS', 'INSERT INTO character_wallet_ledger')) {
+    const [characterId, reason, delta, , eventId, key] = values
+    if (state.failNextWalletTx) {
+      state.failNextWalletTx = false
+      return Promise.reject(new Error('simulated db failure'))
+    }
+    const w = state.wallets.get(characterId)
+    if (!w) return Promise.resolve({ rows: [] })
+    if (state.ledger.some((l) => l.character_id === characterId && l.idempotency_key === key)) return Promise.resolve({ rows: [] })
+    if (w.balance_won + delta < 0) {
+      // CHECK (balance_won >= 0) 위반 — 문장 전체 취소(내역도 남지 않음)
+      const err = new Error('check_violation')
+      err.code = '23514'
+      return Promise.reject(err)
+    }
+    w.balance_won += delta
+    state.ledger.push({ id: state.nextLedgerId++, character_id: characterId, reason, delta_won: delta, balance_after: w.balance_won, event_id: eventId, idempotency_key: key, created_at: new Date().toISOString() })
+    return Promise.resolve({ rows: [{ balance_won: w.balance_won }] })
+  }
+  if (has(text, 'SELECT delta_won FROM character_wallet_ledger')) {
+    const [characterId, key] = values
+    const row = state.ledger.find((l) => l.character_id === characterId && l.idempotency_key === key)
+    return Promise.resolve({ rows: row ? [{ delta_won: row.delta_won }] : [] })
+  }
+  if (has(text, 'SELECT reason, delta_won, balance_after, created_at FROM character_wallet_ledger')) {
+    const [characterId, limit] = values
+    const rows = state.ledger.filter((l) => l.character_id === characterId && l.reason !== 'initial').slice().reverse().slice(0, limit)
+    return Promise.resolve({ rows: rows.map((l) => ({ reason: l.reason, delta_won: l.delta_won, balance_after: l.balance_after, created_at: l.created_at })) })
+  }
+  if (has(text, "UPDATE job_quiz_challenges SET status = 'expired' WHERE character_id")) {
+    const [characterId, mins] = values
+    for (const c of state.challenges.values()) {
+      if (c.character_id === characterId && c.status === 'open' && Date.now() - new Date(c.created_at).getTime() > mins * 60_000) c.status = 'expired'
+    }
+    return Promise.resolve({ rows: [] })
+  }
+  if (has(text, "UPDATE job_quiz_challenges SET status = 'expired' WHERE id")) {
+    const c = state.challenges.get(values[0])
+    if (c && c.status === 'open') c.status = 'expired'
+    return Promise.resolve({ rows: [] })
+  }
+  if (has(text, 'FROM job_quiz_challenges WHERE character_id', "status = 'open'")) {
+    const open = [...state.challenges.values()].filter((c) => c.character_id === values[0] && c.status === 'open').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    return Promise.resolve({ rows: open.slice(0, 1).map((c) => ({ ...c })) })
+  }
+  if (has(text, 'SELECT question_ids FROM job_quiz_challenges')) {
+    return Promise.resolve({ rows: [...state.challenges.values()].filter((c) => c.character_id === values[0] && c.status === 'settled').map((c) => ({ question_ids: c.question_ids })) })
+  }
+  if (has(text, 'INSERT INTO job_quiz_challenges')) {
+    const [id, characterId, context, profession, ageTier, arr] = values
+    const ids = String(arr).slice(1, -1).split(',').map((x) => x.replace(/"/g, ''))
+    state.challenges.set(id, { id, character_id: characterId, context, profession, age_tier: ageTier, question_ids: ids, status: 'open', correct_count: null, delta_won: null, created_at: new Date().toISOString() })
+    return Promise.resolve({ rows: [] })
+  }
+  if (has(text, 'FROM job_quiz_challenges c JOIN characters ch')) {
+    const [id, userId] = values
+    const c = state.challenges.get(id)
+    const ch = c && state.characters.find((x) => x.id === c.character_id)
+    return Promise.resolve({ rows: c && ch && ch.user_id === userId ? [{ ...c }] : [] })
+  }
+  if (has(text, "UPDATE job_quiz_challenges SET status = 'settled'")) {
+    const [correctCount, deltaWon, id] = values
+    const c = state.challenges.get(id)
+    if (!c || c.status !== 'open') return Promise.resolve({ rows: [] })
+    c.status = 'settled'
+    c.correct_count = correctCount
+    c.delta_won = deltaWon
+    return Promise.resolve({ rows: [{ id }] })
+  }
+  if (has(text, 'FROM job_quiz_challenges WHERE id')) {
+    const c = state.challenges.get(values[0])
+    return Promise.resolve({ rows: c ? [{ ...c }] : [] })
   }
 
   throw new Error(`mock-postgres: unhandled statement: ${text}`)

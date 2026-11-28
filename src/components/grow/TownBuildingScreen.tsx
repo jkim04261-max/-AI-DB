@@ -18,6 +18,39 @@ import { useImageFallback } from '../../hooks/useImageFallback'
 import { buildingInteriorFor } from '../../data/buildingInteriors'
 import townMapSrc from '../../assets/grow/town/town-map-2.5d.webp'
 
+// 지도 원본(town-map-2.5d.webp)의 가로:세로 비율. 부지 좌표(%)는 이 이미지
+// 기준이라, 화면 상자의 비율이 다르면(특히 세로로 긴 모바일) object-cover로
+// 이미지가 잘리면서 상자 기준 %와 이미지 기준 %가 어긋난다 — 그러면 건물이
+// 엉뚱한 곳(예: 기존 회사 건물 옥상)에 얹혀 보인다. 그래서 이미지와 건물·핀을
+// 같은 "cover 크기 상자" 안에 함께 넣어 항상 이미지 기준으로 좌표를 맞춘다.
+const TOWN_MAP_RATIO = 1363 / 803
+
+function useCoverBox<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null)
+  const [size, setSize] = useState<{ boxW: number; boxH: number; w: number; h: number } | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => {
+      const boxW = el.clientWidth
+      const boxH = el.clientHeight
+      if (!boxW || !boxH) return
+      const w = Math.max(boxW, boxH * TOWN_MAP_RATIO)
+      const h = Math.max(boxH, boxW / TOWN_MAP_RATIO)
+      setSize((prev) => (prev && prev.boxW === boxW && prev.boxH === boxH ? prev : { boxW, boxH, w, h }))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, size] as const
+}
+
+// 부지 핀 → 부지 지면(건물 바닥) 보정값(지도 높이 대비 %).
+const PLOT_GROUND_OFFSET_PERCENT = 7.5
+
 const COMPANION_LABEL: Record<CompanionType, string> = { nuri: '누리', duri: '두리' }
 const DEFAULT_ADDRESS = '우리 동네'
 
@@ -87,20 +120,32 @@ function BuildingMarker({
     <div
       data-testid="town-building-placed"
       data-plot-building-type={buildingType}
-      className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-full flex-col items-center ${dimmed ? 'opacity-80' : ''}`}
-      style={{ left: `${left}%`, top: `${top}%` }}
+      className={`pointer-events-none absolute ${dimmed ? 'opacity-80' : ''}`}
+      style={{
+        left: `${left}%`,
+        // 부지 좌표는 지도에 박힌 "핀"(부지 윗부분) 위치라, 실제 잔디
+        // 부지의 중심·바닥은 핀보다 지도 높이의 약 7.5% 아래다. 건물 이미지
+        // 하단(바닥)을 그 지면에 맞춰, 건물이 부지 위에 서고 이웃 건물
+        // 옥상에 얹히지 않게 한다.
+        top: `${top + PLOT_GROUND_OFFSET_PERCENT}%`,
+        transform: 'translate(-50%, -100%)',
+      }}
     >
-      <div
-        data-testid="town-building-placed-sign"
-        className="mb-0.5 max-w-[7rem] truncate rounded-md border border-amber-300/70 bg-amber-100/95 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 shadow sm:text-xs"
-      >
-        {buildingName}
+      <div className="relative w-[7.5rem] sm:w-40">
+        {/* 상호명 간판 — 건물 상단(지붕 위)에 겹쳐 표시. 높이를 따로
+            차지하지 않아 지도 윗가장자리 부지에서도 잘리지 않는다. */}
+        <div
+          data-testid="town-building-placed-sign"
+          className="absolute left-1/2 top-[10%] z-10 max-w-[9rem] -translate-x-1/2 truncate rounded-md border border-amber-300/70 bg-amber-100/95 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow sm:max-w-[11rem] sm:text-sm"
+        >
+          {buildingName}
+        </div>
+        <img
+          src={BUILDING_TYPE_IMAGE[buildingType]}
+          alt={`${buildingName} 건물`}
+          className="block h-auto w-full drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)]"
+        />
       </div>
-      <img
-        src={BUILDING_TYPE_IMAGE[buildingType]}
-        alt={`${buildingName} 건물`}
-        className="h-16 w-20 object-contain drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)] sm:h-20 sm:w-24"
-      />
     </div>
   )
 }
@@ -138,6 +183,8 @@ export default function TownBuildingScreen({
   const [buildingName, setBuildingName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [mapZoom, setMapZoom] = useState(1)
+  const [mapBoxRef, mapCover] = useCoverBox<HTMLDivElement>()
+  const [walkBoxRef, walkCover] = useCoverBox<HTMLDivElement>()
   const [skipWalking, setSkipWalking] = useState(false)
 
   const displayAddress = address.trim().length > 0 ? address.trim() : DEFAULT_ADDRESS
@@ -311,9 +358,17 @@ export default function TownBuildingScreen({
               data-testid="town-building-map"
               className="relative min-h-[45vh] flex-1 overflow-hidden rounded-xl border border-emerald-300/20 bg-slate-950"
             >
-              <div className="h-full w-full touch-pan-x touch-pan-y overflow-auto">
-                <div className="relative h-full min-h-full w-full origin-top-left" style={{ transform: `scale(${mapZoom})`, minWidth: '100%' }}>
-                  <img src={townMapSrc} alt="우리 동네 2.5D 지도" className="block h-full w-full object-cover" />
+              <div ref={mapBoxRef} className="h-full w-full touch-pan-x touch-pan-y overflow-auto">
+                <div
+                  data-testid="town-building-map-canvas"
+                  className="relative origin-top-left"
+                  style={{
+                    transform: `scale(${mapZoom})`,
+                    width: mapCover ? mapCover.w : '100%',
+                    height: mapCover ? mapCover.h : '100%',
+                  }}
+                >
+                  <img src={townMapSrc} alt="우리 동네 2.5D 지도" className="block h-full w-full" />
 
                   {PLOTS.map((plot) => {
                     const occupied = occupiedPlots.find((p) => p.plotId === plot.id)
@@ -495,10 +550,19 @@ export default function TownBuildingScreen({
             {label}(이)가 {buildingName || nameFieldLabel}(으)로 걸어가고 있어요
           </p>
           <div
+            ref={walkBoxRef}
             data-testid="town-building-walk-stage"
             className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-emerald-300/30"
           >
-            <img src={townMapSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover" />
+            <div
+              className="absolute"
+              style={
+                walkCover
+                  ? { width: walkCover.w, height: walkCover.h, left: (walkCover.boxW - walkCover.w) / 2, top: (walkCover.boxH - walkCover.h) / 2 }
+                  : { inset: 0 }
+              }
+            >
+            <img src={townMapSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full" />
             {occupiedPlots.map((plot) => (
               <BuildingMarker
                 key={plot.plotId}
@@ -535,6 +599,7 @@ export default function TownBuildingScreen({
                 alt={`${label} 캐릭터, 걷는 중`}
                 className="h-full w-full object-contain drop-shadow-[0_8px_14px_rgba(0,0,0,0.5)]"
               />
+            </div>
             </div>
           </div>
 
