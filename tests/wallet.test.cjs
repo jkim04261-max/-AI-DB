@@ -37,16 +37,23 @@ async function run() {
   await characterHandler({ headers: { cookie: cookie2 }, query: {}, method: 'POST', body: { companionType: 'nuri' } }, mockRes())
   const nuriId = mock.state.characters.find((c) => c.user_id === 1 && c.companion_type === 'nuri').id
 
-  // 꺼져 있으면(기본) DB 지갑 테이블을 전혀 건드리지 않는다
+  // WALLET_API_ENABLED=false로 명시적으로 끄면 DB 지갑 테이블을 전혀
+  // 건드리지 않는다(지시서: 기본값은 이제 켬 — 운영 롤백용 스위치만 남긴다).
   {
-    delete process.env.WALLET_API_ENABLED
+    process.env.WALLET_API_ENABLED = 'false'
     const res = await call(cookie1, 'GET', 'wallet', { companionType: 'nuri' })
-    t.assert(res.statusCode === 200 && res.body.enabled === false, 'WALLET_API_ENABLED 꺼짐 → enabled:false')
+    t.assert(res.statusCode === 200 && res.body.enabled === false, 'WALLET_API_ENABLED=false → enabled:false')
     t.assert(mock.state.wallets.size === 0 && mock.state.ledger.length === 0, '꺼짐 상태에서는 지갑·내역 행이 생기지 않는다')
     const tx = await call(cookie1, 'POST', 'wallet-tx', { companionType: 'nuri', reason: 'errand', eventId: 'evt-00000001' })
     t.assert(tx.body.enabled === false && mock.state.ledger.length === 0, '꺼짐 상태의 거래 요청도 아무 것도 바꾸지 않는다')
   }
-  process.env.WALLET_API_ENABLED = 'true'
+  delete process.env.WALLET_API_ENABLED
+
+  // 기본값(환경변수 미설정)은 이제 켬이다.
+  {
+    const res = await call(cookie1, 'GET', 'wallet', { companionType: 'nuri' })
+    t.assert(res.statusCode === 200 && res.body.enabled === true, 'WALLET_API_ENABLED 미설정(기본) → enabled:true')
+  }
 
   // 최초 1회 100,000원, 재조회·재로그인해도 유지
   {

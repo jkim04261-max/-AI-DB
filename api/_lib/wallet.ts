@@ -4,10 +4,13 @@ import { sql, ensureWalletTables } from './db'
 // 금액과 정답 판정은 전부 서버가 정한다 — 클라이언트는 "무슨 일이 일어났는지"만
 // 보내고 금액은 보내지 않는다(예외: market_purchase, 아래 참고).
 
-// 기본값은 꺼짐. Preview/운영 DB 분리 여부를 확인한 뒤 Vercel 환경변수
-// WALLET_API_ENABLED=true로 켠다 — 꺼져 있으면 DB에 아무 것도 만들지 않는다.
+// 지시서(2026-11-28 긴급 수정: "식사·심부름 보상 및 패널티 실제 적용"):
+// 기본값을 켬으로 바꾼다 — 새 테이블 3개(character_wallets 등)만 추가할
+// 뿐 기존 테이블은 전혀 건드리지 않으므로(ensureWalletTables 참고),
+// Preview와 운영이 같은 DB를 쓰더라도 기존 데이터에 위험이 없다. 필요
+// 시에만 Vercel 환경변수 WALLET_API_ENABLED=false로 다시 끌 수 있다.
 export function walletEnabled(): boolean {
-  return process.env.WALLET_API_ENABLED === 'true'
+  return process.env.WALLET_API_ENABLED !== 'false'
 }
 
 export const WALLET_INITIAL_WON = 100_000
