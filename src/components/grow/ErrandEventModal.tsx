@@ -29,10 +29,40 @@ const ERRAND_ANIMATION_MS = 1900 + 700 + 1600
 // 시장 장면(두부·콩나물 사기)을 보여준 뒤 엄마께 전달하는 장면으로 바꾸는 시점.
 const DELIVERY_SCENE_AT_MS = 1900
 
+// 지시서(10세부터 가상 아르바이트 적용): 8~9세는 기존 "엄마 심부름"
+// 문구를 그대로 쓰고, 10세부터는 "가상 아르바이트"로 바뀌면서 연령대
+// (와 등록 직업이 있으면 그 직업)에 맞는 체험 문구를 보여준다 — 버튼
+// 동작·보상(+10,000원)·테스트 id는 전부 그대로다(문구만 다르다).
+function errandCopy(ageTier: AgeTier, ageNumber: number | undefined, professionLabel: string | null): { title: string; buttonLabel: string } {
+  if (ageTier === 'toddler') {
+    return { title: `엄마가 심부름을 부탁하셨어요! 두부를 사오면 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 줄게요.`, buttonLabel: '심부름하기' }
+  }
+  const n = ageNumber ?? 10
+  if (ageTier === 'teen' && n <= 12) {
+    return { title: `물건 정리·분류 아르바이트가 들어왔어요! 도와주면 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받아요.`, buttonLabel: '아르바이트하기' }
+  }
+  if (ageTier === 'teen') {
+    return {
+      title: `편의점·식당·카페에서 가상 아르바이트 체험을 할 수 있어요! 다녀오면 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받아요.`,
+      buttonLabel: '아르바이트하기',
+    }
+  }
+  if (ageTier === 'junior_20s') {
+    const role = professionLabel ? `${professionLabel} 인턴` : '사무보조 인턴'
+    return { title: `${role} 체험을 할 수 있어요! 다녀오면 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받아요.`, buttonLabel: '인턴 체험하기' }
+  }
+  const role = professionLabel ? `${professionLabel}` : '전문'
+  return {
+    title: `${role} 업무 체험을 할 수 있어요! 다녀오면 용돈 ${ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 받아요.`,
+    buttonLabel: '업무 체험하기',
+  }
+}
+
 export default function ErrandEventModal({
   companionType,
   ageTier,
   ageNumber,
+  professionLabel = null,
   onAccept,
   onDecline,
   onChallenge,
@@ -41,11 +71,13 @@ export default function ErrandEventModal({
   companionType: CompanionType
   ageTier: AgeTier
   ageNumber?: number
+  professionLabel?: string | null
   onAccept: () => void
   onDecline: () => void
   onChallenge: () => void
   challengeDisabled: boolean
 }) {
+  const { title: errandTitle, buttonLabel: errandButtonLabel } = errandCopy(ageTier, ageNumber, professionLabel)
   const { src: walkingSrc, onError: handleWalkingPortraitError } = useImageFallback(
     walkingPortraitSrc(companionType, ageTier, ageNumber),
     fullBodyPortraitSrc(companionType, ageTier, ageNumber),
@@ -140,7 +172,7 @@ export default function ErrandEventModal({
 
       <div className={`absolute inset-0 z-10 flex flex-col items-center justify-between gap-3 p-4 transition-opacity duration-500 ${departing ? 'pointer-events-none opacity-0' : ''}`}>
         <p className="text-center text-sm font-bold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.85)] sm:text-base">
-          엄마가 심부름을 부탁하셨어요! 두부를 사오면 용돈 {ERRAND_EARNING_WON.toLocaleString('ko-KR')}원을 줄게요.
+          {errandTitle}
         </p>
 
         <div className="relative flex flex-1 items-end justify-center pb-2">
@@ -173,7 +205,7 @@ export default function ErrandEventModal({
             disabled={departing}
             className="rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2.5 text-sm font-bold text-white shadow-[0_2px_0_rgba(146,64,14,0.4)] hover:from-amber-600 hover:to-yellow-600 disabled:opacity-70"
           >
-            심부름하기 (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
+            {errandButtonLabel} (+{ERRAND_EARNING_WON.toLocaleString('ko-KR')}원)
           </button>
           <button
             type="button"

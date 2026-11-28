@@ -120,21 +120,13 @@ const HUNGRY_QUIZ_PENALTY_COUNT = 5
 // 서점 카테고리에서 사용자가 직접 고를 수 있다
 // (universalMarketCatalog.ts 참고).
 
-// 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 식사 이벤트와 같은
-// "3회 저장" 신호를 번갈아(식사 → 알바 → 식사 → ...) 띄운다. 체험판
-// 용돈(useMockWallet)에만 더해지고,
-// 실제 character.exp/DB는 건드리지 않는다 — 지출(식사)과 짝을 이루는
-// 수입 이벤트.
-const PART_TIME_JOB_EARNING_WON = 20_000
-
-// 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): toddler
-// (8~9살)에서는 기존 "식사 ↔ 알바" 2단계 번갈이 중 알바 자리를
-// 대신해서 선택형 심부름 이벤트를 띄운다(지시서 4번: "10대 스테이지
-// 부터는 '심부름'이 아닌 [편의점 알바하기] 등으로... 자동 변경" —
-// 즉 심부름은 toddler 전용으로 "알바" 슬롯이 입는 옷일 뿐이다).
-// 10대 이상은 기존 triggerPartTimeJob(자동 연출, 20,000원)을 그대로
-// 쓴다 — 지시서 자신이 "10대용 알바는 추후 업데이트에서 문제 풀이
-// 등으로 연동"이라고 범위를 토들러로 한정했다.
+// 지시서(10세부터 가상 아르바이트 적용, 2026-11-28): 모든 연령대가
+// "식사 ↔ 심부름/아르바이트" 2단계 번갈이에서 같은 ErrandEventModal을
+// 쓴다 — 8~9세는 "엄마 심부름" 문구, 10세부터는 연령·직업에 맞는
+// "가상 아르바이트" 문구로 보인다(ErrandEventModal의 errandCopy
+// 참고). 보상 체계를 모든 연령대에서 10,000원으로 통일했다(예전에
+// teen/20대 이상이 쓰던 30,000원·20,000원 자동 지급 경로는 더 이상
+// 호출하지 않는다).
 const ERRAND_EARNING_WON = 10_000
 
 // 지시서(10대 전용 알바 시스템): 위 toddler 전용 심부름과 같은 자리
@@ -255,8 +247,10 @@ export default function GrowPage() {
   // 패턴과 동일한 원칙).
   const [evolvedTo, setEvolvedTo] = useState<AgeTier | null>(null)
   // 지시서(알바/경제 활동 이벤트): 잠깐 "일하는 중" 턴 연출 중인지 —
-  // 기존 TurnTransition을 그대로 재사용한다.
-  const [workingOnJob, setWorkingOnJob] = useState(false)
+  // 기존 TurnTransition을 그대로 재사용한다. 지시서(10세부터 가상
+  // 아르바이트 적용)로 이걸 true로 바꾸던 자동 연출(triggerPartTimeJob)
+  // 호출부가 사라져 항상 false다(UI 자체는 남겨 둔다).
+  const [workingOnJob] = useState(false)
   // 알바 보상으로 뜨는 "+N원" 팝업 — 순수 연출용.
   const [moneyPopup, setMoneyPopup] = useState<number | null>(null)
   // 지시서(배고픔 이벤트 UI/UX 및 경제 시스템 연동): 자동으로 차감만
@@ -349,16 +343,17 @@ export default function GrowPage() {
   )
 
   const character = characters.find((c) => c.companionType === selected) ?? null
+  const professionLabel = character?.profession
+    ? character.profession === 'custom'
+      ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
+      : PROFESSION_LABEL[character.profession]
+    : null
   // PR #48: "지금 뭘 하면 좋을지"를 한 곳에서만 계산한다 — PR #46의
   // goalText를 대체한다. GrowthHUD의 문구와 QuestBanner/말풍선이 서로
   // 다른 소스를 보여주며 어긋나는 일이 없도록 한다.
   const quest = computeActiveQuest({
     profession: character?.profession ?? null,
-    professionLabel: character?.profession
-      ? character.profession === 'custom'
-        ? character.customProfessionLabel ?? PROFESSION_LABEL.custom
-        : PROFESSION_LABEL[character.profession]
-      : null,
+    professionLabel,
     knowledgeTotal: knowledgeStats.total,
     examPassed,
   })
@@ -887,27 +882,13 @@ export default function GrowPage() {
     showBubble('직업 퀴즈 도전을 마쳤어요!')
   }
 
-  // 지시서(생활·경제 전략 이벤트 — 알바/돈 벌기): 패널을 닫고 짧게
-  // "일하는 중" 연출(기존 TurnTransition 재사용)을 보여준 뒤, 체험판
-  // 용돈에 수입을 더한다. 지갑이 아직 없는 캐릭터(Stage 1 온보딩 전)는
-  // 연출만 보여주고 금액 변화는 건너뛴다(식사/서점 이벤트와 동일 원칙).
-  const triggerPartTimeJob = () => {
-    setOpenSheet(null)
-    showBubble('용돈을 벌고 싶어요! 잠깐 아르바이트하고 올게요!')
-    const t1 = setTimeout(() => {
-      setWorkingOnJob(true)
-      const t2 = setTimeout(() => {
-        setWorkingOnJob(false)
-        reward(wallet, PART_TIME_JOB_EARNING_WON, 'part_time_job')
-        setMoneyPopup(PART_TIME_JOB_EARNING_WON)
-        const t3 = setTimeout(() => setMoneyPopup(null), 1800)
-        outingTimeoutsRef.current.push(t3)
-        showBubble(`아르바이트해서 ${PART_TIME_JOB_EARNING_WON.toLocaleString('ko-KR')}원 벌었어요! 💰`)
-      }, 1800)
-      outingTimeoutsRef.current.push(t2)
-    }, 1400)
-    outingTimeoutsRef.current.push(t1)
-  }
+  // 지시서(10세부터 가상 아르바이트 적용): 예전에 20대 이상이 쓰던
+  // 자동 연출(triggerPartTimeJob, 20,000원 고정 지급)은 이제 아래
+  // triggerErrandEvent(ErrandEventModal, 수락 +10,000원 + 직업 퀴즈
+  // 도전 ±20,000원)로 대체되어 더 이상 호출하지 않는다. workingOnJob
+  // state와 TurnTransition("아르바이트하는 중...")은 UI 틀만 남겨
+  // 두고(JobEventModal과 함께 완전히 삭제하지는 않는다), 호출부만
+  // 걷어냈다 — 이 함수가 비어 있던 자리였다는 참고용 주석.
 
   // 지시서(8세 전용 경제 활동 기획: 엄마/아빠 심부름 이벤트): 패널을
   // 닫고 선택형 모달을 띄운다 — triggerHungryEvent/triggerPartTimeJob과
@@ -948,14 +929,11 @@ export default function GrowPage() {
     showBubble('휴, 숙제를 다 했어요!')
   }
 
-  // 지시서(10대 전용 알바 시스템): 패널을 닫고 알바(걷기→도착→퀴즈→결과)
-  // 모달을 연다 — ①카드 맞추기 완료 직후(InteractionPanel의
-  // onTeenJobEventDue)와 ②기존 "알바" 로테이션 슬롯(teen 분기), 두
-  // 자리에서 똑같이 이 함수 하나를 호출한다.
-  const triggerJobEvent = () => {
-    setOpenSheet(null)
-    setJobEventOpen(true)
-  }
+  // 지시서(10세부터 가상 아르바이트 적용): teen 전용이던 알바 트리거
+  // (①카드 맞추기 완료 직후 onTeenJobEventDue, ②"알바" 로테이션
+  // 슬롯)는 이제 둘 다 triggerErrandEvent를 쓴다 — 이 함수는 더 이상
+  // 어디서도 호출하지 않는다(JobEventModal·jobEventOpen 자체는 남겨
+  // 둔다).
 
   // JobEventModal이 "학습으로 돌아가기"를 누르면 호출된다 — 3문제를
   // 모두 맞혔을 때만 보상을 준다(지시서 "1문제라도 틀리면 0원").
@@ -996,13 +974,15 @@ export default function GrowPage() {
         triggerHungryEvent()
       } else {
         outingCycleRef.current = 0
-        if (ageTier === 'toddler') {
-          triggerErrandEvent()
-        } else if (ageTier === 'teen') {
-          triggerJobEvent()
-        } else {
-          triggerPartTimeJob()
-        }
+        // 지시서(10세부터 가상 아르바이트 적용): 8~9세는 "엄마 심부름",
+        // 10세부터는 모든 연령대가 같은 ErrandEventModal을 쓴다(문구만
+        // 연령·직업에 맞게 바뀐다 — errandCopy 참고). 예전에 teen
+        // 전용이던 JobEventModal(triggerJobEvent)과 20대 이상 자동
+        // 보상(triggerPartTimeJob)은 보상 금액이 새 통일 규칙
+        // (수락 +10,000원, 직업 퀴즈 도전 2문제 ±20,000원)과 달라
+        // 더는 이 자리에서 호출하지 않는다(컴포넌트 자체는 삭제하지
+        // 않고 남겨 둔다).
+        triggerErrandEvent()
       }
     }
   }
@@ -1366,6 +1346,7 @@ export default function GrowPage() {
                       companionType={character.companionType}
                       ageTier={ageTier}
                       ageNumber={ageNumber}
+                      professionLabel={professionLabel}
                       onAccept={handleErrandAccept}
                       onDecline={handleErrandDecline}
                       onChallenge={handleErrandChallenge}
@@ -1559,7 +1540,7 @@ export default function GrowPage() {
               profession={character.profession}
               onPoseChange={handlePoseChange}
               onKnowledgeSaved={handleKnowledgeSaved}
-              onTeenJobEventDue={triggerJobEvent}
+              onTeenJobEventDue={triggerErrandEvent}
               usage={usage}
               accountTier={accountTier}
               onBuyMoreUses={handleBuyMoreUses}

@@ -18,6 +18,7 @@ import type { CharacterPose } from './CharacterSprite'
 import ObjectiveQuizStep from './ObjectiveQuizStep'
 import FinalExamModal from './FinalExamModal'
 import CardMatchGame from '../games/CardMatchGame'
+import { professionCardTerms, cardMatchPairCount } from '../../data/professionCardTerms'
 import SequenceOrderGame from '../games/SequenceOrderGame'
 import CategorizeGame from '../games/CategorizeGame'
 
@@ -129,6 +130,11 @@ export default function InteractionPanel({
   // PR #65: profession==='custom'일 때는 PROFESSION_LABEL 대신 캐릭터가
   // 실제로 입력한 직업명을 보여준다 — 기존 49개 직업은 1바이트도 안 바뀜.
   const professionLabel = profession === 'custom' ? character.customProfessionLabel ?? PROFESSION_LABEL.custom : PROFESSION_LABEL[profession]
+  // 지시서(직업별 카드 맞추기 게임 개선): 카드 맞추기 단계(toddler/teen)
+  // 용 용어 뱅크·쌍 수 — custom(자유 입력 직업)은 카테고리가 없어
+  // professionCardTerms 내부에서 전문직 공통 뱅크로 대체된다.
+  const cardMatchTerms = professionCardTerms(profession)
+  const cardMatchCount = cardMatchPairCount(characterAgeTier, ageNumberForTier(characterAgeTier, character.level))
 
   const poseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -1018,9 +1024,9 @@ export default function InteractionPanel({
         >
           <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 {toddlerQuestionNumber}번째 문제 · 직업 카드 맞추기</p>
           <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
-            직업 카드와 도구 카드를 전부 맞추면 다음 단계로 넘어가요.
+            직업 용어 카드와 그 뜻 카드를 전부 맞추면 다음 단계로 넘어가요.
           </p>
-          <CardMatchGame onCleared={() => void handleCardGameCleared()} />
+          <CardMatchGame onCleared={() => void handleCardGameCleared()} professionTerms={cardMatchTerms} pairCount={cardMatchCount} />
           {cardGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
           {cardGameError && <p className="text-base font-bold text-rose-300">{cardGameError}</p>}
         </div>
@@ -1102,9 +1108,9 @@ export default function InteractionPanel({
         >
           <p className="text-lg font-extrabold text-amber-200 sm:text-xl">🃏 {teenQuestionNumber}번째 문제 · 직업 카드 맞추기</p>
           <p className="text-sm font-semibold text-amber-200/70 sm:text-base">
-            직업 카드와 도구 카드를 전부 맞추면 다음 단계로 넘어가요.
+            직업 용어 카드와 그 뜻 카드를 전부 맞추면 다음 단계로 넘어가요.
           </p>
-          <CardMatchGame onCleared={() => void handleCardGameCleared()} />
+          <CardMatchGame onCleared={() => void handleCardGameCleared()} professionTerms={cardMatchTerms} pairCount={cardMatchCount} />
           {cardGameBusy && <p className="text-sm font-semibold text-amber-200/70">완료 처리 중...</p>}
           {cardGameError && <p className="text-base font-bold text-rose-300">{cardGameError}</p>}
         </div>

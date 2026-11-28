@@ -417,24 +417,6 @@ async function mockCharacterApi(
   })
 }
 
-// 지시서(10대 전용 알바 시스템): JobEventModal은 걷기 연출이 끝나면
-// 자동으로 질문 화면으로 넘어간다(타이머) — 화면에 보이는 질문
-// 텍스트로 ALL_PART_TIME_JOB_QUESTIONS에서 정답 보기를 찾아
-// allCorrect가 true면 3문제 모두, false면 첫 문제만 일부러 틀리게
-// 고른다("1문제라도 틀리면 0원" 규칙 검증용).
-async function answerJobEventQuiz(page: Page, allCorrect: boolean) {
-  await expect(page.getByTestId('job-event-question')).toBeVisible()
-  for (let i = 0; i < 3; i++) {
-    const questionText = (await page.getByTestId('job-event-question').textContent())?.trim()
-    const matched = ALL_PART_TIME_JOB_QUESTIONS.find((q) => q.question === questionText)
-    if (!matched) throw new Error(`Unknown job-event question: ${questionText}`)
-    const answerCorrectly = allCorrect || i !== 0
-    const indexToClick = answerCorrectly ? matched.correctIndex : (matched.correctIndex + 1) % matched.choices.length
-    await page.getByTestId('job-event-choice').nth(indexToClick).click()
-    await page.getByTestId('job-event-next-button').click()
-  }
-}
-
 const NURI_ACCOUNTANT = { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: 'accountant', created_at: new Date().toISOString() }
 const NURI_NO_PROFESSION = { id: 1, user_id: USER.id, companion_type: 'nuri', stage: 'child', profession: null, created_at: new Date().toISOString() }
 
@@ -3187,12 +3169,14 @@ test('completing the toddler (8~9살) 8-question curriculum in its fixed interle
   // (onTeenJobEventDue)는 여기서 뜨지 않는다. 이 3번째 저장 직후 "3회
   // 저장마다 식사/알바 로테이션"의 첫 번째(식사)가 끼어든다.
   await expect(page.getByTestId('toddler-card-game-step')).toBeVisible()
-  for (let i = 0; i < 6; i++) {
+  // 지시서(직업별 카드 맞추기 게임 개선): 8~9세는 이제 4쌍(용어-뜻)이다
+  // — 기존 6쌍/job·tool 카드에서 바뀌었다.
+  for (let i = 0; i < 4; i++) {
     const backs = page.getByTestId('card-match-back')
     const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
     const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
-    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
-    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="term"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="meaning"]`).click()
   }
   await expect(page.getByTestId('hungry-event-modal')).toBeVisible()
   await page.getByTestId('hungry-event-feed-button').click()
@@ -3755,24 +3739,34 @@ test('completing the teen (10대) 10-step curriculum — direct×3(역사·목�
   await page.getByRole('button', { name: '가르치기' }).click()
   await expect(page.getByTestId('teen-card-game-step')).toBeVisible()
   await expect(page.getByTestId('teen-card-game-step')).toContainText('4번째 문제')
+  // level 5 → ageNumber 10 → cardMatchPairCount('teen', 10) = 6쌍(그대로).
   for (let i = 0; i < 6; i++) {
     const backs = page.getByTestId('card-match-back')
     const ids = await backs.evaluateAll((els) => els.map((el) => el.getAttribute('data-job-id')))
     const jobId = [...new Set(ids.filter((id): id is string => id !== null))][0]
-    await page.locator(`[data-job-id="${jobId}"][data-kind="job"]`).click()
-    await page.locator(`[data-job-id="${jobId}"][data-kind="tool"]`).click()
+    await page.locator(`[data-job-id="${jobId}"][data-kind="term"]`).click()
+    // 지시서(직업별 카드 맞추기 게임 개선): 회계사(accountant)는 전용
+    // 용어가 없어 'professional' 카테고리 공통 뱅크를 쓴다 — 뒤집은
+    // 카드에 무작위 동물·사물이 아니라 실제 업무 어휘가 보이는지 확인.
+    await expect(page.locator(`[data-job-id="${jobId}"][data-kind="term"]`)).toContainText(
+      /업무일지|보고서|일정표|장부|계약서|예산|감사|협상|규정 준수|실사|이해관계자|핵심성과지표/,
+    )
+    await page.locator(`[data-job-id="${jobId}"][data-kind="meaning"]`).click()
   }
 
-  // 지시서(10대 전용 알바 시스템): 카드 맞추기 클리어 직후, "3회 저장"
-  // 로테이션과 무관한 전용 트리거(onTeenJobEventDue)로 알바 이벤트가
-  // 곧바로 한 번 뜬다(toddler에는 없는, teen만의 추가 트리거) — 3문제
-  // 모두 맞혀 30,000원을 받는다.
-  await expect(page.getByTestId('job-event-modal')).toBeVisible()
-  await expect(page.getByTestId('job-event-shop-label')).toContainText(/설거지 알바|서빙 알바|편의점 알바/)
-  await answerJobEventQuiz(page, true)
-  await expect(page.getByTestId('job-event-success-message')).toBeVisible()
-  await page.getByTestId('job-event-return-button').click()
-  await expect(page.getByTestId('money-popup')).toContainText('30,000원')
+  // 지시서(10세부터 가상 아르바이트 적용): 카드 맞추기 클리어 직후,
+  // "3회 저장" 로테이션과 무관한 전용 트리거(onTeenJobEventDue)로
+  // 가상 아르바이트 이벤트가 곧바로 한 번 뜬다(toddler의 심부름과
+  // 완전히 같은 ErrandEventModal — teen부터는 "아르바이트" 문구로
+  // 보인다). 수락하면 10,000원을 받는다(보상 체계 통일).
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  // teen(ageNumber 10, 10~12세 구간)은 "엄마가 심부름을" 대신 "아르바이트"
+  // 문구를 보여준다.
+  await expect(page.getByTestId('errand-event-modal')).toContainText('아르바이트')
+  await expect(page.getByTestId('errand-event-modal')).not.toContainText('엄마가 심부름을')
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
+  await expect(page.getByTestId('money-popup')).toContainText('10,000원')
 
   // ⑤⑥번: 객관식 2문제(전문지식·실무판단 세트, 전부 정답 필요) — 위
   // 알바 이벤트가 끝난 뒤 패널을 다시 열어서 이어간다.
@@ -3783,13 +3777,12 @@ test('completing the teen (10대) 10-step curriculum — direct×3(역사·목�
   await page.getByTestId('objective-quiz-choice-1-0').click()
   await page.getByTestId('objective-quiz-submit-button').click()
 
-  // 객관식 통과가 "3회 저장" 로테이션의 두 번째(알바) 자리와 겹친다 —
-  // teen은 toddler의 심부름 대신 알바 이벤트를 받는다. 일부러 1문제를
-  // 틀려 "1문제라도 틀리면 0원" 규칙을 함께 검증한다.
-  await expect(page.getByTestId('job-event-modal')).toBeVisible()
-  await answerJobEventQuiz(page, false)
-  await expect(page.getByTestId('job-event-fail-message')).toBeVisible()
-  await page.getByTestId('job-event-return-button').click()
+  // 객관식 통과가 "3회 저장" 로테이션의 두 번째(아르바이트) 자리와
+  // 겹친다 — teen도 toddler와 똑같은 ErrandEventModal을 받는다(문구만
+  // "아르바이트"로 다르다).
+  await expect(page.getByTestId('errand-event-modal')).toBeVisible()
+  await page.getByTestId('errand-event-accept-button').click()
+  await expect(page.getByTestId('errand-event-modal')).toHaveCount(0)
 
   // ⑦번: 직접입력(knowhow, 노하우) — 알바 이벤트가 끝난 뒤 패널을 다시
   // 열어서 이어간다.

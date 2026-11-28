@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { useMockWallet } from '../../hooks/useMockWallet'
 import { reward } from '../../services/paymentService'
 import { JOB_CARDS, type JobCardEntry } from '../../data/jobCards'
+import type { ProfessionCardTerm } from '../../data/professionCardTerms'
 
 // 지시서(직업 카드 맞추기 미니게임): "독립적인 별도 잔액" 결정에
 // 따라 이 게임 전용 useMockWallet 인스턴스를 따로 쓴다 — /grow의
@@ -18,6 +19,8 @@ const MISMATCH_DELAY_MS = 3000
 type GameCard =
   | { key: string; kind: 'job'; jobId: string; label: string; image: string }
   | { key: string; kind: 'tool'; jobId: string; label: string; image: string }
+  | { key: string; kind: 'term'; jobId: string; label: string; image: string }
+  | { key: string; kind: 'meaning'; jobId: string; label: string; image: string }
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items]
@@ -43,6 +46,26 @@ function buildDeck(jobs: JobCardEntry[]): GameCard[] {
   return shuffle(cards)
 }
 
+// 지시서(직업별 카드 맞추기 게임 개선): 캐릭터 자신의 등록 직업에 맞춘
+// 용어 카드를 쓴다 — 용어(term) 카드와 그 뜻(meaning) 카드를 짝짓는다.
+// professionCardTerms.ts가 쉬운 용어부터 정렬해 두므로, pairCount가
+// 적을수록(낮은 연령대) 자동으로 쉬운 앞쪽 용어만 쓰인다. 뜻 카드는
+// 이미지가 없어(항상 CardArt의 실패 fallback으로 텍스트만 보임) 맞춘
+// 즉시 뜻이 화면에 그대로 드러난다.
+function buildProfessionDeck(terms: ProfessionCardTerm[], pairCount: number): GameCard[] {
+  // terms는 쉬운 용어부터 정렬돼 있다 — 무작위로 아무 n개나 뽑으면 낮은
+  // 난이도(적은 쌍 수)에서도 어려운 용어가 섞여 들어갈 수 있으므로,
+  // 먼저 "앞쪽 pairCount개"로 난이도를 자른 뒤에만 그 안에서 순서를
+  // 섞는다(어떤 쌍이 나올지는 매번 바뀌지만 난이도 상한은 지켜진다).
+  const chosen = shuffle(terms.slice(0, Math.min(pairCount, terms.length)))
+  const cards: GameCard[] = []
+  for (const t of chosen) {
+    cards.push({ key: `${t.id}-term`, kind: 'term', jobId: t.id, label: t.term, image: '' })
+    cards.push({ key: `${t.id}-meaning`, kind: 'meaning', jobId: t.id, label: t.meaning, image: '' })
+  }
+  return shuffle(cards)
+}
+
 // 지시서: TTS는 기존 유틸이 있으면 재사용하라고 했지만, 이 저장소에는
 // 아직 TTS 유틸이 없다(검색 확인) — Web Speech API로 바로 구현한다.
 function speak(text: string) {
@@ -63,9 +86,16 @@ function speak(text: string) {
 // 막기 위해 memo 적용 — 렌더 결과·동작은 동일하다.
 const CardArt = memo(function CardArt({ src, label }: { src: string; label: string }) {
   const [failed, setFailed] = useState(false)
-  if (failed) {
+  // 직업 용어-뜻 카드(src='')는 애초에 이미지가 없으므로, 빈 src로
+  // <img>를 실제로 그려 onError에 기대지 않고 바로 텍스트만 보여준다
+  // (빈 src는 브라우저마다 error 이벤트가 안정적으로 발생하지 않는다).
+  if (failed || src === '') {
+    // 용어-뜻 카드는 문장 길이가 다양해(짧은 단어~긴 뜻풀이) 고정
+    // 64px 정사각형으로는 좁다 — 부모(카드 버튼)가 반응형으로 이미
+    // 크기를 정하므로, 그 크기를 그대로 채우게(w-full h-full) 해서
+    // 좁은 화면에서도 줄바꿈으로 잘리지 않고 다 보이게 한다.
     return (
-      <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-700 p-1 text-center text-[11px] font-bold leading-tight text-slate-200">
+      <div className="flex h-full w-full items-center justify-center rounded-lg bg-slate-700 p-1 text-center text-[10px] font-bold leading-tight text-slate-200 sm:text-xs">
         {label}
       </div>
     )
@@ -89,11 +119,22 @@ export default function CardMatchGame({
   // 콜백을 추가했다 — /card-match 독립 페이지는 이 prop을 안 넘기므로
   // 기존 동작(지갑·보상·"다시 하기" 전부)은 전혀 바뀌지 않는다.
   onCleared,
+  // 지시서(직업별 카드 맞추기 게임 개선): 둘 다 지정하면 무작위
+  // 직업·도구 대신 이 캐릭터의 등록 직업에 맞춘 용어-뜻 카드를
+  // pairCount쌍만큼 쓴다. 둘 중 하나라도 비어 있으면(독립 /card-match
+  // 페이지처럼) 기존 방식(JOB_CARDS, 6쌍 고정) 그대로 동작한다.
+  professionTerms,
+  pairCount,
 }: {
   onCleared?: () => void
+  professionTerms?: ProfessionCardTerm[]
+  pairCount?: number
 } = {}) {
   const wallet = useMockWallet()
-  const [cards, setCards] = useState<GameCard[]>(() => buildDeck(JOB_CARDS))
+  const effectivePairCount = pairCount ?? CARDS_PER_GAME
+  const [cards, setCards] = useState<GameCard[]>(() =>
+    professionTerms ? buildProfessionDeck(professionTerms, effectivePairCount) : buildDeck(JOB_CARDS),
+  )
   const [flipped, setFlipped] = useState<number[]>([])
   const [matchedJobIds, setMatchedJobIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -105,7 +146,7 @@ export default function CardMatchGame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const totalPairs = CARDS_PER_GAME
+  const totalPairs = professionTerms ? Math.min(effectivePairCount, professionTerms.length) : CARDS_PER_GAME
   const matchedCount = matchedJobIds.size
 
   useEffect(() => {
@@ -120,7 +161,7 @@ export default function CardMatchGame({
   }, [matchedCount, totalPairs, cleared])
 
   const handleNewGame = () => {
-    setCards(buildDeck(JOB_CARDS))
+    setCards(professionTerms ? buildProfessionDeck(professionTerms, effectivePairCount) : buildDeck(JOB_CARDS))
     setFlipped([])
     setMatchedJobIds(new Set())
     setBusy(false)
@@ -215,10 +256,17 @@ export default function CardMatchGame({
               }`}
             >
               {isFlipped ? (
-                <>
+                card.kind === 'term' || card.kind === 'meaning' ? (
+                  // 용어·뜻 카드는 CardArt의 텍스트 fallback이 이미
+                  // 전체 내용을 보여주므로, job/tool처럼 따로 캡션을
+                  // 덧붙이지 않는다(같은 글자를 두 번 보여주지 않음).
                   <CardArt src={card.image} label={card.label} />
-                  <span className="text-xs font-bold text-slate-800">{card.label}</span>
-                </>
+                ) : (
+                  <>
+                    <CardArt src={card.image} label={card.label} />
+                    <span className="text-xs font-bold text-slate-800">{card.label}</span>
+                  </>
+                )
               ) : (
                 <span className="text-2xl" aria-hidden>
                   ❓
